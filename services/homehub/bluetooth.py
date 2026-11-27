@@ -84,6 +84,8 @@ IDENTIFY_RETRY_S = 60.0
 DISCOVERY_REFRESH_S = 300.0
 #: A tracker must have been heard this recently for a mapping session to start.
 HEARD_RECENTLY_S = 30.0
+#: How long a start waits for a tracker that has gone quiet (Android pauses the radio).
+HEARD_WAIT_S = 20.0
 SESSION_MIN_S, SESSION_MAX_S, SESSION_DEFAULT_S = 30, 300, 60
 SESSION_KEEP_S = 3600.0
 #: The host scanner is restarted when it has heard nothing for this long.
@@ -665,6 +667,17 @@ class BluetoothManager:
         return []
 
     # -- the room map --------------------------------------------------------------------------
+    def has_ever_been_heard(self, tracker: Any) -> bool:
+        """Whether any scanner has heard this tracker at all, so waiting for it makes sense."""
+        sight = self.sightings.get(self.resolve_tracker(str(tracker or "")))
+        return sight is not None and sight.last_heard is not None
+
+    def heard_recently(self, tracker: Any) -> bool:
+        """Whether the tracker was heard inside the window a mapping session needs."""
+        sight = self.sightings.get(self.resolve_tracker(str(tracker or "")))
+        return (sight is not None and sight.last_heard is not None
+                and self.clock() - sight.last_heard <= HEARD_RECENTLY_S)
+
     def start_session(self, area_id: Any, tracker: Any, duration_s: Any = None) -> dict[str, Any]:
         area = self.hub.area_id_by_name(str(area_id or "")) if area_id else None
         if area is None:

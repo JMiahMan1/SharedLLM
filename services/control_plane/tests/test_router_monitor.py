@@ -177,6 +177,7 @@ class FakeRedis:
 
 
 def test_the_monitor_stores_status_log_and_usage_and_hides_the_password(monkeypatch):
+    monkeypatch.setenv("NETWORK_NEW_DEVICE_NOTICE", "0")
     r = FakeRedis()
     sent = []
     pins = []

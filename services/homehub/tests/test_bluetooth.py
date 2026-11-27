@@ -655,3 +655,68 @@ async def test_a_bindkey_that_does_not_decrypt_parks_the_sensor_for_its_key():
     with pytest.raises(AuthRequired) as raised:
         await driver.async_poll()
     assert raised.value.needs == "bindkey"
+
+# -- a quiet beacon is waited for ------------------------------------------------------------
+
+def test_a_quiet_beacon_is_waited_for_instead_of_refused(env, monkeypatch):
+    """Android pauses the radio, so a tap in that gap must wait for the phone, not fail."""
+    import threading
+    import time
+
+    from services.homehub import bluetooth_api as api
+
+    _hub, store, runtime, mgr, clock, _disc = env
+    app = build_app(runtime, Auth(store, SECRET))
+    c = TestClient(app)
+    key = bp.beacon_key(BEACON_UUID, 1, 2)
+    run(mgr, clock, 4, ROOMS["den"])
+    assert mgr.heard_recently(key)
+    # The beacon goes quiet for longer than the 30 s window.
+    clock.t += 45
+    assert not mgr.heard_recently(key) and mgr.has_ever_been_heard(key)
+
+    monkeypatch.setattr(api, "HEARD_WAIT_S", 5.0)
+
+    def fresh():
+        time.sleep(0.7)
+        run(mgr, clock, 1, ROOMS["den"])
+
+    threading.Thread(target=fresh, daemon=True).start()
+    started = time.monotonic()
+    r = c.post("/hub/bluetooth/map/sessions", headers=ADMIN, json={"area_id": "den", "tracker": key})
+    waited = time.monotonic() - started
+    assert r.status_code == 200, r.text
+    assert waited >= 0.5  # it really did wait for the advertisement
+
+
+def test_a_beacon_no_scanner_has_ever_heard_is_refused_at_once(env, monkeypatch):
+    """Nothing to wait for, so the refusal stays instant."""
+    import time
+
+    from services.homehub import bluetooth_api as api
+
+    _hub, store, runtime, _mgr, _clock, _disc = env
+    app = build_app(runtime, Auth(store, SECRET))
+    c = TestClient(app)
+    monkeypatch.setattr(api, "HEARD_WAIT_S", 30.0)
+    started = time.monotonic()
+    r = c.post("/hub/bluetooth/map/sessions", headers=ADMIN,
+               json={"area_id": "den", "tracker": bp.beacon_key(TAG_UUID, 9, 9)})
+    assert r.status_code == 409 and "not been heard" in r.json()["message"]
+    # Well under the wait it would have served had the tracker ever been heard. An
+    # absolute second is not the point, and a shared runner can take one to answer.
+    assert time.monotonic() - started < 10.0
+
+
+def test_a_beacon_that_stays_quiet_is_still_refused_after_the_wait(env, monkeypatch):
+    from services.homehub import bluetooth_api as api
+
+    _hub, store, runtime, mgr, clock, _disc = env
+    app = build_app(runtime, Auth(store, SECRET))
+    c = TestClient(app)
+    key = bp.beacon_key(BEACON_UUID, 1, 2)
+    run(mgr, clock, 4, ROOMS["den"])
+    clock.t += 45
+    monkeypatch.setattr(api, "HEARD_WAIT_S", 0.6)
+    r = c.post("/hub/bluetooth/map/sessions", headers=ADMIN, json={"area_id": "den", "tracker": key})
+    assert r.status_code == 409 and "not been heard" in r.json()["message"]

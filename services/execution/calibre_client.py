@@ -23,10 +23,13 @@ often the library actually changes.
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import logging
 import re
 import time
+import unicodedata
+from difflib import SequenceMatcher
 from typing import Any
 
 from services.execution import http_client
@@ -42,11 +45,35 @@ CACHE_TTL_SECONDS = 300.0
 
 FETCH_MAX_BYTES = 4 * 1024 * 1024
 
+#: A book matches a spoken title/author at or above this score (0..1).
+MATCH_THRESHOLD = 0.7
+#: Two books within this score of each other are an honest tie: ask, do not guess.
+AMBIGUOUS_MARGIN = 0.05
+#: With no book at the threshold, the closest is still read when it is clearly the one
+#: meant (speech recognition heard "Wild and Park by John Elbridge"): it scores at least
+#: this, beats the next book by ``CLOSEST_MARGIN``, and its author (similarity ratio at
+#: least ``CLOSEST_AUTHOR_RATIO``) or its title (``CLOSEST_TITLE_RATIO``) matches what was
+#: asked. The answer then says which book was read.
+CLOSEST_MIN_SCORE = 0.5
+CLOSEST_MARGIN = 0.15
+CLOSEST_AUTHOR_RATIO = 0.8
+CLOSEST_TITLE_RATIO = 0.7
+#: Words that carry no identity in a title or a request.
+_STOPWORDS = frozenset({"the", "a", "an", "at", "of", "by", "and", "in", "on", "to", "for", "book", "books"})
+
 _META_KEYS = ("title", "author", "authors", "tags", "series", "formats", "published")
 
 
 class CalibreLibraryError(ValueError):
     """The caller asked for something the shelf cannot answer (refused)."""
+
+
+class CalibreAmbiguous(CalibreLibraryError):
+    """More than one book matches about equally; the caller must choose."""
+
+    def __init__(self, message: str, candidates: list[dict[str, Any]]) -> None:
+        super().__init__(message)
+        self.candidates = candidates
 
 
 class CalibreUnavailable(RuntimeError):
@@ -255,15 +282,78 @@ class CalibreClient:
             "path; neither was supplied."
         )
 
+    async def resolve_book(
+        self, *, book_id: Any = None, path: str | None = None, query: str | None = None
+    ) -> dict[str, Any]:
+        """One book by id, shelf path, or a spoken title and/or author.
+
+        A query is matched loosely (see :func:`match_books`) so one call can go
+        from "chapter 4 of Wild Heart by John Eldridge" to the book. A tie is
+        refused with both candidates, and no match names the closest titles.
+        """
+        if (book_id is not None and str(book_id).strip()) or (path and str(path).strip()):
+            return await self.get_book(book_id=book_id, path=path)
+        if not str(query or "").strip():
+            raise CalibreLibraryError(
+                "Name the book: give book_id, or query with its title and/or author."
+            )
+        rows = [_book_row(entry) for entry in await self._entries()]
+        return pick_book(rows, str(query))
+
+    async def chapters(
+        self,
+        *,
+        book_id: Any = None,
+        path: str | None = None,
+        query: str | None = None,
+        chapter: str = "",
+        part: int = 1,
+        max_chars: int = 60000,
+    ) -> dict[str, Any]:
+        """The book's chapter list and, when ``chapter`` is named, that chapter (one part)."""
+        started = time.perf_counter()
+        row = await self.resolve_book(book_id=book_id, path=path, query=query)
+        resolved_s = time.perf_counter() - started
+        try:
+            ident = int(str(row.get("book_id")))
+        except ValueError as exc:
+            raise CalibreLibraryError(f"{row.get('title')} has no Calibre id to read chapters by.") from exc
+        url = f"{self._storage_endpoint()}/calibre/books/{ident}/chapters"
+        resp = await http_client.request(
+            "POST",
+            url,
+            json={
+                "library_path": await self._library_path(),
+                "chapter": str(chapter or ""),
+                "part": max(int(part), 1),
+                "max_chars": max(int(max_chars), 500),
+            },
+            headers=self._headers(),
+            timeout=FETCH_TIMEOUT_SECONDS,
+        )
+        log.info("[calibre] book %s chapter %r: resolved in %.2f s, storage answered %s in %.2f s",
+                 ident, chapter, resolved_s, resp.get("status_code"), time.perf_counter() - started - resolved_s)
+        status = int(resp.get("status_code") or 0)
+        if status in (404, 422):
+            detail = (resp.get("text") or "").strip()
+            with contextlib.suppress(ValueError, AttributeError):
+                detail = str(json.loads(detail).get("detail") or detail)
+            raise CalibreLibraryError(detail or f"{row.get('title')}: the chapter could not be read.")
+        body = _decode(resp, url)
+        body["row"] = row
+        return body
+
     async def fetch_text(
         self, *, book_id: Any = None, path: str | None = None, max_chars: int = 20000
     ) -> tuple[str, dict[str, Any]]:
         """A book's extracted prose, truncated honestly at ``max_chars``.
 
         The bytes come back through ``/providers/fetch`` because the shelf's
-        synthetic ``.txt`` path *is* the file and its bytes are its text; a
-        PDF-only book has no text there, which is reported as the refusal it
-        is rather than as an empty book.
+        synthetic ``.txt`` path *is* the file and its bytes are its text. A
+        PDF-only book's shelf text is its PDF's pages. When the shelf has no text
+        (a scan, a format storage cannot read) or more than one fetch carries,
+        storage reads the book's own file (``/calibre/books/{id}/text``) and cuts
+        it at ``max_chars``; only a book with no readable file at all is refused.
         """
         row = await self.get_book(book_id=book_id, path=path)
         root = await self._library_path()
@@ -281,7 +371,10 @@ class CalibreClient:
         )
         status = int(resp.get("status_code") or 0)
         if status in (413, 502):
-            raise CalibreLibraryError(_fetch_refusal(status, resp, row))
+            text = await self._file_text(row, max_chars)
+            if text is None:
+                raise CalibreLibraryError(_fetch_refusal(status, resp, row))
+            return text
         body = _decode(resp, url)
         encoded = body.get("content_b64")
         if not isinstance(encoded, str) or not encoded:
@@ -297,19 +390,214 @@ class CalibreClient:
                 f"{row['path']!r} came back as something that is not UTF-8 "
                 f"text: {exc}"
             ) from exc
-        total = len(text)
-        bound = max(int(max_chars), 1)
-        if total > bound:
-            text = (
-                text[:bound]
-                + f"\n\n[Truncated: showing the first {bound:,} of "
-                + f"{total:,} characters. For a passage beyond this point, "
-                + "search the library (RAG collection calibre_files) instead.]"
-            )
-        detail = dict(row)
-        detail["total_chars"] = total
-        detail["truncated"] = total > bound
-        return text, detail
+        return _bounded_text(text, len(text), max_chars, row)
+
+    async def _file_text(self, row: dict[str, Any], max_chars: int) -> tuple[str, dict[str, Any]] | None:
+        """A book's text read by storage from its own file (EPUB, PDF or TXT), cut at
+        ``max_chars``; ``None`` when storage has no reader for any of its files."""
+        try:
+            ident = int(str(row.get("book_id")))
+        except ValueError:
+            return None
+        url = f"{self._storage_endpoint()}/calibre/books/{ident}/text"
+        bound = max(int(max_chars), 500)
+        resp = await http_client.request(
+            "POST",
+            url,
+            json={"library_path": await self._library_path(), "max_chars": bound},
+            headers=self._headers(),
+            timeout=FETCH_TIMEOUT_SECONDS,
+        )
+        status = int(resp.get("status_code") or 0)
+        if status in (404, 422):
+            detail = (resp.get("text") or "").strip()
+            with contextlib.suppress(ValueError, AttributeError):
+                detail = str(json.loads(detail).get("detail") or detail)
+            if "no chapter reader" in detail or "no text reader" in detail.lower():
+                return None
+            raise CalibreLibraryError(detail or f"{row.get('title')}: its text could not be read.")
+        body = _decode(resp, url)
+        text = str(body.get("text") or "")
+        total = int(body.get("total_chars") or len(text))
+        return _bounded_text(text, total, bound, row)
+
+
+def _bounded_text(text: str, total: int, max_chars: int, row: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """``text`` cut at ``max_chars`` with an honest note, and the row with its size."""
+    bound = max(int(max_chars), 1)
+    if total > bound:
+        text = (
+            text[:bound]
+            + f"\n\n[Truncated: showing the first {bound:,} of "
+            + f"{total:,} characters. For a passage beyond this point, read one "
+            + "chapter (fetch_text with chapter) or search the library (RAG "
+            + "collection calibre_files) instead.]"
+        )
+    detail = dict(row)
+    detail["total_chars"] = total
+    detail["truncated"] = total > bound
+    return text, detail
+
+
+def _norm_words(text: str) -> list[str]:
+    folded = unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode().lower()
+    folded = re.sub(r"[^a-z0-9\s]", " ", folded.replace("'", ""))
+    return [w for w in folded.split() if w not in _STOPWORDS]
+
+
+def _closeness(word: str, words: list[str]) -> float:
+    """How well ``word`` matches the nearest of ``words``; misheard names still score."""
+    best = 0.0
+    for other in words:
+        if word == other:
+            return 1.0
+        ratio = SequenceMatcher(None, word, other).ratio()
+        best = max(best, ratio)
+    return best if best >= 0.7 else 0.0
+
+
+def book_score(row: dict[str, Any], query: str) -> float:
+    """How well a shelf row answers a spoken title and/or author (0..1).
+
+    Mostly: how many of the words said are in the title or author, each word
+    allowed the small misspellings speech recognition makes (Eldridge for
+    Eldredge). A little: how much of the title was said, so the exact title
+    beats a longer one that merely contains it.
+    """
+    said = _norm_words(query)
+    if not said:
+        return 0.0
+    title = _norm_words(str(row.get("title") or ""))
+    authors = row.get("authors") if isinstance(row.get("authors"), list) else [row.get("authors") or ""]
+    author = _norm_words(" ".join([str(row.get("author") or ""), *[str(a) for a in authors]]))
+    words = title + author
+    if not words:
+        return 0.0
+    coverage = sum(_closeness(w, words) for w in said) / len(said)
+    title_said = sum(_closeness(w, said) for w in title) / len(title) if title else 0.0
+    return round(0.85 * coverage + 0.15 * title_said, 4)
+
+
+def _same_book(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    return _norm_words(str(a.get("title") or "")) == _norm_words(str(b.get("title") or "")) and _norm_words(
+        str(a.get("author") or a.get("authors") or "")
+    ) == _norm_words(str(b.get("author") or b.get("authors") or ""))
+
+
+def match_books(rows: list[dict[str, Any]], query: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """``(matches, closest)``: the books tied for best at or above the threshold, else none,
+    and the two closest titles either way. Copies of one book count as one match."""
+    scored = sorted(
+        ((book_score(row, query), str(row.get("title") or "").lower(), i, row) for i, row in enumerate(rows)),
+        key=lambda item: (-item[0], item[1], item[2]),
+    )
+    closest = [row for _s, _t, _i, row in scored[:2]]
+    if not scored or scored[0][0] < MATCH_THRESHOLD:
+        return [], closest
+    top = scored[0][0]
+    matches: list[dict[str, Any]] = []
+    for score, _title, _i, row in scored:
+        if score < top - AMBIGUOUS_MARGIN:
+            break
+        if not any(_same_book(row, kept) for kept in matches):
+            matches.append(row)
+    return matches, closest
+
+
+def _phrase_ratio(asked: str, actual: str) -> float:
+    a, b = " ".join(_norm_words(asked)), " ".join(_norm_words(actual))
+    return SequenceMatcher(None, a, b).ratio() if a and b else 0.0
+
+
+def _row_authors(row: dict[str, Any]) -> list[str]:
+    authors = row.get("authors") if isinstance(row.get("authors"), list) else [row.get("authors") or ""]
+    return [str(a) for a in [row.get("author"), *authors] if str(a or "").strip()]
+
+
+def clear_closest(rows: list[dict[str, Any]], query: str) -> dict[str, Any] | None:
+    """The closest book when it is clearly the one meant, else ``None`` (see ``CLOSEST_*``).
+
+    Two books close to each other are never chosen between: that stays a question.
+    """
+    scored = sorted(((book_score(row, query), i, row) for i, row in enumerate(rows)), key=lambda t: (-t[0], t[1]))
+    if not scored or scored[0][0] < CLOSEST_MIN_SCORE:
+        return closest_by_sound(rows, query)
+    top, _i, best = scored[0]
+    second = next((score for score, _j, row in scored[1:] if not _same_book(row, best)), 0.0)
+    if top - second < CLOSEST_MARGIN:
+        return closest_by_sound(rows, query)
+    asked_title, by, asked_author = str(query).rpartition(" by ")
+    if not by:
+        asked_title, asked_author = str(query), ""
+    author_ratio = max((_phrase_ratio(asked_author, a) for a in _row_authors(best)), default=0.0) if asked_author else 0.0
+    title_ratio = _phrase_ratio(asked_title, str(best.get("title") or ""))
+    if author_ratio >= CLOSEST_AUTHOR_RATIO or title_ratio >= CLOSEST_TITLE_RATIO:
+        log.info("[calibre] %r read as the closest book %s (score %.2f, next %.2f, author %.2f, title %.2f)",
+                 query, _named(best), top, second, author_ratio, title_ratio)
+        return best
+    return closest_by_sound(rows, query)
+
+
+#: A title heard wrong but sounding right ("Wild Apart" for "Wild at Heart"): the book whose
+#: title is most alike as heard (``spoken_similarity``), when it is at least this alike, beats every other
+#: book by ``CLOSEST_SOUND_MARGIN`` and the sound of what was said is at least
+#: ``CLOSEST_SOUND_MIN_KEY`` letters (a short sound is shared by too many titles).
+CLOSEST_SOUND_RATIO = 0.8
+CLOSEST_SOUND_MARGIN = 0.1
+CLOSEST_SOUND_MIN_KEY = 6
+
+
+def closest_by_sound(rows: list[dict[str, Any]], query: str) -> dict[str, Any] | None:
+    """The one book whose title sounds like the title said (``services.common.media_titles``), or None."""
+    from services.common.media_titles import main_title, phonetic_key, spoken_similarity
+
+    asked_title, by, _author = str(query).rpartition(" by ")
+    asked = asked_title if by else str(query)
+    if len(phonetic_key(asked)) < CLOSEST_SOUND_MIN_KEY:
+        return None
+    scored = []
+    for i, row in enumerate(rows):
+        title = str(row.get("title") or "")
+        ratio = max(spoken_similarity(asked, t) for t in {title, main_title(title)})
+        scored.append((ratio, i, row))
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    if not scored or scored[0][0] < CLOSEST_SOUND_RATIO:
+        return None
+    top, _i, best = scored[0]
+    second = next((ratio for ratio, _j, row in scored[1:] if not _same_book(row, best)), 0.0)
+    if top - second < CLOSEST_SOUND_MARGIN:
+        return None
+    log.info("[calibre] %r read as %s, the title that sounds closest (%.2f, next %.2f)", query, _named(best),
+             top, second)
+    return best
+
+
+def _named(row: dict[str, Any]) -> str:
+    author = str(row.get("author") or row.get("authors") or "").strip() or "unknown author"
+    return f"{row.get('title') or 'Untitled'} by {author} (id {row.get('book_id')})"
+
+
+def pick_book(rows: list[dict[str, Any]], query: str) -> dict[str, Any]:
+    """The one book ``query`` names, or a refusal that says what to ask."""
+    if not rows:
+        raise CalibreLibraryError("The library is empty, so there is no book to read.")
+    matches, closest = match_books(rows, query)
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        names = "; ".join(_named(row) for row in matches[:5])
+        raise CalibreAmbiguous(
+            f"More than one book matches {query!r}: {names}. Ask which one, then call again "
+            "with its book_id.",
+            matches[:5],
+        )
+    nearest = clear_closest(rows, query)
+    if nearest is not None:
+        return {**nearest, "asked_for": str(query).strip()}
+    near = "; ".join(_named(row) for row in closest)
+    raise CalibreLibraryError(
+        f"The library has no book matching {query!r}." + (f" The closest titles are: {near}." if near else "")
+    )
 
 
 def _fetch_refusal(status: int, resp: dict[str, Any], row: dict[str, Any]) -> str:
@@ -318,7 +606,7 @@ def _fetch_refusal(status: int, resp: dict[str, Any], row: dict[str, Any]) -> st
         formats = str(row.get("formats") or "no known format")
         return (
             f"{row.get('title') or row.get('path')} has no text to fetch: it "
-            f"is stored only as {formats}, which has no extractor here. It "
+            f"is stored only as {formats}, and no text could be read from it. It "
             "still appears in list and search."
         )
     return (

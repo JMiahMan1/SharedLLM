@@ -59,6 +59,8 @@ class User(SQLModel, table=True):  # type: ignore
     mass_url: str | None = None
     #: Their account id on the household Music Assistant (set when Jarvis made or checked the account).
     mass_user_id: str | None = None
+    #: Their dedicated Audiobookshelf provider instance_id on the household Music Assistant (e.g. audiobookshelf--xxxx).
+    mass_abs_provider_id: str | None = None
     skylight_url: str | None = None
     skylight_email: str | None = None
     skylight_enabled: bool = Field(default=True)
@@ -91,6 +93,13 @@ class User(SQLModel, table=True):  # type: ignore
     # The system default user's key is the household default: it applies to
     # everyone who has not set their own, with no grant needed.
     malwarebazaar_key_enc: str | None = None
+    # Google Books API key for the library's book lookups (services/common/book_metadata.py).
+    # Like the abuse.ch key, the system default user's is the household default.
+    google_books_key_enc: str | None = None
+    # The book catalogue integrations (Google Books, Open Library): a JSON object of
+    # this person's own choices (enabled, Open Library contact email, order). A key it
+    # does not hold follows the system default user's, then book_metadata.DEFAULT_*.
+    book_metadata: str | None = None
     # The home router (system user only; docs/NETWORK.md): a read-only rpcd
     # login, and the SHA-256 of its self-signed certificate, pinned on first use.
     router_url: str | None = None
@@ -205,6 +214,21 @@ class GlobalSetting(SQLModel, table=True):  # type: ignore
     key: str = Field(index=True, unique=True)
     value: str
     description: str | None = None
+
+class PromptSeed(SQLModel, table=True):  # type: ignore
+    """What identity last seeded into a prompt setting from prompts/<key>.md.
+
+    ``seeded_hash`` is the hash of the repo text last written into the setting, so a
+    live value with that hash is untouched and can follow the repo. None means the
+    seed is unknown (a row from before this table) and the live value counts as
+    edited. ``announced_hash`` is the repo version already logged as newer than an
+    edited value, so that line is written once per repo version, not on every start.
+    """
+    __table_args__ = {"extend_existing": True}
+    key: str = Field(primary_key=True)
+    seeded_hash: str | None = None
+    announced_hash: str | None = None
+    updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 class DnsRecord(SQLModel, table=True):  # type: ignore
     """DNS record configuration. Supports A (multiple IPs) and CNAME (single target)."""
@@ -358,6 +382,21 @@ class UserActivitySharing(SQLModel, table=True):  # type: ignore
     data: str = Field(default="{}")
 
 
+class UserProfileSharing(SQLModel, table=True):  # type: ignore
+    """Which areas of a person's profile stats page the family may see.
+
+    Private by default. Only the areas that have no sharing switch of their
+    own live here (``PROFILE_SHARE_AREAS`` in main.py: garden, recipes,
+    Jarvis use). Health, activity, Wander and Bible keep the switches they
+    already have (HealthShare, UserActivitySharing): this table never
+    duplicates them. data JSON keys:
+      - areas: list[str] subset of PROFILE_SHARE_AREAS
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    data: str = Field(default="{}")
+
+
 # ---------------------------------------------------------------------------
 # User Panel: device registry and telemetry
 #
@@ -473,6 +512,18 @@ class Device(SQLModel, table=True):  # type: ignore
     first_seen_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     #: When it was archived for not checking in (services/identity/device_archive.py); None while it is not.
     archived_at: str | None = Field(default=None, index=True)
+
+    # A shared device HomeHub knows (a voice satellite, a speaker, a TV;
+    # services/identity/hub_devices.py). ``hardware_id`` is its stable identity
+    # (the MAC, else HomeHub's device id), never its name; ``device_key`` is
+    # "hub:<hardware_id>". ``owner_username`` is the person it is assigned to,
+    # None for "shared"; ``room`` is the admin's choice, ``hub_area`` HomeHub's.
+    hardware_id: str | None = Field(default=None, index=True)
+    hub_device_id: str | None = None
+    #: JSON list of the hub entities that belong to it (assist_satellite.*, media_player.*).
+    entity_ids: str = Field(default="[]")
+    room: str | None = None
+    hub_area: str | None = None
 
 
 class DeviceEvent(SQLModel, table=True):  # type: ignore
@@ -657,6 +708,11 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "speech_server_url", "value": "", "description": "alpaca's audio server (http://<gpu-host>:8082) that speaks every voice Jarvis uses, Kokoro and Piper; empty uses KOKORO_GPU_URL from .env. Edit in Admin > Raven > Spoken replies."},
 
     # --- VOICE SATELLITES ---
+    {"key": "voice_satellite_playback", "value": "this_device", "description": "Where media asked for at a voice satellite plays when no device is named: this_device (the satellite's own speaker) or last_used (the last player the household used). A device named in the request always wins."},
+    {"key": "video_safe_search", "value": "strict", "description": "Safe search for every web video Jarvis searches for or plays (voice and assistant): strict (the default), moderate or off. Only an admin can change it, and it is always strict for a child or teen and for a speaker Jarvis did not recognise. Videos rated 13+ never play on a shared screen, 18+ never."},
+    {"key": "video_blocklist", "value": "", "description": "Words or phrases, comma separated or one per line, that keep a web video from playing when its title or channel contains them. Empty by default."},
+    {"key": "voice_video_search", "value": "youtube", "description": "Whether 'play <name>' may look for a YouTube video when the request asks for a video or the target is a TV and nothing in the libraries matched: youtube (the default) or off."},
+    {"key": "voice_default_music", "value": "", "description": "What 'play music' plays when no artist, song or playlist is named: a Music Assistant URI, or a playlist or artist name to search. Empty shuffles a library playlist, else library tracks."},
     {"key": "household_device_access", "value": "unlocked", "description": "What a voice satellite or kiosk may control when it does not recognise who is speaking: unlocked (every device that is not locked) or none. Edit in Admin > Users & Devices > Voice satellites."},
 
     # --- GATEWAY & ROUTING ---
@@ -792,6 +848,29 @@ class VoicePendingEnrolment(SQLModel, table=True):  # type: ignore
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class VoiceCandidate(SQLModel, table=True):  # type: ignore
+    """A command heard at a satellite assigned to one person that sounded close
+    to their voice profile but not close enough to name them.
+
+    Offered to an admin, never used on its own: approving it adds it to the
+    person's profile as an auto sample (``voice.AUTO_SOURCE``, its own cap, so it
+    never displaces an enrolled one); rejecting it deletes it. Kept beside
+    ``VoiceSignature`` in the same database and the same form (a speaker
+    embedding, never audio). A new table, made by ``create_all``.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True)
+    model: str
+    embedding: str = "[]"
+    speech_seconds: float | None = None
+    score: float | None = None
+    #: The best other person's score when it was heard, for the admin's judgement.
+    runner_up: float | None = None
+    satellite: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class UserAvatarImage(SQLModel, table=True):  # type: ignore
     """A user's uploaded profile picture, kept in the identity database."""
     __table_args__ = {"extend_existing": True}
@@ -816,6 +895,21 @@ class UserNotificationPreference(SQLModel, table=True):  # type: ignore
     __table_args__ = {"extend_existing": True}
     username: str = Field(primary_key=True, foreign_key="user.username")
     data: str = Field(default="{}")
+
+
+class UserNearbySetting(SQLModel, table=True):  # type: ignore
+    """Which "Nearby & offline" parts a person's Android phones run (docs in
+    services/identity/nearby_settings.py).
+
+    ``data`` is a JSON object ``{part: bool}`` for the parts in
+    ``nearby_settings.PARTS``. A grown member sets their own; a minor's are set
+    by their parents (``updated_by`` says who).
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    data: str = Field(default="{}")
+    updated_by: str | None = None
+    updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 class UnifiedPushRegistration(SQLModel, table=True):  # type: ignore
@@ -913,6 +1007,10 @@ class GuardRequest(SQLModel, table=True):  # type: ignore
     target: str = Field(index=True)
     label: str = ""
     note: str = ""
+    #: JSON of the app's own profile (version, where it came from, what it can
+    #: reach, who signed it), sent by the phone so the parent decides about the
+    #: app rather than about its package name. Empty for permissions and sites.
+    meta: str = ""
     status: str = Field(default="pending", index=True)  # pending | approved | denied
     until: str | None = None  # a site allowed for a while: when it runs out
     decided_by: str | None = None

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The home-screen button: one tap, then talk. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/voice_assist_widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1B1F2A"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="8dp">
+
+    <ImageView
+        android:id="@+id/voice_assist_widget_icon"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:contentDescription="Talk to Jarvis"
+        android:src="@mipmap/ic_launcher" />
+
+    <TextView
+        android:id="@+id/voice_assist_widget_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Talk to Jarvis"
+        android:textColor="#F5F7FF"
+        android:textSize="13sp" />
+</LinearLayout>

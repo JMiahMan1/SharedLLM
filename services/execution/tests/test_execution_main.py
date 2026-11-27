@@ -259,3 +259,59 @@ def test_transcribe_workspace_success(mocker, tmp_path):
     assert "John chapter 3, verse 16" in transcript
     assert "Fourteen hundred" in transcript
     fake_model.transcribe.assert_called_once()
+
+
+def test_media_transport_by_device_name_without_an_own_login(mocker):
+    """A voice request names the TV and carries no hub login of its own (2026-11-24: "volume down on
+    the Office TV" answered "I couldn't find a speaker in Office TV" while the same command by entity id
+    worked). The route adds the hub login, resolves the name, and checks access to what it found."""
+    states = [
+        {"entity_id": "media_player.office_tv_cast", "state": "playing",
+         "attributes": {"friendly_name": "Office TV Cast", "volume_level": 0.5}},
+        {"entity_id": "light.office_lamp", "state": "on", "attributes": {"friendly_name": "Office lamp"}},
+    ]
+    seen_logins = []
+
+    async def get_states(url, token):
+        seen_logins.append((url, token))
+        return states
+
+    mocker.patch("services.execution.handlers.media.ha_client.get_states", side_effect=get_states)
+    mocker.patch("services.execution.main.hardware_router.hub_login", return_value=("http://hub.local", "hub-token"))
+    checked = []
+
+    async def access(ctx, entity_id):
+        checked.append(entity_id)
+        return True
+
+    mocker.patch("services.execution.main.verify_entity_access", side_effect=access)
+    calls = []
+
+    async def transport(req):
+        calls.append((req.entity_id, req.command, req.volume_level))
+        from services.execution.schemas import ExecutionResult
+        return ExecutionResult(status="SUCCESS", message="ok", service="media_transport")
+
+    mocker.patch("services.execution.main.MediaPlaybackService.transport", side_effect=transport)
+    resp = client.post("/execute/media/transport",
+        headers={"X-Internal-Secret": "test-secret"},
+        json={"user_context": {"user": "household"}, "device_name": "Office TV",
+              "command": "volume_set", "volume_level": 0.3})
+    assert resp.status_code == 200, resp.text
+    assert calls == [("media_player.office_tv_cast", "volume_set", 0.3)]
+    assert checked == ["media_player.office_tv_cast"]
+    assert seen_logins and seen_logins[0] == ("http://hub.local", "hub-token")
+
+
+def test_media_transport_by_device_name_is_refused_without_access(mocker):
+    states = [{"entity_id": "media_player.office_tv_cast", "state": "playing",
+               "attributes": {"friendly_name": "Office TV Cast"}}]
+    mocker.patch("services.execution.handlers.media.ha_client.get_states", return_value=states)
+    mocker.patch("services.execution.main.hardware_router.hub_login", return_value=("http://hub.local", "hub-token"))
+    mocker.patch("services.execution.main.verify_entity_access", return_value=False)
+    transport = mocker.patch("services.execution.main.MediaPlaybackService.transport")
+    resp = client.post("/execute/media/transport",
+        headers={"X-Internal-Secret": "test-secret"},
+        json={"user_context": {"user": "kid"}, "device_name": "Office TV", "command": "volume_up"})
+    assert resp.status_code == 403
+    transport.assert_not_called()

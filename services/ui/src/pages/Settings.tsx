@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import PasswordField from '../components/ui/PasswordField';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDarkModeSync } from '../hooks/useDarkModeSync';
@@ -15,6 +16,7 @@ import AppCleanupPanel from '../components/settings/AppCleanupPanel';
 import MapStylePanel from '../components/settings/MapStylePanel';
 import MyVoicePanel from '../components/settings/MyVoicePanel';
 import MobileMenuPanel from '../components/settings/MobileMenuPanel';
+import NearbyOfflinePanel from '../components/settings/NearbyOfflinePanel';
 import NotificationPreferencesPanel from '../components/settings/NotificationPreferencesPanel';
 import PhoneReportsPanel from '../components/settings/PhoneReportsPanel';
 import RoomDetectionPanel from '../components/settings/RoomDetectionPanel';
@@ -38,6 +40,7 @@ import {
   downloadAndInstallApk,
   downloadApkWithProgress,
   getApkInstallPermission,
+  buildLabel,
   getRunningVersion,
   hasVerifiedInstallFlow,
   installVerifiedApk,
@@ -137,6 +140,9 @@ const Settings = () => {
         <FamilyDropInSection />
         <TelemetryReportsPanel />
       </section>
+
+      {/* Bluetooth between family phones: each part's switch (a child's set by a parent). */}
+      <NearbyOfflinePanel />
 
       <section className="space-y-4" aria-labelledby="settings-device" data-focus-id="section-device">
         <h2 id="settings-device" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">This device</h2>
@@ -336,36 +342,36 @@ const AdminPinManager = ({
             <p className="text-sm text-slate-400 text-center mb-6">Use at least 4 digits</p>
 
             {configured && (
-              <input
-                type="password"
+              <PasswordField
                 inputMode="numeric"
                 autoComplete="current-password"
                 placeholder="Current PIN"
                 aria-label="Current PIN"
                 value={current}
                 onChange={(e) => setCurrent(e.target.value.replace(/\D/g, ''))}
-                className="w-full mb-3 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-center tracking-[0.5em] text-lg outline-none focus:border-purple-500/50"
+                wrapperClassName="mb-3"
+                className="w-full pl-12 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-center tracking-[0.5em] text-lg outline-none focus:border-purple-500/50"
               />
             )}
-            <input
-              type="password"
+            <PasswordField
               inputMode="numeric"
               autoComplete="new-password"
               placeholder="New PIN"
               aria-label="New PIN"
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-              className="w-full mb-3 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-center tracking-[0.5em] text-lg outline-none focus:border-purple-500/50"
+              wrapperClassName="mb-3"
+              className="w-full pl-12 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-center tracking-[0.5em] text-lg outline-none focus:border-purple-500/50"
             />
-            <input
-              type="password"
+            <PasswordField
               inputMode="numeric"
               autoComplete="new-password"
               placeholder="Confirm PIN"
               aria-label="Confirm PIN"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value.replace(/\D/g, ''))}
-              className="w-full mb-3 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-center tracking-[0.5em] text-lg outline-none focus:border-purple-500/50"
+              wrapperClassName="mb-3"
+              className="w-full pl-12 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-center tracking-[0.5em] text-lg outline-none focus:border-purple-500/50"
             />
 
             {error && <p className="text-sm text-red-400 text-center mb-3">{error}</p>}
@@ -766,7 +772,7 @@ const AppUpdatesSection = () => {
           App &amp; OTA Updates
         </h2>
         <span className="min-w-0 break-all text-[10px] text-slate-500 font-mono">
-          {updateInfo.version ? `v${updateInfo.version} ` : ''}({updateInfo.gitSha})
+          {buildLabel(updateInfo.version, apk?.nativeBuildNumber, updateInfo.gitSha)}
         </span>
       </div>
 
@@ -784,7 +790,7 @@ const AppUpdatesSection = () => {
             </p>
             {updateInfo.remoteSha && updateInfo.remoteSha !== 'unknown' && (
               <p className="text-[10px] text-slate-500 font-mono mt-1 break-all">
-                Server: {updateInfo.remoteVersion ? `${updateInfo.remoteVersion} ` : ''}({updateInfo.remoteSha})
+                Server: {buildLabel(updateInfo.remoteVersion, apk?.apkVersionCode, updateInfo.remoteSha)}
                 {lastChecked && ` · checked ${lastChecked.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
               </p>
             )}

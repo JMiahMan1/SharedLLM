@@ -15,15 +15,21 @@ on:
       - '!services/ui/**'
       - 'conftest.py'
       - 'pytest.ini'
+      - '.test_durations'
       - '.github/workflows/soa_tests.yml'
+      - '.github/actions/soa-python-deps/**'
   pull_request:
-    branches: [ main, master ]
+    # microservices too: every change reaches it by pull request, and without this
+    # a test broken by one only showed on the push after the merge.
+    branches: [ main, master, microservices ]
     paths:
       - 'services/**'
       - '!services/ui/**'
       - 'conftest.py'
       - 'pytest.ini'
+      - '.test_durations'
       - '.github/workflows/soa_tests.yml'
+      - '.github/actions/soa-python-deps/**'
 
 jobs:
   # Static gate, on its own runner: it used to run first inside the single job,
@@ -36,34 +42,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-        cache: 'pip'
-
+    # Python, the test tools and every service's requirements, from a cached
+    # virtualenv (see the action for what is in it and when it is rebuilt).
     # No `env:` block on purpose: conftest.py's _TEST_ENV_DEFAULTS is the single
     # source of truth for every value services/config.py reads, so a developer's
     # .env and a CI runner see identical configuration.
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pytest pytest-cov pytest-mock pytest-asyncio pytest-split "fakeredis[lua]" respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
-        # Heavy ML packages (fastembed models, torch) are not installed here:
-        # the tests mock them, so only the API contracts are needed.
-
-    - name: Install service dependencies
-      run: |
-        pip install -r services/identity/requirements.txt
-        pip install -r services/execution/requirements.txt
-        pip install -r services/gateway/requirements.txt
-        pip install -r services/storage/requirements.txt
-        pip install -r services/bible/requirements.txt
-        pip install -r services/health/requirements.txt
-        pip install -r services/automation/requirements.txt
-        pip install -r services/telemetry/requirements.txt
-        pip install -r services/homehub/requirements.txt
-        # RAG has huge deps (Torch), so we mock it for CI unit tests.
+    - name: Python and service dependencies
+      uses: ./.github/actions/soa-python-deps
 
     - name: Ruff (syntax and undefined names)
       run: ruff check --select E9,F63,F7,F82 services/gateway services/garden services/execution
@@ -91,34 +76,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-        cache: 'pip'
-
+    # Python, the test tools and every service's requirements, from a cached
+    # virtualenv (see the action for what is in it and when it is rebuilt).
     # No `env:` block on purpose: conftest.py's _TEST_ENV_DEFAULTS is the single
     # source of truth for every value services/config.py reads, so a developer's
     # .env and a CI runner see identical configuration.
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pytest pytest-cov pytest-mock pytest-asyncio pytest-split "fakeredis[lua]" respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
-        # Heavy ML packages (fastembed models, torch) are not installed here:
-        # the tests mock them, so only the API contracts are needed.
-
-    - name: Install service dependencies
-      run: |
-        pip install -r services/identity/requirements.txt
-        pip install -r services/execution/requirements.txt
-        pip install -r services/gateway/requirements.txt
-        pip install -r services/storage/requirements.txt
-        pip install -r services/bible/requirements.txt
-        pip install -r services/health/requirements.txt
-        pip install -r services/automation/requirements.txt
-        pip install -r services/telemetry/requirements.txt
-        pip install -r services/homehub/requirements.txt
-        # RAG has huge deps (Torch), so we mock it for CI unit tests.
+    - name: Python and service dependencies
+      uses: ./.github/actions/soa-python-deps
 
     - name: Run Pytest (shard ${{ matrix.shard }} of 6)
       env:
@@ -128,11 +92,18 @@ jobs:
         SHAREDLLM_RUN_LIVE: "1"
         # One data file per shard, so the coverage job can combine them.
         COVERAGE_FILE: .coverage.${{ matrix.shard }}
+        # A session that stops reporting (every test done, then a hang at teardown)
+        # dumps every thread's stack and exits instead of eating the job's budget.
+        SHAREDLLM_PYTEST_EXIT_GUARD_S: "900"
       run: |
         # Excludes only the markers that genuinely need live infrastructure:
         # local_only (live Home Assistant / Nextcloud) and server_only (a
         # running service mesh).
-        pytest           -m "not local_only and not server_only"           --splits 6 --group ${{ matrix.shard }}           --junitxml=pytest-report-${{ matrix.shard }}.xml           --cov=services/           --cov-report=xml:coverage-${{ matrix.shard }}.xml
+        # A test that wedges costs one failure naming it after five minutes, not
+        # the whole shard's 30-minute budget: three runs of this job were
+        # cancelled at the job timeout with no test named, which says nothing
+        # about which test hung.
+        pytest           -m "not local_only and not server_only"           --splits 6 --group ${{ matrix.shard }}           --timeout=300 --timeout-method=thread           --junitxml=pytest-report-${{ matrix.shard }}.xml           --cov=services/           --cov-report=xml:coverage-${{ matrix.shard }}.xml
 
     - name: Upload Coverage Report
       uses: actions/upload-artifact@v4

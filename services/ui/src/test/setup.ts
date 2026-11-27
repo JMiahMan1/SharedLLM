@@ -520,6 +520,17 @@ export const server = setupServer(
       credentialShares[username] ?? { username, services: [], shared_owner: 'default' },
     );
   }),
+  // Admin > Users & Devices mounts the shared-device and voice recognition panels.
+  http.get('/api/admin/hub-devices', () => HttpResponse.json({ devices: [] })),
+  http.get('/api/admin/voice', () => HttpResponse.json({
+    calibration: {
+      status: 'default', threshold: 0.8, margin: 0.04, people: 0,
+      same_speaker: null, other_speaker: null, per_person: [],
+    },
+    min_samples: 3,
+    people: [],
+    candidates: [],
+  })),
   http.get('/api/auth/discover', () => {
     console.log('[MSW] /api/auth/discover called, discoveredUsers:', JSON.stringify(discoveredUsers));
     return HttpResponse.json({
@@ -1271,7 +1282,81 @@ function blockNetwork() {
   };
 }
 
-afterAll(() => {
+// A file is done when its last test is, but the work its pages started is not:
+// a poller's next tick, a reconnect backoff, a request still in flight whose
+// catch handler logs ("[AppUpdater] APK update probe failed", "[API] Response
+// error", "[MAWebPlayer] ... connection closed"). Vitest tears the worker down
+// right after the file, and a console.log still on its way to the main process
+// then fails the whole run, in whichever file happened to be last:
+// "EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was pending".
+// A timer that fires after the DOM environment is gone fails differently
+// ("TypeError: URL is not a constructor"). So every timer the file starts is
+// tracked, and at the end of the file the pending ones are cancelled and the
+// requests in flight are let finish (and log) while the worker is still there.
+// Loose signatures: the DOM and Node overloads of the timer functions do not
+// overlap, and these wrappers only pass their arguments through.
+type LooseFn = (...args: unknown[]) => unknown;
+type TimerHost = Record<'setTimeout' | 'clearTimeout' | 'setInterval' | 'clearInterval', LooseFn>;
+const liveTimers = new Map<unknown, () => void>();
+const realSetTimeout = globalThis.setTimeout.bind(globalThis);
+
+function trackTimers(target: object) {
+  const host = target as unknown as TimerHost;
+  const setT = host.setTimeout;
+  const clearT = host.clearTimeout;
+  const setI = host.setInterval;
+  const clearI = host.clearInterval;
+  host.setTimeout = (handler: unknown, ...rest: unknown[]) => {
+    if (typeof handler !== 'function') return setT.call(host, handler, ...rest);
+    const id = setT.call(host, (...a: unknown[]) => {
+      liveTimers.delete(id);
+      (handler as LooseFn)(...a);
+    }, ...rest);
+    liveTimers.set(id, () => clearT.call(host, id));
+    return id;
+  };
+  host.clearTimeout = (id: unknown) => {
+    liveTimers.delete(id);
+    return clearT.call(host, id);
+  };
+  host.setInterval = (...args: unknown[]) => {
+    const id = setI.call(host, ...args);
+    liveTimers.set(id, () => clearI.call(host, id));
+    return id;
+  };
+  host.clearInterval = (id: unknown) => {
+    liveTimers.delete(id);
+    return clearI.call(host, id);
+  };
+}
+trackTimers(globalThis);
+if (typeof window !== 'undefined' && window.setTimeout !== globalThis.setTimeout) trackTimers(window);
+
+const inFlight = new Set<string>();
+server.events.on('request:start', ({ requestId }) => inFlight.add(requestId));
+server.events.on('request:end', ({ requestId }) => inFlight.delete(requestId));
+server.events.on('request:unhandled', ({ requestId }) => inFlight.delete(requestId));
+
+const nextMacrotask = () => new Promise<void>((resolve) => realSetTimeout(resolve, 0));
+
+async function settleFileWork() {
+  // Bounded: a stream or long poll can stay open for good (the media pages
+  // keep one), and the hook must still finish well inside hookTimeout.
+  const deadline = Date.now() + 3000;
+  for (let round = 0; round < 10 && Date.now() < deadline; round++) {
+    for (const cancel of liveTimers.values()) cancel();
+    liveTimers.clear();
+    // Let responses already on their way reach their handlers, and the
+    // handlers' own follow-ups (a log, a state update) run.
+    const waitUntil = Math.min(deadline, Date.now() + 1000);
+    while (inFlight.size > 0 && Date.now() < waitUntil) await nextMacrotask();
+    for (let i = 0; i < 3; i++) await nextMacrotask();
+    if (liveTimers.size === 0) return;
+  }
+}
+
+afterAll(async () => {
+  await settleFileWork();
   server.close();
   blockNetwork();
 });

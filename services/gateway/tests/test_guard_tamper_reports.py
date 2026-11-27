@@ -97,3 +97,10 @@ def test_a_phones_offline_unlock_without_a_detail_keeps_the_plain_sentence(pc):
     client, _, sent, _ = pc
     assert client.post("/api/guard/tamper", json={"event": "offline_unlock"}).status_code == 200
     assert sent[-1]["body"] == "Kid One's PC was unlocked with a parent's offline code."
+
+
+def test_the_new_tamper_reasons_are_known(pc):
+    client, _, sent, _ = pc
+    for event in ("jarvis_settings_page", "device_admin", "guard_accessibility",
+                  "vpn_disconnect", "factory_reset_or_users", "jarvis_install"):
+        assert client.post("/api/guard/tamper", json={"event": event}).status_code == 200

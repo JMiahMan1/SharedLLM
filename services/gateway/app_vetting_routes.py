@@ -199,6 +199,11 @@ def _request_summary(verdict: dict[str, Any]) -> dict[str, Any]:
     return {
         **{k: verdict.get(k) for k in keys},
         "concerns": [{"label": c["label"], "severity": c["severity"], "why": c.get("why")} for c in verdict["concerns"]],
+        # The security scan on the app's own profile (sideloaded, risky access,
+        # stalkerware, MalwareBazaar), most serious first.
+        "security": [{"text": f["text"], "severity": f["severity"], "check": f["check"]}
+                     for f in verdict.get("security") or []],
+        "security_level": verdict.get("security_level"),
         "line": app_vetting.verdict_line(verdict),
     }
 
@@ -240,8 +245,13 @@ async def vet_requests(caller: str, requests: list[dict[str, Any]]) -> list[dict
         child = children.get(row["username"])
         if child is None:
             continue
-        verdict = app_vetting.assess({"package": row["target"], "label": row.get("label") or ""},
-                                     catalog.get(row["target"]), _child_policy(child), JARVIS_PACKAGE)
+        # The phone sends the app's own profile with the question, so the scan
+        # (sideload, risky access, stalkerware, MalwareBazaar) and the age rating
+        # are worked out from the real app rather than its package name alone.
+        profile = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+        app = {**{k: v for k, v in profile.items() if k != "package"},
+               "package": row["target"], "label": row.get("label") or profile.get("label") or ""}
+        verdict = app_vetting.assess(app, catalog.get(row["target"]), _child_policy(child), JARVIS_PACKAGE)
         row["vetting"] = _request_summary(verdict)
     return requests
 

@@ -128,3 +128,49 @@ def test_each_devices_totals_say_how_many_lookups_of_how_many_domains(tmp_path):
         {"device": "192.0.2.99", "ip": "192.0.2.99", "lookups": 1, "domains": 1, "last": NOW},
     ]
     assert store.device_totals(NOW + 7200) == []
+
+
+# ---------------------------------------------------------------- DHCP fingerprints (logdhcp)
+
+def dhcp(msg: str) -> str:
+    return line("dnsmasq-dhcp[77]", msg)
+
+
+def test_a_dhcp_exchange_becomes_one_fingerprint_whatever_the_order(tmp_path):
+    rec, store = receiver(tmp_path)
+    for msg in ("3612345678 available DHCP range: 192.0.2.10 -- 192.0.2.200",
+                "3612345678 vendor class: android-dhcp-14",
+                f"3612345678 DHCPREQUEST(br-lan) {PHONE_IP} {PHONE.upper()}",
+                "3612345678 tags: lan, known",
+                f"3612345678 DHCPACK(br-lan) {PHONE_IP} {PHONE} phone-guest",
+                "3612345678 requested options: 1:netmask, 3:router, 6:dns-server, 15:domain-name,",
+                "3612345678 requested options: 26:mtu, 28:broadcast, 51:lease-time"):
+        rec.accept(ROUTER, dhcp(msg), now=NOW)
+    rec.drain()
+    fp = store.fingerprints()[PHONE]
+    assert fp["vendor"] == "android-dhcp-14"
+    assert fp["options"] == "1,3,6,15,26,28,51"
+
+
+def test_dhcp_detail_lines_stay_out_of_the_router_log_and_the_ack_loses_its_number(tmp_path):
+    rec, store = receiver(tmp_path)
+    rec.accept(ROUTER, dhcp("99001 vendor class: MSFT 5.0"), now=NOW)
+    rec.accept(ROUTER, dhcp(f"99001 DHCPACK(br-lan) {PHONE_IP} {PHONE} laptop"), now=NOW)
+    rec.drain()
+    msgs = [e["msg"] for e in store.log(50, None, None)]
+    assert msgs == [f"dnsmasq-dhcp: DHCPACK(br-lan) {PHONE_IP} {PHONE} laptop"]
+
+
+def test_without_logdhcp_nothing_is_fingerprinted(tmp_path):
+    rec, store = receiver(tmp_path)
+    rec.accept(ROUTER, dhcp(f"DHCPACK(br-lan) {PHONE_IP} {PHONE} phone"), now=NOW)
+    rec.drain()
+    assert store.fingerprints() == {}
+
+
+def test_an_exchange_that_never_names_its_mac_is_forgotten(tmp_path, monkeypatch):
+    rec, store = receiver(tmp_path)
+    rec.accept(ROUTER, dhcp("5550001 vendor class: udhcp 1.36.1"), now=NOW)
+    monkeypatch.setattr(rs.time, "time", lambda: NOW + rs.DHCP_EXCHANGE_SECONDS + 1)
+    rec.drain()
+    assert rec.dhcp == {} and store.fingerprints() == {}

@@ -13,11 +13,24 @@ socket error. ``BackendHealth`` is the shared answer to "is it up?":
 * While it is down, ``check()`` raises ``BackendUnavailable`` at once, so a
   request fails in well under a second instead of timing out again.
 * A daemon thread probes it in the background, every ``probe_interval``
-  seconds at first and backing off to ``probe_max``. The first HTTP answer of
-  any status (the machine answered) closes it again; the next request goes
-  through as normal. The thread is loop-agnostic on purpose: the gateway runs
-  two event loops (the API and the Raven worker) in one process, and both
-  read the same state.
+  seconds at first and backing off to ``probe_max``. A passing probe closes it
+  again; the next request goes through as normal. What "passing" means is the
+  backend's own business: by default any HTTP answer (the machine is up), but a
+  backend that sits in front of another one passes a readiness probe
+  (``http_probe``) so that a proxy answering while the server behind it is
+  dead still counts as down. The thread is loop-agnostic on purpose: the
+  gateway runs two event loops (the API and the Raven worker) in one process,
+  and both read the same state.
+* A failure that does not prove anything by itself (a timeout, a 502/503/504,
+  a dropped connection: a model loading after a swap looks exactly like that)
+  never opens it. It asks the probe instead (``verify_soon`` in the
+  background, ``confirm`` inline). Two failures in a row open it: that call
+  plus a probe the backend *answered* with "I cannot serve" (the proxy's own
+  word that the server behind it is gone), or ``WATCH_MISSES`` failed probes
+  ``verify_interval`` apart when nothing answers. A probe that passes clears
+  it, so a slow first answer while a model loads stays a slow answer, and a
+  dead server behind a live proxy is found in seconds instead of one long
+  timeout per request.
 * The log says it once: one error when it goes down (with an error id that the
   responses carry), one line when it comes back, and a summary every
   ``summary_interval`` seconds while it stays down. Each refused request is
@@ -42,8 +55,10 @@ from dataclasses import dataclass
 
 UP = "up"
 DOWN = "down"
-#: Watch probes (while up) that must go unanswered in a row before it is marked down.
+#: Probes (while up) that must fail in a row before it is marked down.
 WATCH_MISSES = 2
+#: How much of a probe's answer is read: a status route's JSON, never a page.
+PROBE_READ_BYTES = 65536
 
 _log = logging.getLogger("backend_health")
 
@@ -96,6 +111,10 @@ class Settings:
     #: Connect timeout for real calls to the backend: long enough for a busy
     #: LAN, short enough that a powered-off box is noticed on the first call.
     connect_timeout: float = 5.0
+    #: After a failed probe while up, the next one comes this soon instead of a
+    #: whole ``watch_interval`` later, so a dead backend is confirmed quickly and
+    #: a server restart shorter than this never opens the breaker.
+    verify_interval: float = 10.0
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -108,6 +127,7 @@ class Settings:
             summary_interval=_env_seconds("LOCAL_AI_LOG_SUMMARY_S", 600.0, 10.0, 86400.0),
             probe_timeout=_env_seconds("LOCAL_AI_PROBE_TIMEOUT_S", 4.0, 0.5, 60.0),
             connect_timeout=_env_seconds("LOCAL_AI_CONNECT_TIMEOUT_S", 5.0, 0.5, 120.0),
+            verify_interval=_env_seconds("LOCAL_AI_VERIFY_INTERVAL_S", 10.0, 1.0, 600.0),
         )
 
 
@@ -175,6 +195,80 @@ def is_unreachable(exc: BaseException | None) -> bool:
     return False
 
 
+#: Failures that are not proof either way: the machine answered (or may have),
+#: but the call still did not get through. Matched by name like ``is_unreachable``.
+_SUSPECT_NAMES = frozenset({
+    "TimeoutError", "ServerTimeoutError", "SocketTimeoutError", "ServerDisconnectedError",
+    "ClientPayloadError", "ClientOSError", "RemoteProtocolError", "ReadTimeout",
+})
+_SUSPECT_TEXT = (
+    "http 502", "http 503", "http 504", "bad gateway", "service unavailable", "gateway timeout",
+    "no slots available", "queue_timeout", "timed out",
+)
+
+
+def is_suspect(exc: BaseException | None) -> bool:
+    """True when ``exc`` could mean the server behind the machine is gone.
+
+    A timeout, a 502/503/504 or a dropped connection proves nothing alone (a
+    model loading after a swap gives the same), so it never opens the breaker;
+    it is the reason to ask the backend's readiness probe right away.
+    """
+    for e in _causes(exc):
+        if isinstance(e, TimeoutError) or type(e).__name__ in _SUSPECT_NAMES:
+            return True
+        text = str(e).lower()
+        if any(t in text for t in _SUSPECT_TEXT):
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class ProbeResult:
+    """One probe's verdict. Truthy when the backend can serve.
+
+    ``answered`` says whether anything answered at all, so the log can tell
+    "the machine is off" from "the machine is up but cannot serve"."""
+
+    ok: bool
+    answered: bool = True
+    reason: str = ""
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
+def http_probe(
+    judge: Callable[[int, bytes], ProbeResult],
+    headers: dict[str, str] | None = None,
+) -> Callable[[str, float], ProbeResult]:
+    """A probe that GETs a status route and lets ``judge(status, body)`` decide.
+
+    No answer (refused, timeout, DNS) is never ready. Anything that answered,
+    error statuses included, goes to ``judge``: it knows what the backend's
+    own "I am up but cannot serve" looks like.
+    """
+    extra = dict(headers or {})
+
+    def probe(url: str, timeout: float) -> ProbeResult:
+        req = urllib.request.Request(url, method="GET",
+                                     headers={"User-Agent": "sharedllm-health-probe", **extra})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                status, body = resp.status, resp.read(PROBE_READ_BYTES)
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            try:
+                body = exc.read(PROBE_READ_BYTES) or b""
+            except Exception:
+                body = b""
+        except Exception as exc:
+            return ProbeResult(False, answered=False, reason=f"no answer ({type(exc).__name__})")
+        return judge(status, body)
+
+    return probe
+
+
 def default_probe(url: str, timeout: float) -> bool:
     """True when ``url`` gave any HTTP answer: the question is whether the machine is up."""
     req = urllib.request.Request(url, method="GET", headers={"User-Agent": "sharedllm-health-probe"})
@@ -237,6 +331,8 @@ class BackendHealth:
             self.generation = 0  # bumps on every transition, for pollers
             self._next_probe_at: float | None = None
             self._watch_misses = 0
+            self._verify_at: float | None = None  # monotonic: a confirming probe is due
+            self._suspect = False  # a real call just failed in a way that proved nothing
             self._last_summary_at: float | None = None
             self.last_change: float | None = None
 
@@ -275,11 +371,51 @@ class BackendHealth:
         call is the one that opened the breaker), so callers know not to retry.
         """
         if not is_unreachable(exc):
+            if is_suspect(exc):
+                self.verify_soon(f"{type(exc).__name__}: {exc}")
             return False
         if isinstance(exc, BackendUnavailable):
             return True
         self.mark_down(f"{type(exc).__name__}: {exc}")
         return True
+
+    def verify_soon(self, detail: str = "") -> None:
+        """A call failed in a way that proves nothing alone: probe now, not at the next watch.
+
+        Never opens the breaker by itself. The probe does, after ``WATCH_MISSES``
+        failures in a row ``verify_interval`` apart; one that passes (the server
+        is loading a model, or was only busy) clears it. A confirmation already
+        on its way is not brought forward, so a burst of failed calls cannot
+        turn the spaced probes into back-to-back ones.
+        """
+        with self._lock:
+            if self.state == DOWN or not self._url:
+                return
+            self._suspect = self._suspect or bool(detail)
+            if self._verify_at is not None:
+                return
+            self._verify_at = self._clock()
+        self._log.debug("%s: %s; probing now", self.name, detail or "checking")
+        if self._autostart:
+            self.start()
+        self._wake.set()
+
+    def confirm(self, detail: str) -> bool:
+        """``verify_soon``, but probe here and now; returns whether calls may go ahead.
+
+        Blocks for up to ``probe_timeout`` (async callers run it in a thread).
+        For a call that is about to wait a long time on a backend that may be
+        gone: the proxy timing out on its model list is that call's first
+        failure, and a probe answered "cannot serve" is its second.
+        """
+        with self._lock:
+            if self.state == DOWN:
+                return False
+            if not self._url:
+                return True
+            self._suspect = True
+        self.probe_once()
+        return self.state != DOWN
 
     def record_success(self) -> None:
         """A real call got an answer: the backend is up."""
@@ -294,6 +430,7 @@ class BackendHealth:
                 return
             self.state = DOWN
             self._watch_misses = 0
+            self._verify_at = None
             self.down_since = self._wall()
             self._down_at = self._clock()
             self.error_id = uuid.uuid4().hex[:8]
@@ -340,9 +477,9 @@ class BackendHealth:
         return min(s.probe_max, s.probe_interval * (2 ** min(self.probes, 16)))
 
     def probe_once(self) -> bool:
-        """Probe now; closes the breaker on an answer, backs off on silence.
+        """Probe now; closes the breaker when the probe passes, backs off when not.
 
-        Returns whether the backend answered. With no URL configured there is
+        Returns whether the probe passed. With no URL configured there is
         nothing to probe and the state is left alone.
         """
         url = self._url
@@ -350,31 +487,59 @@ class BackendHealth:
             return self.state == UP
         target = f"{url}{self.probe_path}" if self.probe_path else url
         try:
-            ok = bool(self._probe(target, self.settings.probe_timeout))
+            result = self._probe(target, self.settings.probe_timeout)
         except Exception as exc:  # a broken probe must not kill the thread
             self._log.debug("%s probe raised %r", self.name, exc)
-            ok = False
+            result = False
+        ok = bool(result)
+        answered = bool(getattr(result, "answered", False))
+        reason = getattr(result, "reason", "") or ("answered" if ok else "got no answer")
+        with self._lock:
+            suspect, self._suspect = self._suspect, False
         if ok:
-            self._watch_misses = 0
-            self.mark_up("a background probe answered")
+            with self._lock:
+                self._watch_misses = 0
+                self._verify_at = None
+            self.mark_up(f"a background probe {reason}")
             return True
         with self._lock:
+            if self.state != DOWN and suspect and answered:
+                # A real call failed and the backend itself now says it cannot
+                # serve: two failures in a row, the second one definite.
+                self._watch_misses = WATCH_MISSES
             if self.state != DOWN:
-                # A watch probe while it is up: one miss can be a busy moment, so
-                # it takes WATCH_MISSES in a row (real calls still open it at once).
+                # While it is up, one failed probe can be a busy moment or a quick
+                # restart: it takes WATCH_MISSES in a row, the next one coming
+                # ``verify_interval`` later instead of a whole watch interval.
                 self._watch_misses += 1
                 if self._watch_misses < WATCH_MISSES:
-                    self._log.debug("%s watch probe got no answer (%d in a row)", self.name, self._watch_misses)
+                    self._verify_at = self._clock() + self.settings.verify_interval
+                    self._log.debug("%s probe failed (%d in a row): %s; checking again in %.0fs", self.name,
+                                    self._watch_misses, reason, self.settings.verify_interval)
                     return False
             if self.state == DOWN:
                 self.probes += 1
                 self._next_probe_at = self._clock() + self.next_probe_delay()
-                self._log.debug("%s probe %d got no answer; next in %.0fs", self.name, self.probes,
+                self._log.debug("%s probe %d failed: %s; next in %.0fs", self.name, self.probes, reason,
                                 self.next_probe_delay())
                 self._maybe_summarise()
                 return False
-        self.mark_down(f"background probe of {target} got no answer")
+        self.mark_down(f"background probe of {target} {reason}")
         return False
+
+    def seconds_to_next_probe(self) -> float | None:
+        """How long the probe thread sleeps: None means until something wakes it."""
+        now = self._clock()
+        if self.state == DOWN:
+            if self._next_probe_at is not None:
+                return max(0.0, self._next_probe_at - now)
+            return self.next_probe_delay()
+        waits = []
+        if self._verify_at is not None:
+            waits.append(max(0.0, self._verify_at - now))
+        if self.settings.watch_interval > 0:
+            waits.append(self.settings.watch_interval)
+        return min(waits) if waits else None
 
     def _maybe_summarise(self) -> None:
         if self.state != DOWN or self._last_summary_at is None:
@@ -411,20 +576,15 @@ class BackendHealth:
 
     def _run(self) -> None:
         while not self._stop.is_set():
+            delay = self.seconds_to_next_probe()
+            woke = self._wake.wait(timeout=delay)  # None: not watching, sleep until woken
             self._wake.clear()
-            delay = self.next_probe_delay()
-            if self.state == DOWN and self._next_probe_at is not None:
-                delay = max(0.0, self._next_probe_at - self._clock())
-            if delay <= 0 and self.state != DOWN:
-                # Not watching while up: sleep until something marks it down.
-                self._wake.wait()
-                continue
-            woke = self._wake.wait(timeout=delay)
             if self._stop.is_set():
                 return
             if woke or self._wake.is_set():
                 continue  # state changed: recompute the delay
             self.probe_once()
+rexویرایش با موفقیت انجام شد، اما ممکن است خطاهای نگارشی یا املایی در متن جدید وجود داشته باشد. لطفاً متن ویرایش شده را بررسی کنید و در صورت نیاز اصلاح نمایید.
 
     def snapshot(self) -> dict[str, object]:
         """The state for a status endpoint: no host names, no exception text."""

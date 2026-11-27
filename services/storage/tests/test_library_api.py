@@ -23,6 +23,7 @@ CATALOG = {
     6: _book(6, "Works of John Wesley - Vol. 08", "John Wesley", ["Wesley"]),
     10: _book(10, "Henry of Guise; (Vol. I of 3)", "G. P. R. James"),
     11: _book(11, "Henry of Guise; (Vol. II of 3)", "G. P. R. James"),
+    12: _book(12, "A Scanned Atlas", "Anon", ["maps"], ["DJVU"]),
 }
 
 
@@ -57,7 +58,11 @@ def test_the_audit_names_copies_editions_and_gaps_but_never_two_volumes():
     # The readable, tagged copy is the one to keep.
     assert copy["keep"]["id"] == 1 and [b["id"] for b in copy["others"]] == [2]
     assert len(report["editions"]) == 1 and {report["editions"][0]["keep"]["id"], report["editions"][0]["others"][0]["id"]} == {3, 4}
+    # A PDF is read like an EPUB; only a format with no reader (DJVU) is unreadable.
     assert report["no_file"]["count"] == 1 and report["unreadable"]["count"] == 1
+    assert [b["id"] for b in report["unreadable"]["books"]] == [12]
+    assert "usually PDF" not in report["unreadable"]["why"]
+    assert library_api._row(CATALOG[2])["readable"] is True
     # Numbered volumes are different books, in or out of parentheses.
     assert not any("Wesley" in g["keep"]["title"] or "Guise" in g["keep"]["title"] for g in report["copies"] + report["editions"])
 
@@ -87,6 +92,8 @@ def test_a_tag_change_is_written_and_sent_to_the_index(monkeypatch):
     monkeypatch.setattr(library_api, "_provider", lambda path: Prov())
     monkeypatch.setattr(library_api, "_rag_tags", rag)
     body = client.post("/calibre/books/1/tags", json={**LIB, "add": ["fasting"]}, headers=H).json()
-    assert closed == [True]  # the request's Nextcloud session is closed, not left to the GC
+    # The provider is the kept one (build_provider), so its Nextcloud session stays
+    # open for the next request; build_provider closes it when it drops it.
+    assert closed == []
     assert body["tags"] == ["Lent", "fasting"] and patched == [(1, ["Lent", "fasting"])]
     assert client.post("/calibre/books/1/tags", json=LIB, headers=H).status_code == 422

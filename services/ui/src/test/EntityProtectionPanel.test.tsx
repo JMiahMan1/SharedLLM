@@ -88,6 +88,25 @@ describe('EntityProtectionPanel', () => {
     seed();
   });
 
+  it('lets an admin choose where media asked for at a satellite plays, saving the choice', async () => {
+    let saved: { key: string; value: string } | null = null;
+    server.use(
+      http.get('/api/settings', () =>
+        HttpResponse.json([{ key: 'voice_satellite_playback', value: 'this_device', description: '' }])
+      ),
+      http.patch('/api/settings/:key', async ({ params, request }) => {
+        const body = (await request.json()) as { value: string };
+        saved = { key: String(params.key), value: body.value };
+        return HttpResponse.json({ key: params.key, value: body.value, description: '' });
+      })
+    );
+    render();
+    const self = await screen.findByRole('radio', { name: 'On the satellite itself' });
+    await waitFor(() => expect(self).toHaveAttribute('aria-checked', 'true'));
+    fireEvent.click(screen.getByRole('radio', { name: 'On the last device used' }));
+    await waitFor(() => expect(saved).toEqual({ key: 'voice_satellite_playback', value: 'last_used' }));
+  });
+
   it('says plainly that nothing is protected to begin with', async () => {
     render();
     expect(await screen.findByText('No entities are protected.')).toBeInTheDocument();

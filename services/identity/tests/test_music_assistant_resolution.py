@@ -361,3 +361,141 @@ def test_concurrent_first_use_makes_one_account_and_both_get_its_token(tmp_path,
     with Session(engine) as s:
         robin = s.exec(select(User).where(User.username == "robin")).first()
         assert decrypt(robin.mass_token_enc) == "t-1" and robin.mass_user_id == "u-robin"
+
+
+# -- per-user Audiobookshelf provider sync on household Music Assistant -----------------------
+
+def test_saving_own_abs_credentials_triggers_ma_provider_sync(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'identity.db'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as s:
+        s.add(User(username="default", display_name="Household", is_system_default=True))
+        s.add(User(username="zachary", display_name="Zachary"))
+        s.commit()
+
+    synced_calls: list[dict] = []
+
+    def fake_sync(**kwargs):
+        synced_calls.append(kwargs)
+        return {
+            "username": kwargs["username"],
+            "user_id": "u-zachary",
+            "abs_instance_id": "audiobookshelf--zach1",
+            "provider_filter": ["audiobookshelf--zach1", "opensubsonic--m1"],
+            "filter_updated": True,
+            "action": "created",
+        }
+
+    monkeypatch.setattr(music_assistant, "sync_audiobookshelf_provider", fake_sync)
+
+    def override_session():
+        with Session(engine) as s:
+            yield s
+
+    def override_user():
+        with Session(engine) as s:
+            return s.exec(select(User).where(User.username == "zachary")).first()
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[require_api_key] = override_user
+    try:
+        client = TestClient(app)
+        resp = client.patch(
+            "/api/users/me",
+            json={
+                "audiobookshelf_url": "https://abs.example.test/",
+                "audiobookshelf_user": "zachary",
+                "audiobookshelf_pass": "zach-pass",
+            },
+        )
+        assert resp.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+    assert len(synced_calls) == 1
+    assert synced_calls[0]["username"] == "zachary"
+    assert synced_calls[0]["abs_url"] == "https://abs.example.test"
+    assert synced_calls[0]["abs_username"] == "zachary"
+    assert synced_calls[0]["abs_password"] == "zach-pass"
+    assert synced_calls[0]["abs_api_key"] is None
+    with Session(engine) as s:
+        zach = s.exec(select(User).where(User.username == "zachary")).first()
+        assert zach.mass_abs_provider_id == "audiobookshelf--zach1"
+        assert zach.mass_user_id == "u-zachary"
+
+
+def test_admin_ma_audiobookshelf_plan_and_reconcile(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'identity.db'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as s:
+        s.add(User(username="default", display_name="Household", is_system_default=True))
+        s.add(User(
+            username="jeremiah",
+            display_name="Jeremiah",
+            audiobookshelf_url="https://abs.example.test",
+            audiobookshelf_api_key_enc=encrypt("jer-key"),
+            mass_abs_provider_id="audiobookshelf--jer1",
+        ))
+        s.add(User(
+            username="zachary",
+            display_name="Zachary",
+            audiobookshelf_url="https://abs.example.test",
+            audiobookshelf_user="zachary",
+            audiobookshelf_pass_enc=encrypt("zach-pw"),
+        ))
+        s.add(User(username="michele", display_name="Michele"))
+        s.add(User(username="kim", display_name="Kim", mass_url=MINE))
+        s.commit()
+
+    seen: list[dict] = []
+
+    def fake_sync(**kwargs):
+        seen.append(kwargs)
+        has_abs = bool(kwargs.get("abs_url") and (kwargs.get("abs_api_key") or (kwargs.get("abs_username") and kwargs.get("abs_password"))))
+        inst = kwargs.get("existing_instance_id") or (f"audiobookshelf--{kwargs['username']}" if has_abs else None)
+        return {
+            "username": kwargs["username"],
+            "user_id": f"u-{kwargs['username']}",
+            "abs_instance_id": inst,
+            "provider_filter": [p for p in ["opensubsonic--m1", inst] if p],
+            "filter_updated": True,
+            "action": "updated" if kwargs.get("existing_instance_id") else ("created" if has_abs else "scoped"),
+        }
+
+    monkeypatch.setattr(music_assistant, "household_server", lambda fresh=False: {"url": HOUSEHOLD, "error": None})
+    monkeypatch.setattr(music_assistant, "sync_audiobookshelf_provider", fake_sync)
+
+    def override_session():
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[require_admin_or_internal] = lambda: True
+    try:
+        client = TestClient(app)
+        plan = client.get("/api/admin/music-assistant/audiobookshelf")
+        assert plan.status_code == 200
+        by_user = {r["username"]: r for r in plan.json()["users"]}
+        assert by_user["jeremiah"]["action"] == "update_provider"
+        assert by_user["zachary"]["action"] == "create_provider"
+        assert by_user["michele"]["action"] == "scope_shared_only"
+        assert by_user["kim"]["action"] == "own_server"
+        assert "default" not in by_user
+
+        apply_resp = client.post("/api/admin/music-assistant/audiobookshelf", json={"confirm": True})
+        assert apply_resp.status_code == 200
+        res_by_user = {r["username"]: r for r in apply_resp.json()["users"]}
+        assert res_by_user["jeremiah"]["result"] == "updated"
+        assert res_by_user["zachary"]["result"] == "created"
+        assert res_by_user["zachary"]["abs_instance_id"] == "audiobookshelf--zachary"
+        assert res_by_user["michele"]["result"] == "scoped"
+        assert res_by_user["michele"]["abs_instance_id"] is None
+        assert res_by_user["kim"]["result"] == "skipped_own_server"
+    finally:
+        app.dependency_overrides.clear()
+
+    with Session(engine) as s:
+        zach = s.exec(select(User).where(User.username == "zachary")).first()
+        michele = s.exec(select(User).where(User.username == "michele")).first()
+        assert zach.mass_abs_provider_id == "audiobookshelf--zachary"
+        assert michele.mass_abs_provider_id is None

@@ -46,6 +46,49 @@ def valid_satellite(value: Any) -> str | None:
     return text if _SATELLITE.match(text) else None
 
 
+def _room_slug(value: Any) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    return slug[4:] if slug.startswith("the_") else slug
+
+
+def resolve_room_satellite(all_states: list[dict], room: str | None,
+                           fallback_satellite: str | None = None, idx=None) -> str | None:
+    """The ``assist_satellite.*`` entity in ``room``, or the fallback when no room was named.
+
+    With the hub's capability index the room is the area its name or alias names
+    (``require_area``). Without one, a plain HA's satellite entity id or friendly
+    name is matched. An explicitly named room never falls back to another room:
+    when it has no satellite the answer is None, so a timer is not rung somewhere
+    else. Only an empty room (a timer set without one) uses ``fallback_satellite``.
+    """
+    if not str(room or "").strip():
+        return valid_satellite(fallback_satellite)
+    if idx is not None:
+        from services.execution.capability_index import UnknownAreaError
+
+        try:
+            area_id = idx.require_area(room)
+            satellites = idx.in_area(area_id, domain="assist_satellite")
+        except UnknownAreaError:
+            return None
+        return valid_satellite(satellites[0]) if satellites else None
+    wanted = _room_slug(room)
+    if not wanted:
+        return None
+    for state in all_states or []:
+        entity_id = str((state or {}).get("entity_id") or "")
+        if not entity_id.startswith("assist_satellite."):
+            continue
+        attributes = (state or {}).get("attributes") or {}
+        haystacks = [
+            _room_slug(entity_id.split(".", 1)[-1]),
+            _room_slug(attributes.get("friendly_name")),
+        ]
+        if any(wanted in haystack for haystack in haystacks if haystack):
+            return valid_satellite(entity_id)
+    return None
+
+
 def _when(value: Any) -> datetime | None:
     try:
         dt = datetime.fromisoformat(str(value))

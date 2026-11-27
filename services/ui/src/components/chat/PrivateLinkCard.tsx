@@ -1,6 +1,8 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Globe, Link2, Loader2, Music, Play, X } from 'lucide-react';
 import { hostOf, playerUrl, type LinkPreview } from '../../lib/privateLinkPreview';
+import { animationChoice, isGifClip, linkClipKey, setAnimationChoice, subscribeAnimationChoices } from '../../lib/animatedImage';
+import { AnimationToggle } from './AnimatedImage';
 
 /** Keeps a tap or a key inside the card from also opening the message's sheet. */
 const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
@@ -40,6 +42,74 @@ function OpenLink({ preview, children, testId }: { preview: LinkPreview; childre
 }
 
 /**
+ * A GIPHY or Tenor link: tap to play (the site hears nothing before then), then
+ * it loops silently like the GIF it is, with the same pause control as a GIF.
+ * Paused freezes the frame; the choice lasts the session, so coming back to a
+ * paused one shows its still card and a playing one plays again.
+ */
+function GifClip({ preview, label, shell }: { preview: LinkPreview; label: string; shell: string }) {
+  const key = linkClipKey(preview.url);
+  const choice = useSyncExternalStore(subscribeAnimationChoices, () => animationChoice(key), () => null);
+  // Only a clip someone played this session is put on the page by itself.
+  const [mounted, setMounted] = useState(choice === 'playing');
+  const video = useRef<HTMLVideoElement | null>(null);
+  const paused = choice !== 'playing';
+  const src = preview.embed?.provider === 'file' ? preview.embed.src : '';
+
+  useEffect(() => {
+    const clip = video.current;
+    if (!clip) return;
+    if (paused) clip.pause();
+    else void clip.play().catch(() => {});
+  }, [paused, mounted]);
+
+  return (
+    <span className={shell} onClick={stop} onKeyDown={stop} data-testid="private-link-card" data-kind="gif">
+      {mounted ? (
+        <span className="relative block" data-animated={paused ? 'paused' : 'playing'}>
+          <video
+            ref={video}
+            src={src}
+            autoPlay={!paused}
+            loop
+            muted
+            playsInline
+            disablePictureInPicture
+            preload="auto"
+            aria-label={label}
+            className="block aspect-video w-full bg-black object-contain"
+            data-testid="private-link-player"
+          />
+          <AnimationToggle paused={paused} onToggle={() => setAnimationChoice(key, paused ? 'playing' : 'paused')} />
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setAnimationChoice(key, 'playing');
+            setMounted(true);
+          }}
+          aria-label={`Play GIF: ${label}`}
+          data-testid="private-link-play"
+          className="relative block aspect-video w-full overflow-hidden bg-gradient-to-br from-slate-700 to-slate-900"
+        >
+          {preview.image && <img src={preview.image} alt="" draggable={false} className="h-full w-full object-cover" />}
+          <span className="absolute inset-0 flex items-center justify-center">
+            <span className="flex h-12 items-center gap-1.5 rounded-full bg-black/60 px-4 text-white shadow-lg ring-1 ring-white/30">
+              <Play size={18} fill="currentColor" aria-hidden />
+              <span className="text-sm font-bold tracking-wide">GIF</span>
+            </span>
+          </span>
+        </button>
+      )}
+      <OpenLink preview={preview} testId="private-link-open">
+        <Words preview={preview} />
+      </OpenLink>
+    </span>
+  );
+}
+
+/**
  * A received (or sent) message's link preview, drawn only from what was in the
  * sealed message. A video or audio player is not on the page until it is
  * tapped, so the site that hosts it hears nothing before then.
@@ -50,6 +120,8 @@ export default function PrivateLinkCard({ preview, own }: { preview: LinkPreview
   const shell = `mt-2 block w-64 max-w-full overflow-hidden whitespace-normal rounded-2xl text-left ${
     own ? 'bg-black/20' : 'border border-white/10 bg-black/25'
   }`;
+
+  if (isGifClip(preview)) return <GifClip preview={preview} label={label} shell={shell} />;
 
   if (preview.kind === 'video' && preview.embed) {
     const embed = preview.embed;

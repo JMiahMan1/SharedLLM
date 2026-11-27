@@ -6,6 +6,7 @@ from services.gateway.agent_loop import (
     action_signature,
     build_adaptive_guidance,
     compose_timeout_partial_result,
+    detect_mission_loop,
     event_text,
     extract_action_batch,
     guidance_branch,
@@ -211,6 +212,53 @@ def test_is_verification_action():
 def test_action_signature():
     assert action_signature("WorkspaceFileWriteRequest", {"file_path": "game.py"}) == "workspacefilewriterequest::'game.py'"
     assert action_signature("WorkspaceShellRequest", {"command": "ruff check"}) == "workspaceshellrequest::'ruff check'"
+
+
+def test_action_signature_uses_url():
+    assert action_signature("WebReadRequest", {"url": "https://github.com/Sendspin/aiosendspin"}) == "webreadrequest::'https://github.com/Sendspin/aiosendspin'"
+
+
+def test_action_signature_uses_urls_list():
+    assert action_signature("WebReadRequest", {"urls": ["one", "two"]}) == "webreadrequest::'one two'"
+
+
+def test_action_signature_fallback_ignores_volatile_keys():
+    p1 = {"tool": "WebReadRequest", "@type": "WebReadRequest", "user_context": {"a": 1}, "note": "same"}
+    p2 = {"tool": "WebReadRequest", "@type": "WebReadRequest", "user_context": {"b": 2}, "note": "same"}
+    assert action_signature("WebReadRequest", p1) == action_signature("WebReadRequest", p2)
+
+
+def test_action_signature_existing_file_path_unchanged():
+    assert action_signature("WorkspaceFileWriteRequest", {"file_path": "game.py"}) == "workspacefilewriterequest::'game.py'"
+
+
+def test_action_signature_without_a_payload_keeps_the_empty_tail():
+    # Nothing identifies the call: the empty tail it always had, never a digest of nothing.
+    assert action_signature("LightControlRequest", None) == "lightcontrolrequest::''"
+    assert action_signature("LightControlRequest", {}) == "lightcontrolrequest::''"
+    assert action_signature("LightControlRequest", {"user_context": {"a": 1}, "query": ""}) == "lightcontrolrequest::''"
+
+
+def test_action_signature_fallback_tells_different_calls_apart():
+    a = action_signature("LightControlRequest", {"entity_id": "light.porch"})
+    b = action_signature("LightControlRequest", {"entity_id": "light.kitchen"})
+    assert a != b
+    assert a == action_signature("LightControlRequest", {"entity_id": "light.porch", "user_context": {"x": 1}})
+
+
+def test_seven_different_web_reads_do_not_trip_mission_loop():
+    history = [
+        (action_signature("WebReadRequest", {"url": f"https://example.com/page{i}"}), True, "")
+        for i in range(7)
+    ]
+    assert detect_mission_loop(history) is None
+
+
+def test_five_identical_web_reads_trip_mission_loop():
+    sig = action_signature("WebReadRequest", {"url": "https://example.com/page"})
+    history = [(sig, True, "")] * 5
+    assert detect_mission_loop(history) == f"looping: {sig[:120]} repeated 5 times"
+
 
 def test_outcome_digest():
     assert outcome_digest({"message": "Success!"}) == "Success!"

@@ -76,7 +76,13 @@ export function usePlayback(web: WebPlayerHandle) {
         // The progress reporter reads this until the device's next update, so
         // it must not save the pre-seek position over the listener's own.
         if (id) store().actions.patchPlayer(id, { positionSec: at, positionUpdatedAt: Date.now() });
-        await adapter(id).seek(id, at).catch(() => {
+        const seekNow = () => adapter(id).seek(id, at);
+        await seekNow().catch(async () => {
+          // Music Assistant can still be loading the audiobook right after
+          // play_media returns; give it one short beat before reporting failure.
+          await new Promise((r) => window.setTimeout(r, 600));
+          await seekNow();
+        }).catch(() => {
           toast.error('Could not jump to where you left off');
         });
       }

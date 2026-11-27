@@ -127,11 +127,16 @@ class FetchFailed(Exception):
 # --- Who may ask, and how often -----------------------------------------------
 
 
+def _now() -> float:
+    """The clock the window is counted on. A seam, so a test cannot straddle a boundary."""
+    return time.time()
+
+
 def _claim(user: str, now: float | None = None) -> bool:
     """Count one preview for ``user``; False once ``RATE_LIMIT`` are used in this window."""
     from services.gateway.cache import get_redis
 
-    window = int((now if now is not None else time.time()) // RATE_WINDOW_S)
+    window = int((now if now is not None else _now()) // RATE_WINDOW_S)
     key = f"private-chat:link-preview:{user}:{window}"
     r = get_redis()
     count = r.incr(key)

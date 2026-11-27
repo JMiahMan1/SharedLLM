@@ -94,4 +94,56 @@ describe('Identity credentials', () => {
     expect(screen.getByRole('checkbox', { name: 'Use shared Audiobookshelf credentials' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Use shared Nextcloud credentials' })).toBeDisabled();
   });
+  it('files every member their own Audiobookshelf token from the card', async () => {
+    const posted: unknown[] = [];
+    server.use(
+      http.post('/api/media/audiobookshelf/users/tokens', async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({
+          status: 'SUCCESS',
+          issued: [{ username: 'alex', audiobookshelf_user: 'alex' }],
+          skipped: [{ username: 'sam', reason: 'no Audiobookshelf account with that name' }],
+        });
+      }),
+    );
+
+    renderWithProviders(<Identity />);
+    const user = await openTile('Audiobookshelf');
+
+    await user.click(await screen.findByTestId('abs-issue-tokens'));
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    // No names are sent: the server reads the household and the ABS accounts.
+    expect(posted[0]).toEqual({});
+    // The member who could not be given one is named, with the reason.
+    expect(await screen.findByRole('status')).toHaveTextContent('1 given their own token');
+    expect(screen.getByRole('status')).toHaveTextContent('sam (no Audiobookshelf account with that name)');
+  });
+
+  it('creates the missing Audiobookshelf accounts with the password the admin types', async () => {
+    const bodies: unknown[] = [];
+    server.use(
+      http.post('/api/media/audiobookshelf/users/provision', async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json({
+          status: 'SUCCESS',
+          created: ['robin', 'taylor'],
+          filed: [{ username: 'robin', audiobookshelf_user: 'robin' }],
+          skipped: [{ username: 'taylor', reason: 'Identity answered 500' }],
+        });
+      }),
+    );
+
+    renderWithProviders(<Identity />);
+    const user = await openTile('Audiobookshelf');
+
+    await user.type(await screen.findByLabelText('Temporary password for any account created here'), 'temp-pass');
+    await user.click(screen.getByTestId('abs-provision-accounts'));
+
+    await waitFor(() => expect(bodies).toEqual([{ password: 'temp-pass' }]));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('2 account(s) created');
+    expect(status).toHaveTextContent('1 given a token');
+    expect(status).toHaveTextContent('taylor (Identity answered 500)');
+  });
 });

@@ -31,6 +31,7 @@
 - `docs/PUSH.md`: phone notifications over self-hosted ntfy: publishing notices, the phone stream, categories and preferences, action buttons, UnifiedPush for other apps
 - `docs/BIBLE_STUDY.md`: Bible reader, study help, plans, games, memorization, interlinear
 - `docs/ACHIEVEMENTS.md`: goals, achievements, opt-in sharing, stars
+- `docs/PROFILE_STATS.md`: each person's profile stats across Jarvis (opt-in per area for the family) and the admin's per-person page (devices, collector health, features, errors, trends)
 - `docs/HEALTH_STEPS.md`: pedometer capture, device ledger, widgets
 - `docs/HEALTH_HUB.md`: Health hub service and UI: profiles, open metric ingestion, sleep, readiness, nutrition, sharing
 - `docs/PLANT_CARE.md`: Garden hub (planned): species-specific houseplant care, personal plant names, kitchen herbs, family-sized outdoor garden planner, harvest-driven recipes, food preservation & Put-Up Pantry, weather automation, and opt-in Home Hub sensors/valves
@@ -43,6 +44,7 @@
 - `docs/WINDOWS_LOCK_SCREEN.md`: a Jarvis lock screen for Windows 10/11 family PCs - bedtime/school windows, time budgets, ask-to-time, managed-device signage, CI-built exe
 - `docs/MDM.md`: device management (MDM): tablet/phone awareness, ESPHome companion control/OTA, OS update policies, always-on VPN lockdown, Wi-Fi & CA cert provisioning, and audit log
 - `docs/VOICE_RECOGNITION.md`: recognising who speaks at a Home Assistant voice satellite
+- `docs/VOICE_PHONE.md`: the phone as a voice assistant (listen, think, answer out loud), the turn rules, and what is not built yet
 - `docs/THEMES.md`: Jarvis-wide theme packs, import/export, widget tinting
 
 ## Media
@@ -63,6 +65,7 @@
 ## Raven
 
 - `docs/RAVEN_LEARNING_MEMORY.md`: how Raven works, its tools and its learning memory
+- `docs/RAVEN_HARNESS.md`: the workspace field kit — exact patch, numbered reads, capped search, list-files, shell output file
 - `docs/JARVIS_TRAINER.md`: the trainer around the local model: the feature catalogue derived from the code, the evaluation curriculum (repairs, sermons, image edits, memory), self-repair proven by workspace tests, dreaming's improvement backlog, and the Lab's Training tab
 - `docs/WORKSPACE_STUDIO.md`: the Workspace as a build surface: project detection (Python, Node/Vite/Next, Go, Rust, Java, .NET, static), running and testing in the sandbox, dev-server previews with published ports, generated art and narration, self-contained slide decks and playable single-file games
 

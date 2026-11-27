@@ -14,7 +14,7 @@ interface GeofenceAlertsCardProps {
 }
 
 /**
- * Family Link / Bark Batch 7: Place arrival/departure geofence alerts
+ * Place arrival/departure geofence alerts
  * and on-device photo & video safety monitoring for a child.
  */
 export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCardProps) {

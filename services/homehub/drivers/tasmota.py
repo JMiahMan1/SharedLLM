@@ -41,8 +41,10 @@ state.
 A device with a web password answers ``/cm`` with HTTP 401 (or, on older
 firmware, ``{"WARNING": "Need user=..."}``); that is ``AuthRequired``, so the
 entry shows it needs its web password rather than that it is unreachable. The
-password goes as Tasmota's own ``user``/``password`` arguments (user ``admin``),
-the only way its ``/cm`` takes it; no log or error text carries the request URL.
+password goes as Tasmota's own ``user``/``password`` arguments (user ``admin``)
+and as HTTP Basic, or only one of them when the entry's ``auth_mode`` says so
+(the flow that adds a device records the way its ``/cm`` took); no log or error
+text carries the request URL or the password.
 """
 from __future__ import annotations
 
@@ -50,10 +52,11 @@ import colorsys
 import re
 from datetime import datetime, timedelta
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
+from yarl import URL
 
 from services.homehub.core import (
     AuthRequired,
@@ -176,11 +179,100 @@ def cm_params(command: str, password: str | None) -> dict[str, str]:
     return params
 
 
+def basic_auth(password: str | None) -> Any:
+    """HTTP Basic credentials for the web password (user ``admin``), or None.
+
+    Stock Tasmota reads the password from ``/cm``'s ``user``/``password`` arguments, but some
+    builds and Tasmota-compatible firmwares put every page, ``/cm`` included, behind HTTP Basic
+    login and close the connection on a ``/cm`` without it. Sending both works for either.
+    """
+    # UTF-8, as browsers send it (aiohttp's default is Latin-1, which mangles a non-ASCII password).
+    return aiohttp.BasicAuth("admin", password, encoding="utf-8") if password else None
+
+
+#: How ``/cm`` is sent the web password: as ``user``/``password`` query arguments, as an HTTP Basic header, or
+#: both (the default, and what an entry without ``auth_mode`` uses). Some firmwares refuse a request that carries
+#: the one they do not expect, so the flow that adds a device records the way that worked.
+AUTH_MODES = ("both", "params", "basic")
+
+
+def cm_request(command: str, password: str | None, mode: str | None = "both") -> tuple[dict[str, str], Any]:
+    """``(query, auth)`` of a ``/cm`` request sending the password the ``mode`` way (``AUTH_MODES``)."""
+    if mode not in AUTH_MODES:
+        mode = "both"
+    params = cm_params(command, password if mode in ("both", "params") else None)
+    return params, (basic_auth(password) if mode in ("both", "basic") else None)
+
+
+def cm_query(params: dict[str, str]) -> str:
+    """The query string with every reserved character percent-encoded (``+`` is ``%2B``, a space ``%20``,
+    ``?`` ``%3F``), which the device's URL decoder reads back exactly. aiohttp's own ``params`` encoding
+    sends a space as ``+`` and leaves ``?`` as it is."""
+    return urlencode(params, quote_via=quote, safe="")
+
+
+def cm_url(host: str, command: str, password: str | None, mode: str | None = "both") -> tuple[Any, Any]:
+    """``(URL, auth)`` of a ``/cm`` request, the query already encoded (``cm_query``), so aiohttp sends it as is."""
+    params, auth = cm_request(command, password, mode)
+    return URL(f"http://{host}/cm?{cm_query(params)}", encoded=True), auth
+
+
+def password_traits(password: str | None) -> dict[str, Any]:
+    """What a refusal's log may say about the password: its length and which awkward characters it has.
+
+    Booleans and a length only, never the password or any part of it."""
+    pw = password or ""
+    return {"length": len(pw), "has_hash": "#" in pw, "has_amp": "&" in pw, "has_plus": "+" in pw,
+            "has_percent": "%" in pw, "has_space": " " in pw, "has_question": "?" in pw, "has_equals": "=" in pw,
+            "has_non_ascii": any(ord(c) > 127 for c in pw)}
+
+
+async def asks_for_login(session: Any, host: str) -> bool:
+    """Whether the device's web page wants a login (401 with a Basic challenge).
+
+    Used after ``/cm`` closed the connection without a reply: a password-protected
+    device does that on some firmwares, where an unreachable one never answers at all.
+    """
+    try:
+        async with session.get(f"http://{host}/") as resp:
+            return resp.status == 401 and "basic" in resp.headers.get("WWW-Authenticate", "").lower()
+    except (aiohttp.ClientError, TimeoutError):
+        return False
+
+
+async def password_accepted(session: Any, host: str, password: str) -> bool | None:
+    """The web password checked against the device's own login page (``/`` behind HTTP Basic).
+
+    False: the page refuses it (401 with it). True: the page asks for a login and takes this one.
+    None: cannot tell (the page does not answer, or has no login), so the caller decides from ``/cm``.
+    """
+    try:
+        async with session.get(f"http://{host}/", auth=basic_auth(password)) as resp:
+            if resp.status == 401:
+                return False
+    except (aiohttp.ClientError, TimeoutError):
+        return None
+    return True if await asks_for_login(session, host) else None
+
+
 def safe_error(exc: BaseException, password: str | None) -> str:
     """An error's text for logs and the entry's reason, without the password (a URL in it carries the query)."""
     text = str(exc) or type(exc).__name__
     if (password and password in text) or "password=" in text:
         return type(exc).__name__
+    return text
+
+
+def redact(text: str, password: str | None) -> str:
+    """``text`` with the password (as typed and as ``cm_query`` encodes it) replaced by ``***``.
+
+    For a device's reply in a log: ``safe_error`` drops any text containing ``password=``, which would also
+    drop Tasmota's own ``Need user=<username>&password=<password>`` warning, the part worth seeing."""
+    if not password:
+        return text
+    for form in (password, quote(password, safe=""), quote(password, safe="").replace("%20", "+")):
+        if form:
+            text = text.replace(form, "***")
     return text
 
 
@@ -362,13 +454,26 @@ class TasmotaDriver(Driver):
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT))
         pw = str(self.entry.data.get("password") or "")
+        url, auth = cm_url(self.host, command, pw, self.entry.data.get("auth_mode") or "both")
         try:
-            async with self._session.get(f"http://{self.host}/cm", params=cm_params(command, pw)) as resp:
+            async with self._session.get(url, auth=auth) as resp:
                 if resp.status == 401:
                     raise self._auth_failure()
                 if resp.status != 200:
                     raise DeviceUnavailable(f"Tasmota {self.host} answered HTTP {resp.status} to {command!r}")
                 body = await resp.json(content_type=None)
+        except aiohttp.ServerDisconnectedError as exc:
+            if pw:
+                accepted = await password_accepted(self._session, self.host, pw)
+                if accepted:
+                    raise DeviceUnavailable(f"Tasmota {self.host} accepts its web password but refuses commands "
+                                            "over HTTP (on the device: Configuration, Configure Other, "
+                                            "HTTP API Enable)") from None
+                if accepted is False:
+                    raise self._auth_failure() from None
+            elif await asks_for_login(self._session, self.host):
+                raise self._auth_failure() from None
+            raise DeviceUnavailable(f"Tasmota {self.host} unreachable: {safe_error(exc, pw)}") from None
         except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
             raise DeviceUnavailable(f"Tasmota {self.host} unreachable: {safe_error(exc, pw)}") from None
         if needs_password(200, body):
@@ -515,3 +620,25 @@ class TasmotaDriver(Driver):
             if str(self.power.get(idx, "")).upper() != "ON":
                 await self._send(f"{power} On")  # a plain on, or a device set not to power on with a change
         self._publish_lights()
+
+    # -- one command for the template tools (tasmota_templates.py) --------------------------------
+    async def cm(self, command: str) -> dict[str, Any]:
+        """One ``/cm`` command and its reply, through the driver's own transport (password included)."""
+        return await self._command(command)
+
+    # -- firmware ---------------------------------------------------------------------------------
+    async def upgrade(self) -> dict[str, Any]:
+        """Ask the device to fetch the firmware at its own update address and flash it (``Upgrade 1``).
+
+        Tasmota has no update entity: it keeps an ``OtaUrl`` and downloads from
+        it. The device answers first and restarts after, which is why a dropped
+        reply is reported as the request having been taken rather than an error.
+        """
+        try:
+            return await self._command("Upgrade 1")
+        except aiohttp.ServerDisconnectedError:
+            return {"Upgrade": "1"}
+        except DeviceUnavailable as exc:
+            if "closed" in str(exc).lower():
+                return {"Upgrade": "1"}
+            raise

@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { BookPlus, ClipboardCheck, FileCheck, Library, Loader2, Plus, Search, Tag, Upload, Wand2, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
 import type { BookInspection, LibraryAuditGroup, LibraryAuditList, LibraryBook } from '../../types/api';
+import { catalogueReportLines, cataloguesSummary } from '../../lib/bookCatalogues';
 
 /** Topics the app's features read (Fasting, Bible, Health); offered first when tagging. */
 const TOPICS = ['fasting', 'prayer', 'lent', 'bible-study', 'health', 'early-church'];
@@ -104,6 +106,37 @@ function sourcesLine(sources: Record<string, string>): string {
   return [...bySource.entries()].map(([source, fields]) => `${fields.join(', ')} from ${source}`).join('; ');
 }
 
+
+/** The line under "Add a book": where details come from, and a way to change it. */
+function CataloguesNote() {
+  const catalogues = useQuery({ queryKey: ['library', 'catalogues'], queryFn: () => api.libraryCatalogues(), staleTime: 30_000, retry: false });
+  if (catalogues.isLoading) return null;
+  const settingsLink = (
+    <Link to="/identity" className="underline text-indigo-200 hover:text-white pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center">
+      Settings &gt; Accounts &amp; Integrations
+    </Link>
+  );
+  if (catalogues.isError || !catalogues.data || catalogues.data.error) {
+    return (
+      <p className="text-[11px] text-amber-300" data-testid="library-catalogues">
+        {catalogues.data?.error ?? errorText(catalogues.error, 'The book catalogue settings could not be read')}. No catalogue is asked until they can be. {settingsLink}
+      </p>
+    );
+  }
+  const { using, notUsed, problems } = cataloguesSummary(catalogues.data);
+  return (
+    <div className="space-y-0.5 text-[11px]" data-testid="library-catalogues">
+      <p className="text-slate-400">
+        {using.length ? `Book details from ${using.join(', then ')}.` : 'No book catalogue is turned on, so only the file itself fills a book in.'}{' '}
+        Change it in {settingsLink}.
+      </p>
+      {notUsed.map((why) => <p key={why} className="text-slate-500">Not used: {why}.</p>)}
+      {problems.map((why) => <p key={why} className="text-rose-300">{why}</p>)}
+    </div>
+  );
+}
+
+
 function splitTags(value: string): string[] {
   return value.split(',').map((t) => t.trim()).filter(Boolean);
 }
@@ -145,10 +178,17 @@ function AddBook({ onDone }: { onDone: () => void }) {
       if (file) form.append('file', file);
       for (const [key, value] of Object.entries(fields)) form.append(key, value);
       if (found?.cover_url && !found.cover_preview) form.append('cover_url', found.cover_url);
+      // The server fills any field left empty (file, catalogues, library tags) unless auto-fill is off.
+      form.append('online', autoFill ? 'true' : 'false');
       return api.libraryAddBook(form);
     },
     onSuccess: (out) => {
-      toast.success(`Added “${out.title}”${out.tags.length ? ` with ${out.tags.join(', ')}` : ''}. Jarvis is indexing it now.`);
+      if ((out.identified === false || (out.catalogues?.errors.length ?? 0) > 0) && out.message) {
+        // Added, but the catalogues did not know it (or one answered with an error): the person should know.
+        toast(out.message, { duration: 10_000 });
+      } else {
+        toast.success(`Added “${out.title}”${out.tags.length ? ` with ${out.tags.join(', ')}` : ''}. Jarvis is indexing it now.`);
+      }
       void queryClient.invalidateQueries({ queryKey: ['library'] });
       onDone();
     },
@@ -238,6 +278,14 @@ function AddBook({ onDone }: { onDone: () => void }) {
           {sourcesLine(found.sources) || 'Nothing found; fill it in by hand.'} Check everything before adding.
         </p>
       )}
+      {found?.catalogues && (
+        <ul className="space-y-0.5 text-[11px]" data-testid="library-found-catalogues">
+          {catalogueReportLines(found.catalogues).map((line) => (
+            <li key={line.text} className={line.problem ? 'text-rose-300' : 'text-slate-500'}>{line.text}</li>
+          ))}
+        </ul>
+      )}
+      {!found && <CataloguesNote />}
 
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_7rem]">
         <div className="grid gap-2 sm:grid-cols-2">

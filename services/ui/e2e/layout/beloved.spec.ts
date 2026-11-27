@@ -8,6 +8,9 @@ import { deriveKey, makeVerifier, openRecord, randomBytes, sealRecord, toBase64,
 
 const expect = baseExpect.configure({ timeout: 20_000 });
 
+/** The CI job that checks layout against the production build (UI_SERVE=preview), where dev-only stand-ins are ignored. */
+const PRODUCTION_BUILD = process.env.UI_SERVE === 'preview';
+
 /**
  * Beloved, the couple's page inside the private chat, on every form factor:
  * the home page with both pictures and the days-married counter, adding a
@@ -36,6 +39,11 @@ interface Server {
   belovedCalls: number;
   /** The caller's children as identity knows them (the overview's `children`). */
   children?: Array<{ username: string; display_name: string; birth_date: string | null }>;
+  /** Metadata-only reading signals; never sealed content. */
+  activity: Array<{ who: string; what: string; at: number }>;
+  prefs: { share_activity: boolean; encouragements: boolean; encourage_hour: number };
+  /** Reading-signal posts, kept apart from the sealed-record traffic in `sent`. */
+  seen: Array<{ what: string }>;
 }
 
 async function serve(page: Page, server: Server): Promise<void> {
@@ -49,6 +57,25 @@ async function serve(page: Page, server: Server): Promise<void> {
     if (p === `/api/private-chat/chats/${TOKEN}` && req.method() === 'GET') return route.fulfill({ json: server.chat });
     // The thread's edits and reactions (none here).
     if (p === `/api/private-chat/chats/${TOKEN}/marks`) return route.fulfill({ json: { marks: [] } });
+    // The gallery's sealed entries (the thread reads them to know what is in the gallery).
+    if (p === `/api/private-chat/chats/${TOKEN}/gallery` && req.method() === 'GET') return route.fulfill({ json: { entries: [] } });
+    // Metadata-only endpoints: answered here (not by the generic regex below)
+    // so no reading signal or preference is mixed into the sealed-record traffic.
+    const signal = new RegExp(`^/api/private-chat/chats/${TOKEN}/beloved/(seen|activity|prefs)$`).exec(p);
+    if (signal) {
+      if (signal[1] === 'seen') {
+        const what = (req.postDataJSON() as { what: string }).what;
+        server.seen.push({ what });
+        return route.fulfill({ json: { shared: server.prefs.share_activity, notified: false } });
+      }
+      if (signal[1] === 'activity') {
+        return route.fulfill({ json: { me: 'parent', activity: server.activity } });
+      }
+      if (req.method() === 'PUT') {
+        server.prefs = { ...server.prefs, ...(req.postDataJSON() as Partial<typeof server.prefs>) };
+      }
+      return route.fulfill({ json: server.prefs });
+    }
     const beloved = new RegExp(`^/api/private-chat/chats/${TOKEN}/beloved(?:/([a-z]+))?(?:/([0-9a-f]{32}))?$`).exec(p);
     if (beloved) {
       server.belovedCalls += 1;
@@ -121,6 +148,9 @@ async function setup(): Promise<{ server: Server; key: CryptoKey }> {
     ],
     sent: [],
     belovedCalls: 0,
+    activity: [],
+    prefs: { share_activity: true, encouragements: true, encourage_hour: 19 },
+    seen: [],
   };
   return { server, key };
 }
@@ -189,6 +219,13 @@ test.describe('Beloved on every form factor', () => {
     await expect(home.getByTestId('beloved-counter')).toContainText('years');
     await expect(home.getByTestId('beloved-verse')).toContainText('patient and kind');
     await expect(home.getByTestId('beloved-latest-note')).toContainText('Thank you for the coffee');
+    // The day's tip and the one metadata-only visit signal, with no activity yet.
+    await expect(home.getByTestId('beloved-tip')).toBeVisible();
+    await expect(home.getByTestId('beloved-tip-link')).toBeVisible();
+    await expect(home.getByTestId('beloved-today-strip')).toHaveCount(0);
+    await expect.poll(() => server.seen.filter((s) => s.what === 'page').length).toBe(1);
+    await expect(home.getByTestId('beloved-heart-back-card')).toBeVisible();
+    await expect(home.getByTestId('beloved-heart-back')).toBeVisible();
     await check(page, info, run, 'beloved home', beloved);
 
     await home.getByTestId('beloved-heart').click();
@@ -265,6 +302,12 @@ test.describe('Beloved on every form factor', () => {
     await beloved.getByTestId('beloved-settings-open').click();
     const sheet = page.getByTestId('beloved-settings');
     await expect(sheet.getByTestId('beloved-wedding')).toHaveValue(WEDDING);
+    await sheet.getByTestId('beloved-share-activity').uncheck();
+    await expect.poll(() => server.prefs.share_activity).toBe(false);
+    await sheet.getByTestId('beloved-encouragements').uncheck();
+    await expect.poll(() => server.prefs.encouragements).toBe(false);
+    await sheet.getByTestId('beloved-encourage-hour').selectOption('8');
+    await expect.poll(() => server.prefs.encourage_hour).toBe(8);
     await sheet.getByTestId('beloved-first-date').fill('2014-02-14');
     await check(page, info, run, 'beloved details', sheet);
     await sheet.getByTestId('beloved-settings-save').click();
@@ -292,6 +335,45 @@ test.describe('Beloved on every form factor', () => {
       await expect(page.getByText(text)).toHaveCount(0);
     }
     expect(await page.locator('img[src^="blob:"]').count()).toBe(0);
+    done(run);
+  });
+
+  test('today strip, read markers and reading signals carry metadata only', async ({ page }, info) => {
+    const { server, key } = await setup();
+    server.activity = [
+      { who: 'robin', what: 'page', at: SEC },
+      { who: 'robin', what: 'note', at: SEC - 60 },
+    ];
+    server.records.push({ id: 'b'.repeat(32), kind: 'note', at: SEC - 3600, updated_at: SEC - 3600, by: 'parent', own: true,
+      by_name: 'Parent', sealed: await sealRecord(key, { b: 'note', text: 'A note I wrote earlier' }) });
+    const run = await open(page, server);
+
+    await page.getByTestId('private-beloved-open').click();
+    const beloved = page.getByTestId('beloved');
+    const home = beloved.getByTestId('beloved-home');
+    const strip = home.getByTestId('beloved-today-strip');
+    await expect(strip).toBeVisible();
+    await expect(strip).toContainText('Today with Robin');
+    await expect(strip.getByTestId('beloved-today-item')).toHaveCount(2);
+    await expect(strip).toContainText('opened Beloved');
+    await expect(strip).toContainText('read your love note');
+    await check(page, info, run, 'beloved today strip', beloved);
+
+    // A spouse's note is a preview until opened; the first opening signals once.
+    await beloved.getByTestId('beloved-tab-notes').click();
+    const notes = beloved.getByTestId('beloved-notes');
+    const spouseNote = notes.getByTestId('beloved-note').filter({ hasText: 'Thank you for the coffee' });
+    await expect(spouseNote.getByTestId('beloved-read-more')).toBeVisible();
+    await spouseNote.getByTestId('beloved-read-more').click();
+    await expect(spouseNote).toContainText('Thank you for the coffee');
+    await expect.poll(() => server.seen.filter((s) => s.what === 'note').length).toBe(1);
+    // Our own note shows "Read" from the activity entry that came after it.
+    const ownNote = notes.getByTestId('beloved-note').filter({ hasText: 'A note I wrote earlier' });
+    await expect(ownNote.getByTestId('beloved-read')).toHaveText('Read');
+    await check(page, info, run, 'beloved note read markers', beloved);
+
+    // No reading signal or activity entry ever reached the sealed-record traffic.
+    expect(server.sent.some((s) => s.path.includes('/seen') || s.path.includes('/activity') || s.path.includes('/prefs'))).toBe(false);
     done(run);
   });
 
@@ -422,7 +504,12 @@ test.describe('Beloved on every form factor', () => {
     await check(page, info, run, 'just us planned and reminder', beloved);
     type Synced = Array<{ id: number; at: number; title: string; body: string }>;
     const lastSync = async () => ((await page.evaluate(() => (window as unknown as { __synced: Synced[] }).__synced)).at(-1) ?? []);
-    await expect.poll(async () => (await lastSync()).filter((r) => r.body === 'A little reminder for the two of you.').length).toBe(2);
+    if (PRODUCTION_BUILD) {
+      // src/plugins/belovedReminders.ts reads the stand-in only in a dev build: the production build never calls it.
+      expect(await page.evaluate(() => (window as unknown as { __synced: Synced[] }).__synced)).toEqual([]);
+    } else {
+      await expect.poll(async () => (await lastSync()).filter((r) => r.body === 'A little reminder for the two of you.').length).toBe(2);
+    }
     // Every reminder the phone holds is generic: no tab, no idea, no note, no word that says what it is.
     const reminderText = JSON.stringify(await lastSync());
     for (const word of [/intima/i, /\bsex/i, /night/i, /together/i, /\bbed\b/i, /romanc/i, /candle/i, /hotel/i, /sitter/i, /fire/i, /just us/i]) {

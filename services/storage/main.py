@@ -6,6 +6,7 @@ import os
 import re
 import time
 from contextlib import asynccontextmanager
+from typing import Any
 
 import aiohttp
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Query, Response
@@ -30,6 +31,7 @@ from services.storage.indexer import (
 from services.storage.library_api import router as library_router
 from services.storage.models import (
     IndexScanRequest,
+    ProviderConfig,
     ProviderFetchRequest,
     ProviderListRequest,
     ProviderMirrorRequest,
@@ -38,7 +40,10 @@ from services.storage.models import (
 from services.storage.providers import build_provider
 
 log = logging.getLogger("storage")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
+# force: an import above already logged through the root logger, which configured it
+# at WARNING, so without it every INFO line here (crawl progress, "Indexed files 1-8")
+# was dropped and a crawl left nothing in the log but uvicorn's access lines.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s", force=True)
 
 
 async def _artifact_purge_loop() -> None:
@@ -63,10 +68,12 @@ async def lifespan(_app: FastAPI):
         # not mounted; artifact endpoints will report the real failure.
         log.warning("Artifact storage is unavailable: %s", exc)
     purge_task = asyncio.create_task(_artifact_purge_loop())
+    catalogue_task = asyncio.create_task(_calibre_catalogue_loop())
     try:
         yield
     finally:
         purge_task.cancel()
+        catalogue_task.cancel()
 
 
 from services.common.logging_utils import redact_access_log  # noqa: E402
@@ -185,6 +192,97 @@ async def sync_folder_to_rag(req: IndexScanRequest, background_tasks: Background
         "message": "Indexing started in background."
     }
 
+#: The RAG owner of the family's Calibre library. The library is one shelf for the
+#: whole household (one ``calibre_library_path`` setting), and ``/rag/search``
+#: returns a person's own rows plus ``default``'s. Filing the books under whoever
+#: crawled them hid them from everyone else: a crawl from the Knowledge Hub filed
+#: them under that person's Nextcloud login, and the scoped crawl after "Add book"
+#: (``library_api._index_folder``, no login in its settings) under ``admin``, so a
+#: household member's library held only the one book added through the page.
+SHARED_LIBRARY_OWNER = "default"
+
+#: Files extracted and synced together. Extracting a whole Calibre library before
+#: syncing any of it held every book's text in memory at once (thousands of books)
+#: and lost all of it to a single failure or restart; a group at a time keeps
+#: memory flat and every finished group stays indexed.
+_INDEX_GROUP_FILES = 8
+_SYNC_BATCH_CHUNKS = 25
+
+
+def _index_owner(req: IndexScanRequest) -> str:
+    if req.provider.kind == "calibre":
+        return SHARED_LIBRARY_OWNER
+    return (req.user_id or req.provider.settings.get("username") or "admin").lower()
+
+
+def _whole_library_scan(req: IndexScanRequest) -> bool:
+    """A Calibre scan of the library root (not one author folder after Add book)."""
+    scope = "/" + str(req.path or "/").strip("/")
+    library = "/" + str(req.provider.settings.get("library_path") or "").strip("/")
+    return req.recursive and scope in ("/", library)
+
+
+async def _drop_private_library_copies(client, collection_name: str) -> None:
+    """Remove copies of the shared library filed under one person's account.
+
+    Only after a complete whole-library crawl into ``SHARED_LIBRARY_OWNER``: until
+    then those copies are the only index some people have. A failed lookup leaves
+    them (a duplicate is recoverable, a missing library is not).
+    """
+    try:
+        listed = await client.get(
+            f"{RAG_SVC}/rag/owners",
+            params={"collection_name": collection_name},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=30.0, connect=5.0),
+        )
+        if listed.status != 200:
+            log.warning("Owner lookup for %s returned %s; private copies left", collection_name, listed.status)
+            return
+        owners = (await listed.json() or {}).get("owners") or {}
+    except Exception as e:
+        log.warning("Owner lookup for %s failed (%s); private copies left", collection_name, e)
+        return
+    for owner in sorted(o for o in owners if o != SHARED_LIBRARY_OWNER):
+        try:
+            resp = await client.post(
+                f"{RAG_SVC}/rag/purge/{collection_name}",
+                json={"user_id": owner, "filter": {}},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=60.0, connect=5.0),
+            )
+            log.info("Dropped %s's private copy of %s (%s rows): HTTP %s",
+                     owner, collection_name, owners.get(owner), resp.status)
+        except Exception as e:
+            log.warning("Dropping %s's private copy of %s failed: %s", owner, collection_name, e)
+
+
+#: RAG embeds a batch on the CPU; a batch of long book chunks can take minutes, and one
+#: slow batch used to stop a 4,000-book crawl at the 60 s limit (TimeoutError, 2026-11-23).
+_SYNC_TIMEOUT_S = 180.0
+_SYNC_ATTEMPTS = 3
+_SYNC_RETRY_WAIT_S = (5.0, 30.0)
+
+
+async def _sync_batch(client: Any, batch: list[dict[str, Any]], user_id: str, collection_name: str) -> Any:
+    """POST one batch to RAG, retrying a timeout or a dropped connection before giving up."""
+    for attempt in range(_SYNC_ATTEMPTS):
+        try:
+            return await client.post(
+                f"{RAG_SVC}/rag/sync/files",
+                json={"chunks": batch, "user_id": user_id, "collection_name": collection_name},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=_SYNC_TIMEOUT_S, connect=5.0),
+            )
+        except (TimeoutError, aiohttp.ClientConnectionError) as exc:
+            if attempt == _SYNC_ATTEMPTS - 1:
+                raise
+            wait = _SYNC_RETRY_WAIT_S[min(attempt, len(_SYNC_RETRY_WAIT_S) - 1)]
+            log.warning("RAG sync of %d chunks failed (%s); retrying in %.0f s", len(batch), type(exc).__name__, wait)
+            await asyncio.sleep(wait)
+    raise RuntimeError("unreachable")
+
+
 async def _run_full_index_task(req: IndexScanRequest):
     """Internal task for background indexing."""
     crawl_begin(req.provider.kind, req.path)
@@ -204,26 +302,15 @@ async def _run_full_index_task(req: IndexScanRequest):
         log.info(f"Scan complete. Found {len(entries)} raw entries.")
         items = build_content_index(entries)
 
-        # 2. Extract and chunk with checkpointing
-        crawl_phase("extracting", 0, len(items))
-        checkpoint = None if req.force else CheckpointManager(_checkpoint_path() or "")
-        chunks = await extract_and_chunk_contents(provider, items, checkpoint=checkpoint)
-        log.info(f"Extracted {len(chunks)} total chunks from {len(items)} files.")
-        crawl_phase("syncing", 0, len(chunks))
-
-        # 3. Sync to RAG in batches to avoid timeout on large payloads
-        user_id = (req.user_id or req.provider.settings.get("username") or "admin").lower()
-        import time
+        # force reads every file again, but still records what it indexed.
+        record = CheckpointManager(_checkpoint_path() or "")
+        checkpoint = None if req.force else record
+        user_id = _index_owner(req)
         session_id = str(int(time.time()))
         indexed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-        for c in chunks:
-            c["metadata"]["session_id"] = session_id
-            c["metadata"]["indexed_at"] = indexed_at
-
         collection_name = f"{req.provider.kind}_files"
-        BATCH_SIZE = 25
         total_synced = 0
+        total_chunks = 0
         # Every listed path counts as present, including files the checkpoint
         # skipped because they are unchanged and so produced no chunks.
         scanned_paths = {item.path for item in items}
@@ -236,43 +323,50 @@ async def _run_full_index_task(req: IndexScanRequest):
                     scope=req.path, recursive=req.recursive,
                 )
 
-                # 3.6. Sync to RAG in batches to avoid timeout on large payloads
-                for i in range(0, len(chunks), BATCH_SIZE):
-                    batch = chunks[i:i+BATCH_SIZE]
-                    batch_num = (i // BATCH_SIZE) + 1
-                    total_batches = (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE
-
-                    sync_payload = {
-                        "chunks": batch,
-                        "user_id": user_id,
-                        "collection_name": collection_name
-                    }
-
-                    resp = await client.post(
-                        f"{RAG_SVC}/rag/sync/files",
-                        json=sync_payload,
-                        headers={"X-Internal-Secret": INTERNAL_SECRET},
-                        timeout=aiohttp.ClientTimeout(total=60.0, connect=5.0),
+                # 2. Extract, chunk and sync a group of files at a time.
+                crawl_phase("extracting", 0, len(items))
+                for g in range(0, len(items), _INDEX_GROUP_FILES):
+                    group = items[g:g + _INDEX_GROUP_FILES]
+                    marks: list[tuple[str, str]] = []
+                    chunks = await extract_and_chunk_contents(
+                        provider, group, checkpoint=checkpoint, pending_marks=marks,
                     )
-                    if resp.status != 200:
-                        raise RuntimeError(
-                            f"RAG sync failed (batch {batch_num}/{total_batches}): {resp.status}"
-                        )
-                    total_synced += len(batch)
-                    crawl_phase("syncing", min(i + BATCH_SIZE, len(chunks)), len(chunks))
-                    log.info(f"RAG batch {batch_num}/{total_batches} synced: {len(batch)} chunks")
+                    crawl_phase("extracting", min(g + _INDEX_GROUP_FILES, len(items)), len(items))
+                    for c in chunks:
+                        c["metadata"]["session_id"] = session_id
+                        c["metadata"]["indexed_at"] = indexed_at
+                    total_chunks += len(chunks)
+                    for i in range(0, len(chunks), _SYNC_BATCH_CHUNKS):
+                        batch = chunks[i:i + _SYNC_BATCH_CHUNKS]
+                        resp = await _sync_batch(client, batch, user_id, collection_name)
+                        if resp.status != 200:
+                            raise RuntimeError(
+                                f"RAG sync failed (files {g + 1}-{g + len(group)} of {len(items)}): {resp.status}"
+                            )
+                        total_synced += len(batch)
+                        crawl_phase("syncing", total_synced, total_chunks)
+                    # Only now are this group's files in the index: a crawl stopped
+                    # before this point reads them again next time.
+                    if marks:
+                        for path, stamp in marks:
+                            record.mark_indexed(path, stamp)
+                        record.save()
+                    crawl_phase("indexing", min(g + _INDEX_GROUP_FILES, len(items)), len(items))
+                    log.info(f"Indexed files {g + 1}-{g + len(group)} of {len(items)}: {len(chunks)} chunks")
 
-                log.info(f"Background index complete for {user_id}. Synced {total_synced}/{len(chunks)} chunks.")
+                log.info(f"Background index complete for {user_id}. Synced {total_synced}/{total_chunks} chunks.")
+                if req.provider.kind == "calibre" and _whole_library_scan(req):
+                    await _drop_private_library_copies(client, collection_name)
             except aiohttp.ClientResponseError as e:
                 failure = f"RAG sync failed: HTTP {e.status} - {e.message}"
                 log.error(f"Failed to sync background index to RAG: HTTP {e.status} - {e.message}")
             except Exception as e:
-                failure = f"RAG sync failed: {type(e).__name__}: {e}"
-                log.error(f"Failed to sync background index to RAG: {type(e).__name__}: {e}")
+                failure = f"Index failed: {type(e).__name__}: {e}"
+                log.error(f"Background index stopped: {type(e).__name__}: {e}")
 
         crawl_end(
             files=len(items),
-            chunks=len(chunks),
+            chunks=total_chunks,
             synced=total_synced,
             **({"error": failure} if failure else {}),
         )
@@ -281,6 +375,74 @@ async def _run_full_index_task(req: IndexScanRequest):
         import traceback
         log.error(traceback.format_exc())
         crawl_end(error=f"{type(e).__name__}: {e}")
+
+def _catalogue_interval_s() -> float:
+    from services import config
+
+    return float(config.CALIBRE_INDEX_INTERVAL_S)
+
+
+#: Seconds after startup before the first catalogue check: Identity's settings
+#: (the library path among them) are resolved by then, and startup stays quick.
+_CATALOGUE_FIRST_CHECK_S = 60.0
+_CATALOGUE_PATH_WARNED = False
+
+
+async def _calibre_catalogue_tick(last_digest: str | None) -> str | None:
+    """Index the library's catalogue when ``metadata.db`` changed since ``last_digest``.
+
+    Returns the digest the index now matches (``last_digest`` when nothing ran or
+    the crawl failed, so the next tick tries again). A changed catalogue means a
+    book was added, removed or edited; the crawl's checkpoint skips every book
+    whose ``last_modified`` is unchanged, so only those books are read, and the
+    stale-path purge removes the cards of books that are gone. Nobody has to ask
+    for a reindex.
+    """
+    global _CATALOGUE_PATH_WARNED
+    from services import config
+
+    library = str(config.CALIBRE_LIBRARY_PATH or "").strip()
+    if not library:
+        if not _CATALOGUE_PATH_WARNED:
+            _CATALOGUE_PATH_WARNED = True
+            log.warning("calibre_library_path is not set: the library catalogue is not indexed "
+                        "automatically. Set it in Admin > LLM & Settings.")
+        return last_digest
+    if crawl_snapshot().get("active"):
+        return last_digest
+    req = IndexScanRequest(
+        provider=ProviderConfig(kind="calibre", settings={"library_path": library}),
+        path="/" + library.strip("/"), recursive=True,
+    )
+    provider = build_provider(req.provider)
+    await provider._load_catalog(refresh=True)  # type: ignore[attr-defined]
+    digest = getattr(provider, "_catalog_digest", None)
+    if digest is not None and digest == last_digest:
+        return last_digest
+    log.info("Library catalogue %s: indexing what changed", "is new" if last_digest is None else "changed")
+    await _run_full_index_task(req)
+    if crawl_snapshot().get("error"):
+        return last_digest
+    return digest
+
+
+async def _calibre_catalogue_loop() -> None:
+    """Keep the library's catalogue cards in the index: at startup, then on every change."""
+    interval = _catalogue_interval_s()
+    if interval <= 0:
+        log.info("CALIBRE_INDEX_INTERVAL_S is 0: the library catalogue is indexed only on request")
+        return
+    await asyncio.sleep(_CATALOGUE_FIRST_CHECK_S)
+    digest: str | None = None
+    while True:
+        try:
+            digest = await _calibre_catalogue_tick(digest)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("Library catalogue check failed: %s: %s", type(exc).__name__, exc)
+        await asyncio.sleep(interval)
+
 
 def _within_scope(path: str, scope: str, recursive: bool) -> bool:
     """Whether ``path`` is one a scan of ``scope`` would have listed.

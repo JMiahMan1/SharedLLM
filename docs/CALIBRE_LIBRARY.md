@@ -101,7 +101,7 @@ BibleVersion + BibleVerse + StudyNote rows in bible.db
 |---|---|---|
 | `StorageProvider.get_bytes(path)` | `services/storage/providers.py` | `get_content` decodes bytes as text, so a PDF or EPUB comes back as a string of replacement characters rather than an error, and anything reading it then works from confident mojibake. `get_bytes` returns the real bytes, and returns `None` for "this provider cannot give you bytes", which is a different answer from "the file was empty" |
 | `NextcloudStorageProvider.get_bytes` | `services/storage/providers_impl/nextcloud.py` | `NextCloudClient.get_file_bytes`, whose own docstring warns about `get_file_content` |
-| `CalibreStorageProvider.get_bytes` | `services/storage/providers_impl/calibre.py` | Returns the shelf entry's extracted text as UTF-8 bytes (the entry *is* a `.txt` document), so `/providers/fetch` works for callers like Raven's `fetch_text`; a book with no extracted text (PDF-only) returns `None`, keeping the honest "cannot read as bytes" refusal |
+| `CalibreStorageProvider.get_bytes` | `services/storage/providers_impl/calibre.py` | Returns the shelf entry's extracted text as UTF-8 bytes (the entry *is* a `.txt` document), so `/providers/fetch` works for callers like Raven's `fetch_text`; a PDF-only book returns its pages' text; a book with no extracted text (a scan with no text layer, a format with no reader) returns `None`, keeping the honest "cannot read as bytes" refusal |
 | `ProviderFetchRequest` | `services/storage/models.py` | `provider`, `path`, `max_bytes` |
 | `POST /providers/fetch` | `services/storage/main.py` | Returns `{"status":"SUCCESS","path","name","size","content_b64"}`, guarded by `X-Internal-Secret` |
 
@@ -175,14 +175,29 @@ Routes (storage, internal): `POST /calibre/books` (search, `tag`, `untagged`), `
 **Auto-fill before adding** (`services/storage/book_lookup.py`, `POST /calibre/books/inspect`, gateway
 `POST /api/library/books/inspect`, admins): Jarvis reads the file's own details (an EPUB's OPF: title,
 authors, subjects, description, ISBN, publisher, date, language, cover; a PDF's document info via
-`pypdf`), then asks Google Books and Open Library (by ISBN, else title and author) for what is
-missing, and falls back to a "Title - Author" file name. Each field comes from the first source that
+`pypdf`), then asks the book catalogues turned on in Settings > Accounts & Integrations (Google
+Books, with its API key; Open Library) in the order set there (by ISBN, else title and author) for
+what is missing, and falls back to a "Title - Author" file name. Each field comes from the first source that
 has it, and the form says which. Tags are suggested from the library's own tags that the subjects
 name, and the app's topics (fasting, prayer, lent, bible-study, early-church, health) when the
 title, subjects or description use their words (whole words: "breakfast" is not a fast). Every
 field stays editable and nothing is saved until "Add to the library". A catalogue cover is fetched
 only from the catalogues' own hosts, over HTTPS. Publisher, date, ISBN and language are written to
 Calibre's own tables.
+
+**Book catalogues are integrations** (`services/common/book_metadata.py`, docs/INTEGRATIONS.md >
+Google Books / Open Library). Storage asks identity (`/api/resolve`, cached a minute) for the
+requesting person's settings: their own, else the household's on the default user, else the
+defaults (Open Library on; Google Books off until it has a key). **The Google Books API key goes
+in Settings > Accounts & Integrations > Google Books**, never in `.env`: the
+`GOOGLE_BOOKS_API_KEY` variable is gone and is not read (there was no env-to-settings migration;
+a key put in `.env` for it does nothing). A catalogue that is off, or on without what it needs,
+is skipped and every reply says so (`catalogues.skipped`: "Google Books: turned on but no API key
+is set in Settings > Accounts & Integrations"); one that answers with an error (a refused key,
+429) is in `catalogues.errors` and the reply's message. Add a book shows which catalogues fill a
+book in (`GET /api/library/catalogues`, with each one's last answer), and the enrich reply has a
+`catalogues` summary for the whole run. When identity cannot be asked, no catalogue is asked and
+the reply says why.
 
 The audit lists duplicate copies (same title and author, keeping the readable, tagged one), other
 editions ("(Annotated)", "Revised edition"...; numbered volumes are never merged), records with no
@@ -196,10 +211,25 @@ library.
   not a book. Books are added and tagged through the librarian (above), never by writing files.
 - **Deleting books.** Jarvis can suggest what the family may not need (the audit) but never deletes;
   removing a book is done by a person in Calibre.
-- **PDF and DOCX text.** Only `EPUB`, `AZW3`, `MOBI` and `FB2` are extracted. A PDF-only book still
-  appears as a searchable metadata row rather than a failure, and nothing pretends its bytes are text.
-  (The Bible importer is the exception, because it has its own PDF reader (see
-  `services/bible/pdf_import.py`), and it refuses a PDF whose chapter counts do not match the canon.)
+- **DOCX and DJVU text.** `EPUB`, `AZW3`, `MOBI`, `FB2` and `PDF` are extracted. A book only in
+  another format still appears as a searchable metadata row rather than a failure, and nothing
+  pretends its bytes are text.
+
+## PDF books
+
+A book stored only as PDF is indexed by its text, through the same reader Nextcloud PDFs use
+(`services/storage/pdf_index.py` over `book_chapters.pdf_sections`):
+
+- **With bookmarks**, one section per chapter, labelled with the bookmark's title (so a search hit
+  cites "The Wilderness", not "chunk 412"). Pages before the first bookmark become one unnumbered
+  "Pages 1-N" section, so nothing is dropped.
+- **Without bookmarks**, one section per page, labelled "Page N".
+- **A scan with no text layer** keeps its metadata row, and the log says "is a PDF with no text
+  layer"; OCR it (`ocrmypdf`) to index its words. OcrRequest can read its pages meanwhile.
+- **Memory is bounded**: pages are extracted one at a time and reading stops at
+  `STORAGE_PDF_MAX_CHARS` characters per book (default 3,000,000, about 1,500 printed pages;
+  a provider's `pdf_max_chars` setting overrides it).
+- A book that has both EPUB and PDF is still read from the EPUB.
 - **Calibre-Web's `/cdb/cmd`.** That endpoint executes arbitrary `calibredb` commands, which is a
   shell on the library. Use `calibredb` deliberately, not by proxy.
 - **Annotations and reading progress.** The schema carries both tables; neither is read yet.

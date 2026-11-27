@@ -265,10 +265,25 @@ def test_direct_cast_puts_the_volume_back_after_the_clip():
 
 # -- /execute/announce ------------------------------------------------------------------------------
 
+class _RecordingSleep:
+    """An asyncio.sleep stand-in that returns at once and records (task, seconds)."""
+
+    def __init__(self):
+        self.calls: list = []
+
+    async def __call__(self, secs, *args, **kwargs):
+        self.calls.append((asyncio.current_task(), secs))
+
+
+_own_task_sleep = _RecordingSleep()
+
+
 async def test_execute_announce_waits_the_clips_real_length_not_ten_seconds():
     from services.execution.main import execute_announce
     from services.execution.schemas import AnnouncementRequest, UserContext
 
+    me = asyncio.current_task()
+    _own_task_sleep.calls.clear()
     ctx = UserContext(user="test", is_admin=True, ha_url="http://ha.local:8123", ha_token="t")
     req = AnnouncementRequest(user_context=ctx, entity_id="media_player.den_speaker", message="Hi", volume=0.5)
     playing = {"state": "playing", "attributes": {"friendly_name": "Den Speaker", "volume_level": 0.5}}
@@ -294,7 +309,7 @@ async def test_execute_announce_waits_the_clips_real_length_not_ten_seconds():
          patch("services.execution.main.ha_client.call_service", AsyncMock(return_value={"ok": True})), \
          patch("services.execution.main.ha_client.get_config", AsyncMock(return_value={"components": []})), \
          patch("services.execution.main.ha_client.get_logbook", AsyncMock(return_value=[])), \
-         patch("services.execution.main.asyncio.sleep", new_callable=AsyncMock) as slept, \
+         patch("services.execution.main.asyncio.sleep", new=_own_task_sleep), \
          patch("services.execution.main.text_to_speech", AsyncMock(return_value=wav(3.0))), \
          patch("services.execution.main.TEMP_AUDIO_CACHE", {}), \
          patch("services.execution.main.get_client", lambda: Client()), \
@@ -303,6 +318,8 @@ async def test_execute_announce_waits_the_clips_real_length_not_ten_seconds():
          patch("services.execution.announce_handlers.dispatch_announce", AsyncMock(return_value={"ok": True})), \
          patch("services.execution.main.get_public_host", return_value="192.0.2.205"):
         await execute_announce(req)
-    waits = [c.args[0] for c in slept.call_args_list]
+    # Only this announcement's own waits: a background loop another test left running in the
+    # same event loop sleeps through the same patched asyncio.sleep (10 s polls in CI).
+    waits = [secs for task, secs in _own_task_sleep.calls if task is me]
     assert pytest.approx(3.0 + announce_clips.RESTORE_MARGIN_S) in waits
     assert 10 not in waits

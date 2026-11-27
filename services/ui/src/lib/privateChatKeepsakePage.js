@@ -156,11 +156,23 @@
     const input = el('input', { type: 'password', id: 'keepsake-password', autocomplete: 'current-password', autocapitalize: 'off', spellcheck: 'false' });
     const error = el('p', { class: 'error', role: 'alert', id: 'keepsake-error', text: message || '' });
     const button = el('button', { type: 'submit', id: 'keepsake-open', text: 'Open' });
+    // The show/hide eye: it only ever shows what was typed into this box.
+    const eye = el('button', {
+      type: 'button', id: 'keepsake-password-toggle', class: 'eye', text: 'Show',
+      'aria-label': 'Show password', 'aria-pressed': 'false', 'aria-controls': 'keepsake-password',
+    });
+    const setShown = (shown) => {
+      input.type = shown ? 'text' : 'password';
+      eye.textContent = shown ? 'Hide' : 'Show';
+      eye.setAttribute('aria-label', shown ? 'Hide password' : 'Show password');
+      eye.setAttribute('aria-pressed', shown ? 'true' : 'false');
+    };
+    eye.addEventListener('click', () => setShown(input.type === 'password'));
     const form = el('form', { class: 'lock' }, [
       el('h1', { text: 'Private chat backup' }),
       el('p', { class: 'muted', text: 'Encrypted. Enter the chat password to read it on this device. Nothing is sent anywhere.' }),
       el('label', { for: 'keepsake-password', text: 'Chat password' }),
-      input,
+      el('div', { class: 'pwbox' }, [input, eye]),
       error,
       el('p', {}, [button]),
     ]);
@@ -171,6 +183,7 @@
       error.textContent = '';
       const password = input.value;
       input.value = '';
+      setShown(false);
       try {
         await show(await readKeepsake(await openBackup(backupBlob(), password)));
       } catch (e) {

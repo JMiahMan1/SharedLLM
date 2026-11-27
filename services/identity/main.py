@@ -32,8 +32,8 @@ from pydantic import Field as PydField
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from services.common import app_vetting, book_metadata, device_noun, ha_redirect, video_calls
 from services.common import concern_monitor as concern_levels
-from services.common import app_vetting, device_noun, ha_redirect, video_calls
 from services.common.http import get_client, get_client_insecure
 from services.common.screen_time import (
     LOCKED_SECTIONS,
@@ -51,15 +51,31 @@ from services.config import (
     IDENTITY_DATABASE_URL,
     INTERNAL_SECRET,
 )
-from services.identity import abuse_ch, audit, battery_alerts, device_archive, push, roles, voice
-from services.identity import music_assistant, sign_in_reset
+from services.identity import (
+    abuse_ch,
+    audit,
+    battery_alerts,
+    book_metadata_check,
+    device_archive,
+    hub_devices,
+    music_assistant,
+    nearby_settings,
+    new_voices,
+    onboarding,
+    profile_sharing,
+    prompt_seed,
+    push,
+    roles,
+    sign_in_reset,
+    voice,
+)
 from services.identity.crypto import decrypt, digest_candidates, digest_secret, encrypt
 from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
     DEVICE_KINDS,
     MOBILE_DEVICE_KINDS,
-    SELF_REGISTER_KINDS,
     NO_OPT_IN_EVENTS,
+    SELF_REGISTER_KINDS,
     APIKey,
     AuditEvent,
     CapabilityInventory,
@@ -75,6 +91,7 @@ from services.identity.models import (
     GuardRequest,
     GuardUnlockRequest,
     LinkedAccount,
+    PromptSeed,
     RavenMission,
     RecommendationLanes,
     Role,
@@ -85,11 +102,13 @@ from services.identity.models import (
     UserAvatarImage,
     UserCalendarSetting,
     UserCredentialShare,
+    UserProfileSharing,
     UserRole,
     UserThemeSetting,
     UserWeatherSetting,
     UserWidget,
     UserWorkspaceSession,
+    VoiceCandidate,
     VoicePendingEnrolment,
     VoiceSignature,
     WorkspaceChat,
@@ -228,6 +247,7 @@ SCHEMA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("user", "mass_url", "ALTER TABLE user ADD COLUMN mass_url VARCHAR"),
     ("user", "mass_token_enc", "ALTER TABLE user ADD COLUMN mass_token_enc VARCHAR"),
     ("user", "mass_user_id", "ALTER TABLE user ADD COLUMN mass_user_id VARCHAR"),
+    ("user", "mass_abs_provider_id", "ALTER TABLE user ADD COLUMN mass_abs_provider_id VARCHAR"),
     ("user", "skylight_enabled", "ALTER TABLE user ADD COLUMN skylight_enabled BOOLEAN NOT NULL DEFAULT 1"),
     ("user", "skylight_url", "ALTER TABLE user ADD COLUMN skylight_url VARCHAR"),
     ("user", "avatar", "ALTER TABLE user ADD COLUMN avatar VARCHAR"),
@@ -246,6 +266,8 @@ SCHEMA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("user", "voice_fingerprint", "ALTER TABLE user ADD COLUMN voice_fingerprint VARCHAR"),
     ("user", "preferred_tts_voice", "ALTER TABLE user ADD COLUMN preferred_tts_voice VARCHAR"),
     ("user", "malwarebazaar_key_enc", "ALTER TABLE user ADD COLUMN malwarebazaar_key_enc VARCHAR"),
+    ("user", "google_books_key_enc", "ALTER TABLE user ADD COLUMN google_books_key_enc VARCHAR"),
+    ("user", "book_metadata", "ALTER TABLE user ADD COLUMN book_metadata VARCHAR"),
     ("user", "is_test_account", "ALTER TABLE user ADD COLUMN is_test_account BOOLEAN NOT NULL DEFAULT 0"),
     ("apikey", "key_hash", "ALTER TABLE apikey ADD COLUMN key_hash VARCHAR"),
     ("apikey", "key_prefix", "ALTER TABLE apikey ADD COLUMN key_prefix VARCHAR"),
@@ -260,10 +282,18 @@ SCHEMA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("device", "agent_key_hash", "ALTER TABLE device ADD COLUMN agent_key_hash VARCHAR NOT NULL DEFAULT ''"),
     ("device", "agent_key_created_at", "ALTER TABLE device ADD COLUMN agent_key_created_at VARCHAR"),
     ("device", "archived_at", "ALTER TABLE device ADD COLUMN archived_at VARCHAR"),
+    ("device", "hardware_id", "ALTER TABLE device ADD COLUMN hardware_id VARCHAR"),
+    ("device", "hub_device_id", "ALTER TABLE device ADD COLUMN hub_device_id VARCHAR"),
+    ("device", "entity_ids", "ALTER TABLE device ADD COLUMN entity_ids VARCHAR NOT NULL DEFAULT '[]'"),
+    ("device", "room", "ALTER TABLE device ADD COLUMN room VARCHAR"),
+    ("device", "hub_area", "ALTER TABLE device ADD COLUMN hub_area VARCHAR"),
     ("useravatarimage", "original", "ALTER TABLE useravatarimage ADD COLUMN original BLOB"),
     ("useravatarimage", "original_mime", "ALTER TABLE useravatarimage ADD COLUMN original_mime VARCHAR"),
     ("useravatarimage", "crop", "ALTER TABLE useravatarimage ADD COLUMN crop VARCHAR"),
     ("deviceassignment", "revoked", "ALTER TABLE deviceassignment ADD COLUMN revoked BOOLEAN NOT NULL DEFAULT 0"),
+    # The app a child installed, as the phone described it: version, source, size, what it can
+    # reach, its signer and file hash. An install already holding an answer keeps an empty one.
+    ("guardrequest", "meta", "ALTER TABLE guardrequest ADD COLUMN meta VARCHAR NOT NULL DEFAULT ''"),
 )
 
 
@@ -381,8 +411,9 @@ SHARED_CREDENTIAL_SERVICES = (
 # Services whose system default user's credentials are the household default:
 # every user who has not set their own uses them, with no admin grant. Only
 # the abuse.ch Auth-Key app vetting looks app file hashes up with
-# (services/identity/abuse_ch.py): a lookup key, not a personal account.
-HOUSEHOLD_DEFAULT_SERVICES = (abuse_ch.SERVICE,)
+# (services/identity/abuse_ch.py) and the Google Books key the library looks
+# books up with (services/common/book_metadata.py): lookup keys, not personal accounts.
+HOUSEHOLD_DEFAULT_SERVICES = (abuse_ch.SERVICE, book_metadata.KEY_SERVICE)
 
 
 #: The identity a kiosk or voice satellite acts as when it names no person
@@ -480,6 +511,8 @@ def _own_service_creds(user: User, service: str) -> dict[str, str | None]:
         }
     if service == abuse_ch.SERVICE:
         return {abuse_ch.FIELD: _decrypt_field(user.malwarebazaar_key_enc)}
+    if service == book_metadata.KEY_SERVICE:
+        return {book_metadata.KEY_FIELD: _decrypt_field(user.google_books_key_enc)}
     raise ValueError(f"Unknown credential service: {service}")
 
 
@@ -509,6 +542,31 @@ def abuse_ch_status(session: Session, user: User) -> str:
         return "own"
     default_user = None if _is_system_default_user(user) else _system_default_user(session)
     return abuse_ch.status_for(None, default_user.malwarebazaar_key_enc if default_user else None)
+
+
+def book_metadata_for(session: Session, user: User) -> dict:
+    """The book catalogue integrations as they apply to ``user``, the Google Books key included.
+
+    Each choice is the user's own, else the system default user's (the household
+    default), else book_metadata's default; the key the same way, with no grant.
+    """
+    values, source = _resolve_household_default_creds(session, user, book_metadata.KEY_SERVICE)
+    default_user = None if _is_system_default_user(user) else _system_default_user(session)
+    return book_metadata.resolve(user.book_metadata, default_user.book_metadata if default_user else None,
+                                 key=values.get(book_metadata.KEY_FIELD), key_source=source)
+
+
+def _merge_book_metadata(user: User, update_data: dict) -> None:
+    """Turn a book_metadata update into the JSON stored on the row, merged over what is saved."""
+    if "book_metadata" not in update_data:
+        return
+    update = update_data.pop("book_metadata")
+    if update is None:
+        return
+    try:
+        user.book_metadata = book_metadata.clean_update(update, user.book_metadata)
+    except book_metadata.SettingsError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 def _check_abuse_ch_key(update_data: dict) -> None:
@@ -814,10 +872,13 @@ async def lifespan(app: FastAPI):
             session.commit()
     # Registered devices that stopped checking in are archived, and deleted a year later (device_archive.py).
     archive_task = asyncio.create_task(device_archive.run(engine), name="device-archive")
+    # HomeHub's voice satellites, speakers and TVs, for assigning to people (hub_devices.py).
+    hub_task = asyncio.create_task(hub_devices.run(engine), name="hub-devices")
     try:
         yield
     finally:
         archive_task.cancel()
+        hub_task.cancel()
 
 from services.common.logging_utils import redact_access_log  # noqa: E402
 
@@ -1040,6 +1101,54 @@ def admin_set_password(username: str, req: dict, request: Request, session: Sess
     _audit(request, session, "user.password_reset", user.username, changes=[{"field": "password", "change": "changed", "secret": True}])
     return {"status": "SUCCESS", "message": f"Password for @{username} updated"}
 
+
+@app.post("/api/admin/users/{username}/provision-accounts")
+def admin_provision_accounts(
+    username: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    admin_check: bool = Depends(require_admin_or_internal),
+):
+    """Trigger account provisioning for an existing user (admin only)."""
+    target = session.exec(select(User).where(User.username == username.lower())).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Get the admin user for credential lookup (system default user if internal auth)
+    admin_user = _system_default_user(session)
+
+    def _resolve_ma(session: Session, user: User):
+        granted = set(_granted_services(session, user.username))
+        return _resolve_music_assistant(session, user, granted, may_provision=True)
+
+    def _sync_ma_abs(session: Session, user: User):
+        return _sync_user_ma_audiobookshelf(session, user, best_effort=True, remove_if_unconfigured=False)
+
+    try:
+        provisioning_results = onboarding.provision_new_user_accounts(
+            session,
+            target,
+            admin=admin_user,
+            raw_password=None,  # No raw password available for existing users
+            resolve_ma_fn=_resolve_ma,
+            sync_ma_abs_fn=_sync_ma_abs,
+        )
+        # Audit account provisioning if any service ran (status != 'skipped')
+        ran_any = any(v.get("status") in ("created", "linked") for v in provisioning_results.values())
+        if ran_any:
+            changes = [
+                {"field": f"provisioning.{svc}", "change": "set", "to": result.get("status")}
+                for svc, result in provisioning_results.items()
+                if result.get("status") in ("created", "linked")
+            ]
+            _audit(request, session, "user.accounts_provisioned", target.username, actor=admin_user, changes=changes)
+    except Exception as exc:
+        log.warning(f"[onboarding] Unexpected error during account provisioning for {target.username}: {exc}")
+        provisioning_results = {"error": {"status": "error", "detail": str(exc)}}
+
+    return {"username": target.username, "services": provisioning_results}
+
+
 def require_api_key(authorization: str = Header(None), session: Session = Depends(get_session)) -> User:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing API Key")
@@ -1064,6 +1173,14 @@ def require_api_key(authorization: str = Header(None), session: Session = Depend
 
 # Push topics, notification preferences, UnifiedPush (docs/PUSH.md)
 app.include_router(push.build_router(get_session, require_api_key, require_internal))
+
+# Settings > Nearby & offline: the Bluetooth LE parts a person's phones run (a minor's set by their parents)
+app.include_router(nearby_settings.build_router(
+    get_session, require_api_key, lambda viewer, subject: _may_manage_screen_time(viewer, subject),
+))
+
+# Profile stats: the areas the family may see, and the admin's usage read (docs/PROFILE_STATS.md)
+app.include_router(profile_sharing.build_router(get_session, require_api_key, require_internal))
 
 
 def _require_admin_user(user: User = Depends(require_api_key)) -> User:
@@ -1139,6 +1256,20 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             log.info(f"[resolve] Resolved by voice_id={req.voice_id}: user={user.username}")
         else:
             log.warning(f"[resolve] No user found for voice_id={req.voice_id}")
+
+    # A voice satellite (or another shared hub device) a spoken request came
+    # from, when no voice was recognised: the person an admin assigned it to
+    # (hub_devices.py). A shared or unknown satellite says nothing, and the
+    # request goes on to the default user. A device stands in for a person it
+    # cannot prove is speaking, so it never carries administrator powers.
+    by_device = False
+    if not user and req.voice_device:
+        owner = hub_devices.owner_for(session, req.voice_device)
+        if owner and owner.get("username"):
+            user = session.exec(select(User).where(User.username == owner["username"])).first()
+            by_device = user is not None
+            if by_device:
+                log.info(f"[resolve] Resolved by voice device {owner['device_key']}: user={owner['username']}")
 
     device_known = False
     if not user and req.device_id is not None:
@@ -1263,7 +1394,9 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
     return ResolvedCredentials(
         user=HOUSEHOLD_IDENTITY if household else user.username,
         id=None if household else user.id,
-        is_admin=False if household else user.is_admin,
+        is_admin=False if (household or by_device) else user.is_admin,
+        is_minor=False if household else user.family_role in roles.MINOR_FAMILY_ROLES,
+        identified_by="device" if by_device else None,
         api_key=None if household else (decrypt(user.api_key_enc) if user.api_key_enc else req.api_key),
         nextcloud_url=nextcloud["nextcloud_url"],
         nextcloud_user=nextcloud["nextcloud_user"],
@@ -1309,6 +1442,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             decrypt(user.huggingface_token_enc) if user.huggingface_token_enc else None
         ),
         malwarebazaar_key=household_default[abuse_ch.SERVICE][abuse_ch.FIELD],
+        book_metadata=book_metadata_for(session, user),
         skylight_url=skylight_user.skylight_url if skylight_user else None,
         skylight_email=(skylight_user.skylight_email if skylight_user else None) or user.username,
         skylight_pass=(
@@ -1397,6 +1531,7 @@ def get_me(user: User = Depends(require_api_key), session: Session = Depends(get
     me = _user_read(session, user)
     me.skylight_status = skylight_status(session, user)
     me.abuse_ch_status = abuse_ch_status(session, user)
+    me.book_metadata_status = book_metadata.public(book_metadata_for(session, user))
     return me
 
 
@@ -1649,9 +1784,13 @@ async def _voice_signature_of(file: UploadFile) -> dict:
 
 
 def _voice_profiles(session: Session) -> list[dict]:
-    names = {u.username: (u.display_name or u.username) for u in session.exec(select(User)).all()}
+    names = {
+        u.username: (u.display_name or u.username, getattr(u, "family_role", None))
+        for u in session.exec(select(User)).all()
+    }
     return [
-        {"username": row.username, "name": names[row.username], "samples": voice.load_samples(row.samples)}
+        {"username": row.username, "name": names[row.username][0], "role": names[row.username][1],
+         "samples": voice.load_samples(row.samples)}
         for row in session.exec(select(VoiceSignature).where(VoiceSignature.model == voice.MODEL)).all()
         if row.username in names
     ]
@@ -1741,8 +1880,9 @@ def approve_pending_voice(
                     "Discard them, or erase your profile first if it was not you."
                 ),
             )
-    added = pending[:max(0, voice.MAX_SAMPLES - len(existing))]
-    samples = existing + added
+    enrolled = [x for x in existing if x.get("source") != voice.AUTO_SOURCE]
+    added = pending[:max(0, voice.MAX_SAMPLES - len(enrolled))]
+    samples = voice.trim(existing + added)
     if profile is None:
         profile = VoiceSignature(username=user.username, model=voice.MODEL)
     profile.model = voice.MODEL
@@ -1809,9 +1949,10 @@ async def enroll_voice(
     samples.append({
         "embedding": signature["embedding"],
         "speech_seconds": signature.get("speech_seconds"),
+        "snr_db": signature.get("snr_db"),
         "recorded_at": datetime.now(UTC).isoformat(),
     })
-    samples = samples[-voice.MAX_SAMPLES:]
+    samples = voice.trim(samples)
     if row is None:
         row = VoiceSignature(username=user.username, model=voice.MODEL)
     row.model = voice.MODEL
@@ -1824,7 +1965,8 @@ async def enroll_voice(
     _audit(request, session, "user.voice_enroll", user.username, actor=user,
            changes=[{"field": "voice_samples", "change": str(len(samples))}])
     log.info(f"[voice] {user.username} enrolled sample {len(samples)} ({signature.get('speech_seconds')}s of speech)")
-    return {"status": "SUCCESS", "speech_seconds": signature.get("speech_seconds"), **_voice_status(row)}
+    return {"status": "SUCCESS", "speech_seconds": signature.get("speech_seconds"), "snr_db": signature.get("snr_db"),
+            **_voice_status(row)}
 
 
 @app.delete("/api/users/me/voice")
@@ -1861,12 +2003,21 @@ async def check_my_voice(
     if not any(p["username"] == user.username and len(p["samples"]) >= voice.MIN_SAMPLES for p in profiles):
         raise HTTPException(status_code=409, detail=f"Record at least {voice.MIN_SAMPLES} samples before testing.")
     signature = await _voice_signature_of(file)
-    result = voice.decide(voice.rank(signature["embedding"], profiles))
+    calibration = _voice_calibration(session, profiles)
+    result = voice.decide(
+        voice.rank(signature["embedding"], profiles),
+        calibration["threshold"],
+        calibration["margin"],
+        calibration.get("relative"),
+    )
     return {**result, "is_me": result["matched_username"] == user.username}
 
 
 class VoiceIdentifyRequest(BaseModel):
     embedding: list[float]
+    #: The probe's own windows, when the caller kept them: a short or quiet command
+    #: is one or two windows, and the mean of them is what scores badly.
+    partials: list[list[float]] | None = None
     model: str = voice.MODEL
     threshold: float | None = None
 
@@ -1874,6 +2025,7 @@ class VoiceIdentifyRequest(BaseModel):
 class VoiceLearnRequest(BaseModel):
     username: str
     embedding: list[float]
+    partials: list[list[float]] | None = None
     speech_seconds: float | None = None
     model: str = voice.MODEL
 
@@ -1910,11 +2062,12 @@ def learn_voice(request: Request, req: VoiceLearnRequest, session: Session = Dep
         return {"status": "SKIPPED", "reason": "already known", **_voice_status(row)}
     samples.append({
         "embedding": embedding,
+        "partials": voice.valid_partials(req.partials),
         "speech_seconds": req.speech_seconds,
         "recorded_at": datetime.now(UTC).isoformat(),
         "source": "learned",
     })
-    samples = samples[-voice.MAX_SAMPLES:]
+    samples = voice.trim(samples)
     row.model = voice.MODEL
     row.samples = json.dumps(samples)
     row.updated_at = datetime.now(UTC)
@@ -1991,7 +2144,7 @@ def enroll_voice_from_satellite(request: Request, req: VoiceEnrollRequest, sessi
                 status_code=422,
                 detail=f"That take does not sound like {against} (similarity {score:.2f}).",
             )
-        samples = [*samples, take][-voice.MAX_SAMPLES:]
+        samples = voice.trim([*samples, take])
         row.model = voice.MODEL
         row.samples = json.dumps(samples)
         row.updated_at = datetime.now(UTC)
@@ -2037,30 +2190,86 @@ def enroll_voice_from_satellite(request: Request, req: VoiceEnrollRequest, sessi
 
 @app.get("/api/internal/satellite-owner", dependencies=[Depends(require_internal)])
 def internal_satellite_owner(entity_id: str, session: Session = Depends(get_session)):
-    """Internal: the one person a voice satellite is assigned to, if exactly one.
+    """Internal: the one person a voice satellite is assigned to, if any.
 
-    ``owners`` says how many people share it: 0 (unassigned) and more than
-    one both leave ``username`` empty, because a teaching session must know
-    whose voice it is learning.
+    The assignment is the satellite's hub device row (hub_devices.py), set in
+    Admin, Users & Devices. ``owners`` is 1 when a person is assigned and 0
+    when it is shared or unknown. (It used to read ``DeviceAssignment``, which
+    is who may *control* an entity: every discovered entity is granted to the
+    default user there, so a satellite looked "assigned" to the default user.)
     """
-    rows = session.exec(
-        select(DeviceAssignment).where(
-            DeviceAssignment.device_id == entity_id.strip(),
-            DeviceAssignment.revoked == False,  # noqa: E712
-        )
-    ).all()
-    owners = {r.user_id for r in rows}
-    person = session.get(User, next(iter(owners))) if len(owners) == 1 else None
+    owner = hub_devices.owner_for(session, entity_id)
+    person = owner.get("username") if owner else None
     return {
-        "username": person.username if person else None,
-        "name": (person.display_name or person.username) if person else None,
-        "owners": len(owners),
+        "username": person,
+        "name": owner.get("name") if person else None,
+        "owners": 1 if person else 0,
+        "device_key": owner.get("device_key") if owner else None,
+        "room": owner.get("room") if owner else None,
+        "known": owner is not None,
     }
+
+
+@app.get("/api/internal/person-devices", dependencies=[Depends(require_internal)])
+def internal_person_devices(person: str, session: Session = Depends(get_session)):
+    """Internal: a family member, by the name someone said, and the hub devices assigned to them.
+
+    Execution announces "to <person>" on these (hub_devices.person_devices). 404
+    when the name is no one in the household.
+    """
+    found = hub_devices.person_devices(session, person)
+    if found is None:
+        raise HTTPException(status_code=404, detail="No one in the household by that name.")
+    return found
+
+
+CALIBRATION_SETTING = "voice_calibration"
+_calibration_cache: dict[str, Any] = {}
+
+
+def _voice_calibration(session: Session, profiles: list[dict] | None = None) -> dict:
+    """The household's calibrated threshold and margin (voice.calibrate).
+
+    Made again, and stored in ``GlobalSetting`` for the admin page, whenever a
+    profile has changed since the last one; otherwise read from memory.
+    """
+    profiles = _voice_profiles(session) if profiles is None else profiles
+    key = voice.profiles_key(profiles)
+    cached = _calibration_cache.get("value")
+    if voice.calibration_is_current(cached, key):
+        return cached
+    row = session.exec(select(GlobalSetting).where(GlobalSetting.key == CALIBRATION_SETTING)).first()
+    stored = None
+    if row is not None:
+        try:
+            stored = json.loads(row.value or "{}")
+        except ValueError:
+            stored = None
+    if voice.calibration_is_current(stored, key):
+        _calibration_cache["value"] = stored
+        return stored
+    result = {**voice.calibrate(profiles), "calibrated_at": datetime.now(UTC).isoformat()}
+    if row is None:
+        row = GlobalSetting(key=CALIBRATION_SETTING, value="{}",
+                            description="Voice recognition threshold and margin, calibrated on the enrolled voices")
+    row.value = json.dumps(result)
+    session.add(row)
+    session.commit()
+    _calibration_cache["value"] = result
+    log.info(
+        f"[voice] calibrated on {result['people']} enrolled voice(s): threshold {result['threshold']}, "
+        f"margin {result['margin']} ({result['status']})"
+    )
+    return result
 
 
 @app.post("/api/voice/identify", dependencies=[Depends(require_internal)])
 def identify_voice(req: VoiceIdentifyRequest, session: Session = Depends(get_session)):
-    """Which enrolled family member a signature belongs to (internal)."""
+    """Which enrolled family member a signature belongs to (internal).
+
+    The threshold and margin are the household's calibrated ones
+    (``_voice_calibration``) unless the caller names a threshold.
+    """
     if req.model != voice.MODEL:
         raise HTTPException(status_code=422, detail=f"Signatures are {voice.MODEL}, not {req.model}.")
     try:
@@ -2069,10 +2278,375 @@ def identify_voice(req: VoiceIdentifyRequest, session: Session = Depends(get_ses
         raise HTTPException(status_code=422, detail=str(e)) from None
     if req.threshold is not None and not 0.0 < req.threshold <= 1.0:
         raise HTTPException(status_code=422, detail="threshold must be in (0, 1].")
-    candidates = voice.rank(embedding, _voice_profiles(session))
+    profiles = _voice_profiles(session)
+    candidates = voice.rank(embedding, profiles, voice.valid_partials(req.partials))
     if not candidates:
         raise HTTPException(status_code=404, detail="Nobody has enrolled a voice yet.")
-    return voice.decide(candidates, req.threshold)
+    calibration = _voice_calibration(session, profiles)
+    threshold = req.threshold if req.threshold is not None else calibration["threshold"]
+    return {
+        **voice.decide(candidates, threshold, calibration["margin"], calibration.get("relative")),
+        "calibration": calibration["status"],
+    }
+
+
+class VoiceCandidateRequest(BaseModel):
+    #: The hub entity the command was spoken at; identity looks up whom it is assigned to.
+    satellite: str
+    embedding: list[float]
+    speech_seconds: float | None = None
+    model: str = voice.MODEL
+
+
+@app.post("/api/voice/candidate", dependencies=[Depends(require_internal)])
+def offer_voice_candidate(request: Request, req: VoiceCandidateRequest, session: Session = Depends(get_session)):
+    """A command heard at a satellite assigned to one person that was not
+    recognised: kept as a candidate sample of their voice for an admin to review
+    (internal; the gateway offers it).
+
+    Identity decides who it would belong to from the satellite's own assignment,
+    never from the caller. It is kept only when it passes ``voice.candidate_gate``
+    (enough speech, close to that person's profile, nobody else closer) and is
+    not a near-duplicate of one already waiting; at most ``voice.MAX_CANDIDATES``
+    wait per person, the oldest going first. Nothing touches the profile until an
+    admin approves it.
+    """
+    if req.model != voice.MODEL:
+        raise HTTPException(status_code=422, detail=f"Signatures are {voice.MODEL}, not {req.model}.")
+    try:
+        embedding = voice.valid_embedding(req.embedding)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    device = hub_devices.owner_for(session, req.satellite)
+    username = device.get("username") if device else None
+    if not username:
+        return {"status": "SKIPPED", "reason": "the satellite is not assigned to one person"}
+    ok, why, ranked = voice.candidate_gate(embedding, username, _voice_profiles(session), req.speech_seconds)
+    if not ok:
+        return {"status": "SKIPPED", "reason": why}
+    waiting = session.exec(
+        select(VoiceCandidate).where(VoiceCandidate.username == username).order_by(VoiceCandidate.created_at)  # type: ignore[arg-type]
+    ).all()
+    for row in waiting:
+        try:
+            if voice.cosine(embedding, json.loads(row.embedding)) >= voice.DUPLICATE_SAMPLE:
+                return {"status": "SKIPPED", "reason": "already waiting"}
+        except (ValueError, TypeError):
+            continue
+    for row in waiting[: max(0, len(waiting) - voice.MAX_CANDIDATES + 1)]:
+        session.delete(row)
+    mine = next(c for c in ranked if c["username"] == username)
+    others = [c for c in ranked if c["username"] != username]
+    candidate = VoiceCandidate(
+        username=username, model=voice.MODEL, embedding=json.dumps(embedding),
+        speech_seconds=req.speech_seconds, score=mine["score"],
+        runner_up=others[0]["score"] if others else None, satellite=req.satellite.strip()[:120],
+    )
+    session.add(candidate)
+    session.commit()
+    _audit(request, session, "user.voice_candidate", username,
+           note=f"candidate sample from {device.get('label') or req.satellite} (score {mine['score']})")
+    log.info(f"[voice] candidate sample for {username} from {device.get('device_key')} (score {mine['score']}, "
+             f"{req.speech_seconds}s of speech)")
+    return {"status": "PENDING", "id": candidate.id, "score": mine["score"]}
+
+
+_new_voice_redis: Any = None
+
+
+def _voice_redis() -> Any:
+    """Redis for the anonymous new-voice clusters (``new_voices``); made once, short timeouts."""
+    global _new_voice_redis
+    if _new_voice_redis is None:
+        import redis as _redis_sync
+
+        from services.config import REDIS_URL as _REDIS_URL
+
+        _new_voice_redis = _redis_sync.from_url(
+            _REDIS_URL, decode_responses=True, socket_timeout=1.0, socket_connect_timeout=1.0
+        )
+    return _new_voice_redis
+
+
+class NewVoiceRequest(BaseModel):
+    #: The hub entity the command was spoken at.
+    satellite: str
+    embedding: list[float]
+    speech_seconds: float | None = None
+    model: str = voice.MODEL
+
+
+@app.post("/api/voice/new_voice", dependencies=[Depends(require_internal)])
+def heard_new_voice(req: NewVoiceRequest, session: Session = Depends(get_session)):
+    """A command whose voice sounds like nobody enrolled (internal; the gateway asks).
+
+    Identity checks that against its own profiles (``voice.new_voice_gate``), then
+    counts it in an anonymous cluster for the satellite (``new_voices``, Redis, a
+    week) and says whether to invite the speaker to be learned: at most once a day
+    per voice and satellite. ``learn_here`` is true when "learn my voice" would work
+    at this satellite (it is assigned to one person who has no voice profile yet).
+    Nothing here makes or changes a profile; no signature is returned or logged.
+    """
+    if req.model != voice.MODEL:
+        raise HTTPException(status_code=422, detail=f"Signatures are {voice.MODEL}, not {req.model}.")
+    try:
+        embedding = voice.valid_embedding(req.embedding)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    satellite = req.satellite.strip()[:120]
+    if not satellite:
+        raise HTTPException(status_code=422, detail="satellite is required")
+    profiles = _voice_profiles(session)
+    calibration = _voice_calibration(session, profiles)
+    ok, why, best = voice.new_voice_gate(embedding, profiles, calibration["threshold"], req.speech_seconds)
+    if not ok:
+        return {"status": "SKIPPED", "reason": why, "new_voice": False, "ask": False}
+    device = hub_devices.owner_for(session, satellite)
+    device_key = (device or {}).get("device_key") or satellite
+    label = (device or {}).get("label") or None
+    try:
+        seen = new_voices.heard(_voice_redis(), device_key, label, embedding)
+    except Exception as e:  # the clusters are a courtesy: no Redis means no invitation, never an error
+        log.warning(f"[voice] new voice at {device_key} not counted: {type(e).__name__}")
+        return {"status": "SKIPPED", "reason": "the new-voice store is unavailable", "new_voice": True, "ask": False}
+    owner = (device or {}).get("username")
+    enrolled = {p["username"] for p in profiles if len(p["samples"]) >= voice.MIN_SAMPLES}
+    log.info(f"[voice] new voice at {device_key}: heard {seen['visits_week']} time(s) this week"
+             f"{' (first time)' if seen['new'] else ''}; best score {best}; "
+             f"{'inviting it' if seen['ask'] else 'already invited today'}")
+    return {
+        "status": "NEW_VOICE",
+        "new_voice": True,
+        "ask": seen["ask"],
+        "visits_week": seen["visits_week"],
+        "learn_here": bool(owner and owner not in enrolled),
+    }
+
+
+def _require_voice_admin(caller: User, session: Session) -> None:
+    if not roles.has_permission(session, caller, "devices.assign"):
+        raise HTTPException(status_code=403, detail="Only an admin can manage voice recognition")
+
+
+def _candidate_read(row: VoiceCandidate, names: dict[str, str]) -> dict:
+    return {
+        "id": row.id,
+        "username": row.username,
+        "name": names.get(row.username, row.username),
+        "score": row.score,
+        "runner_up": row.runner_up,
+        "speech_seconds": row.speech_seconds,
+        "satellite": row.satellite,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+@app.get("/api/admin/voice")
+def admin_voice_overview(session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Admin: who is enrolled (counts only), the calibration, and candidates to review."""
+    _require_voice_admin(caller, session)
+    profiles = _voice_profiles(session)
+    calibration = _voice_calibration(session, profiles)
+    users = session.exec(select(User)).all()
+    names = {u.username: (u.display_name or u.username) for u in users}
+    by_user = {p["username"]: p for p in profiles}
+    people = []
+    for u in users:
+        if u.is_system_default or getattr(u, "is_test_account", False):
+            continue
+        samples = by_user.get(u.username, {}).get("samples", [])
+        people.append({
+            "username": u.username,
+            "name": names[u.username],
+            "family_role": getattr(u, "family_role", None),
+            "samples": len(samples),
+            "auto_samples": sum(1 for x in samples if x.get("source") == voice.AUTO_SOURCE),
+            "satellite_samples": sum(1 for x in samples if x.get("source") in ("satellite", "learned")),
+            "enrolled": len(samples) >= voice.MIN_SAMPLES,
+            "consistency": voice.consistency(samples),
+        })
+    candidates = session.exec(select(VoiceCandidate).order_by(VoiceCandidate.created_at.desc())).all()  # type: ignore[attr-defined]
+    try:
+        unknown = new_voices.overview(_voice_redis())
+    except Exception as e:  # counts only, and optional
+        log.warning(f"[voice] new voices could not be read: {type(e).__name__}")
+        unknown = []
+    return {
+        "calibration": calibration,
+        "min_samples": voice.MIN_SAMPLES,
+        "people": sorted(people, key=lambda p: (not p["enrolled"], p["name"].lower())),
+        "candidates": [_candidate_read(c, names) for c in candidates],
+        "new_voices": [
+            {**v, "last_heard": datetime.fromtimestamp(v["last_heard"], UTC).isoformat()} for v in unknown
+        ],
+    }
+
+
+@app.delete("/api/admin/voice/new_voices/{cluster_id}")
+def admin_forget_new_voice(
+    cluster_id: str, device: str = Query(...), session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Admin: stop mentioning one unknown voice (its counts are dropped; it was never a profile)."""
+    _require_voice_admin(caller, session)
+    try:
+        gone = new_voices.forget(_voice_redis(), device, cluster_id)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"The new-voice store is unavailable: {type(e).__name__}") from None
+    if not gone:
+        raise HTTPException(status_code=404, detail="That voice is no longer listed")
+    return {"status": "SUCCESS"}
+
+
+@app.post("/api/admin/voice/calibrate")
+def admin_voice_calibrate(session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Admin: calibrate again now, from the enrolled voices as they are."""
+    _require_voice_admin(caller, session)
+    _calibration_cache.clear()
+    row = session.exec(select(GlobalSetting).where(GlobalSetting.key == CALIBRATION_SETTING)).first()
+    if row is not None:
+        row.value = "{}"
+        session.add(row)
+        session.commit()
+    return _voice_calibration(session)
+
+
+@app.post("/api/admin/voice/candidates/{candidate_id}")
+def admin_approve_voice_candidate(
+    candidate_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Admin: add a candidate to its person's profile as an auto sample.
+
+    Auto samples have their own cap (``voice.MAX_AUTO_SAMPLES``) and never
+    displace a sample the person recorded.
+    """
+    _require_voice_admin(caller, session)
+    row = session.get(VoiceCandidate, candidate_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such candidate sample.")
+    profile = session.get(VoiceSignature, row.username)
+    samples = voice.load_samples(profile.samples) if profile and profile.model == voice.MODEL else []
+    if len(samples) < voice.MIN_SAMPLES:
+        raise HTTPException(status_code=409, detail="That person no longer has an enrolled voice.")
+    samples = voice.trim([*samples, {
+        "embedding": json.loads(row.embedding),
+        "speech_seconds": row.speech_seconds,
+        "recorded_at": row.created_at.isoformat(),
+        "source": voice.AUTO_SOURCE,
+        "satellite": row.satellite,
+    }])
+    profile.samples = json.dumps(samples)
+    profile.updated_at = datetime.now(UTC)
+    session.add(profile)
+    person = session.exec(select(User).where(User.username == row.username)).first()
+    if person is not None:
+        person.voice_fingerprint = voice.fingerprint(samples)
+        session.add(person)
+    username = row.username
+    session.delete(row)
+    session.commit()
+    _audit(request, session, "user.voice_candidate_approve", username, actor=caller,
+           changes=[{"field": "voice_samples", "change": str(len(samples))}])
+    return {"status": "SUCCESS", "samples": len(samples)}
+
+
+@app.delete("/api/admin/voice/candidates/{candidate_id}")
+def admin_reject_voice_candidate(
+    candidate_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Admin: reject (delete) a candidate sample."""
+    _require_voice_admin(caller, session)
+    row = session.get(VoiceCandidate, candidate_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such candidate sample.")
+    username = row.username
+    session.delete(row)
+    session.commit()
+    _audit(request, session, "user.voice_candidate_reject", username, actor=caller)
+    return {"status": "SUCCESS"}
+
+
+@app.delete("/api/admin/voice/{username}/auto")
+def admin_clear_auto_samples(
+    username: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Admin: remove every auto-added sample from a person's profile (enrolled ones stay)."""
+    _require_voice_admin(caller, session)
+    profile = session.get(VoiceSignature, username.strip().lower())
+    if profile is None:
+        raise HTTPException(status_code=404, detail="That person has no voice profile.")
+    samples = [x for x in voice.load_samples(profile.samples) if x.get("source") != voice.AUTO_SOURCE]
+    profile.samples = json.dumps(samples)
+    profile.updated_at = datetime.now(UTC)
+    session.add(profile)
+    person = session.exec(select(User).where(User.username == profile.username)).first()
+    if person is not None:
+        person.voice_fingerprint = voice.fingerprint(samples) if len(samples) >= voice.MIN_SAMPLES else None
+        session.add(person)
+    session.commit()
+    _audit(request, session, "user.voice_auto_clear", profile.username, actor=caller)
+    return {"status": "SUCCESS", "samples": len(samples)}
+
+
+# --- Shared hub devices (hub_devices.py) ------------------------------------------------
+
+
+@app.get("/api/admin/hub-devices")
+def admin_hub_devices(session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Admin: HomeHub's voice satellites, speakers and TVs, with whom each is assigned to."""
+    if not roles.has_permission(session, caller, "devices.assign"):
+        raise HTTPException(status_code=403, detail="Only an admin can assign shared devices")
+    return {"devices": hub_devices.listing(session)}
+
+
+@app.post("/api/admin/hub-devices/refresh")
+async def admin_hub_devices_refresh(session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Admin: read HomeHub's devices now instead of waiting for the next sync."""
+    if not roles.has_permission(session, caller, "devices.assign"):
+        raise HTTPException(status_code=403, detail="Only an admin can assign shared devices")
+    try:
+        devices = await asyncio.to_thread(hub_devices.fetch_from_hub)
+    except hub_devices.HubDeviceError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from None
+    result = hub_devices.sync(session, devices)
+    return {**result, "devices": hub_devices.listing(session)}
+
+
+@app.patch("/api/admin/hub-devices/{device_key}")
+async def admin_hub_device_assign(
+    device_key: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Admin: assign a shared device to a person (``owner_username``; null is
+    shared) and/or give it a ``room`` (null clears it)."""
+    if not roles.has_permission(session, caller, "devices.assign"):
+        raise HTTPException(status_code=403, detail="Only an admin can assign shared devices")
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict) or not ({"owner_username", "room"} & set(body)):
+        raise HTTPException(status_code=422, detail="Send owner_username and/or room.")
+    try:
+        row, changes = hub_devices.assign(session, device_key, body)
+    except hub_devices.HubDeviceError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from None
+    if changes:
+        _audit(request, session, "device.hub_assign", row.owner_username, actor=caller, changes=changes,
+               note=row.device_key)
+    names = {u.username: (u.display_name or u.username) for u in session.exec(select(User)).all()}
+    return hub_devices.read(row, names)
 
 
 @app.get("/api/voice/profiles", dependencies=[Depends(require_internal)])
@@ -2177,12 +2751,80 @@ def _apply_user_update(user: User, update_data: dict, clear_fields: list[str] | 
         value = _coerce_profile_value(key, value)
         if value is None and key != "display_name":
             continue  # blank: unchanged (use clear_fields to erase)
+        if isinstance(value, str) and not value.strip() and key != "display_name":
+            # An empty string is blank too, and blank never erases. Writing it
+            # stored "" on a plain field (a URL, a username), which then read as
+            # "never set" everywhere except the database, where it was a value.
+            continue
         setattr(user, key, value)
 
 
 def _redacted(update_data: dict) -> list[str]:
     """Field names only, for logging what a request touched."""
     return sorted(update_data)
+
+
+_ABS_CREDENTIAL_FIELDS = frozenset({
+    "audiobookshelf_url",
+    "audiobookshelf_user",
+    "audiobookshelf_pass",
+    "audiobookshelf_api_key",
+})
+
+
+def _sync_user_ma_audiobookshelf(
+    session: Session,
+    user: User,
+    *,
+    best_effort: bool = True,
+    remove_if_unconfigured: bool = False,
+    ma_username: str | None = None,
+) -> dict[str, Any] | None:
+    """Sync ``user``'s dedicated Audiobookshelf provider and provider_filter on the household MA.
+
+    Only uses ``user``'s *own* Audiobookshelf credentials (never a borrowed household grant), so
+    each person's MA account stays strictly bound to their own Audiobookshelf account.
+    """
+    if bool(getattr(user, "is_test_account", False)):
+        return None
+    # A person using their own separate MA server (not the household server) manages providers there.
+    if (user.mass_url or "").strip():
+        return None
+    if _is_system_default_user(user) and not ma_username:
+        return None
+
+    own_abs = _own_service_creds(user, "audiobookshelf")
+    target_ma_username = (ma_username or user.username).strip().lower()
+    try:
+        result = music_assistant.sync_audiobookshelf_provider(
+            username=target_ma_username,
+            display_name=user.display_name or user.username,
+            abs_url=own_abs.get("audiobookshelf_url"),
+            abs_api_key=own_abs.get("audiobookshelf_api_key"),
+            abs_username=own_abs.get("audiobookshelf_user"),
+            abs_password=own_abs.get("audiobookshelf_pass"),
+            existing_instance_id=user.mass_abs_provider_id,
+            remove_if_unconfigured=remove_if_unconfigured,
+        )
+    except music_assistant.HubUnavailable as exc:
+        if best_effort:
+            log.warning("[music_assistant] Could not sync Audiobookshelf provider for %s: %s", user.username, exc)
+            return None
+        raise
+
+    changed = False
+    new_inst = result.get("abs_instance_id")
+    if new_inst != user.mass_abs_provider_id:
+        user.mass_abs_provider_id = new_inst
+        changed = True
+    if result.get("user_id") and result["user_id"] != user.mass_user_id and not _is_system_default_user(user):
+        user.mass_user_id = str(result["user_id"])
+        changed = True
+    if changed:
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    return result
 
 
 @app.patch("/api/users/me", response_model=UserRead)
@@ -2205,12 +2847,43 @@ def update_me(body: UserUpdate, request: Request, session: Session = Depends(get
 
     _check_abuse_ch_key(update_data)
     before = audit.snapshot(user)
+    _merge_book_metadata(user, update_data)
     _apply_user_update(user, update_data, clear_fields)
     session.add(user)
     session.commit()
     session.refresh(user)
     _audit(request, session, "user.self_update", user.username, actor=user, before=before, after=audit.snapshot(user))
+    touched_abs = bool(_ABS_CREDENTIAL_FIELDS.intersection(update_data.keys()) or _ABS_CREDENTIAL_FIELDS.intersection(clear_fields or []))
+    if touched_abs:
+        _sync_user_ma_audiobookshelf(
+            session,
+            user,
+            best_effort=True,
+            remove_if_unconfigured=bool(_ABS_CREDENTIAL_FIELDS.intersection(clear_fields or [])),
+        )
     return user
+
+@app.post("/api/users/me/book-metadata/test")
+def test_book_metadata(body: dict, user: User = Depends(require_api_key), session: Session = Depends(get_session)):
+    """The Test button on the Google Books / Open Library cards: one lookup, the exact outcome.
+
+    ``{"source": "google_books" | "open_library"}``, plus the ``api_key`` or
+    ``contact_email`` being typed, which take the place of the saved (or
+    household) ones. Nothing is saved. The answer never carries the key.
+    """
+    source = str((body or {}).get("source") or "")
+    if source not in book_metadata.SOURCES:
+        raise HTTPException(status_code=422, detail=f"source must be one of {', '.join(book_metadata.SOURCES)}")
+    resolved = book_metadata_for(session, user)["sources"]
+    typed_key = str((body or {}).get("api_key") or "").strip()
+    typed_email = str((body or {}).get("contact_email") or "").strip()
+    log.info("[book_metadata] %s tests %s (typed key: %s)", user.username, source, bool(typed_key))
+    return book_metadata_check.test_source(
+        source,
+        api_key=typed_key or resolved[book_metadata.GOOGLE_BOOKS].get("api_key"),
+        contact_email=typed_email or resolved[book_metadata.OPEN_LIBRARY].get("contact_email") or "",
+    )
+
 
 @app.patch("/api/users/{username}", response_model=UserRead)
 def update_user(username: str, body: UserUpdate, request: Request, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
@@ -2233,12 +2906,71 @@ def update_user(username: str, body: UserUpdate, request: Request, session: Sess
         user, is_admin=update_data.get("is_admin"), is_system_default=update_data.get("is_system_default"),
     )
     before = audit.snapshot(user)
+    _merge_book_metadata(user, update_data)
     _apply_user_update(user, update_data, clear_fields)
     session.add(user)
     session.commit()
     session.refresh(user)
     _audit(request, session, "user.update", user.username, actor=admin, before=before, after=audit.snapshot(user))
+    touched_abs = bool(_ABS_CREDENTIAL_FIELDS.intersection(update_data.keys()) or _ABS_CREDENTIAL_FIELDS.intersection(clear_fields or []))
+    if touched_abs:
+        _sync_user_ma_audiobookshelf(
+            session,
+            user,
+            best_effort=True,
+            remove_if_unconfigured=bool(_ABS_CREDENTIAL_FIELDS.intersection(clear_fields or [])),
+        )
     return user
+
+
+@app.post("/api/users/{username}/audiobookshelf-token")
+def set_audiobookshelf_token(
+    username: str,
+    body: dict,
+    request: Request,
+    session: Session = Depends(get_session),
+    authorization: str = Header(None),
+    x_internal_secret: str = Header(None, alias="X-Internal-Secret"),
+):
+    """Store one member's own Audiobookshelf token.
+
+    The token is issued by Audiobookshelf to the administrator credential the
+    default account holds, so it is read as a secret and never returned: the
+    gateway mints it, this stores it, and the person's own reads then use their
+    own token instead of the household one. Internal calls (the gateway) send
+    X-Internal-Secret; a user request must be an admin, because this writes a
+    secret onto somebody's account.
+    """
+    is_internal = _matches_internal_secret(x_internal_secret)
+    if not is_internal:
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Missing authorization")
+        caller = require_api_key(authorization, session)
+        if not caller.is_admin and caller.username != username.lower():
+            raise HTTPException(status_code=403, detail="Only the account owner or an admin can set this")
+    target = session.exec(select(User).where(User.username == username.lower())).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    token = str(body.get("token") or "").strip()
+    if not token:
+        raise HTTPException(status_code=422, detail="token is required")
+    before = audit.snapshot(target)
+    target.audiobookshelf_api_key_enc = encrypt(token)
+    abs_user = str(body.get("audiobookshelf_user") or "").strip()
+    if abs_user:
+        target.audiobookshelf_user = abs_user
+    session.add(target)
+    session.commit()
+    session.refresh(target)
+    _audit(
+        request, session, "credential.set", target.username, actor=None,
+        before=before, after=audit.snapshot(target),
+    )
+    return {
+        "username": target.username,
+        "stored": True,
+        "audiobookshelf_user": target.audiobookshelf_user,
+    }
 
 
 @app.post("/api/users/{username}/reveal")
@@ -2407,7 +3139,7 @@ def update_credential_shares(
 _DELETED_USER_KEY_PREFIXES = (
     "tel:activity:", "tel:usage:", "tel:usagedev:", "tel:concerns:", "tel:concern-image:",
     "tel:concern-reviews:", "tel:recap:", "tel:night:", "tel:apps:devices:", "tel:apps:mb-state:",
-    "tel:apps:inv:", "phone_beacon:",
+    "tel:apps:inv:", "tel:devhealth:", "tel:arrivals:", "phone_beacon:",
 )
 
 
@@ -2468,6 +3200,7 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
     for model, column in (
         (UserWidget, UserWidget.username),
         (UserActivitySharing, UserActivitySharing.username),
+        (UserProfileSharing, UserProfileSharing.username),
         (ScreenRules, ScreenRules.username),
         (DeviceEvent, DeviceEvent.username),
         (Device, Device.owner_username),
@@ -2502,6 +3235,7 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
         session.delete(stale_weather)
         session.commit()
     push.forget_user(session, user.username)
+    nearby_settings.forget_user(session, user.username)
     _audit(request, session, "user.delete", username.lower(), actor=admin,
            changes=[{"field": "account", "change": "cleared"}])
     return {"status": "SUCCESS"}
@@ -2895,6 +3629,7 @@ def create_user(body: UserCreate, request: Request, session: Session = Depends(g
         display_name=body.display_name,
         is_admin=body.is_admin,
         is_system_default=body.is_system_default,
+        is_test_account=body.is_test_account,
         family_role=body.family_role,
         mother_username=(body.mother_username or "").strip().lower() or None,
         password_hash=hash_password(body.password) if body.password else None,
@@ -2936,6 +3671,36 @@ def create_user(body: UserCreate, request: Request, session: Session = Depends(g
     if roles.sync_family_role(session, user):
         session.commit()
     _audit(request, session, "user.create", user.username, actor=admin, before={}, after=audit.snapshot(user))
+
+    # Provision accounts for external services (best-effort, non-fatal)
+    def _resolve_ma(session: Session, user: User):
+        granted = set(_granted_services(session, user.username))
+        return _resolve_music_assistant(session, user, granted, may_provision=True)
+
+    def _sync_ma_abs(session: Session, user: User):
+        return _sync_user_ma_audiobookshelf(session, user, best_effort=True, remove_if_unconfigured=False)
+
+    try:
+        provisioning_results = onboarding.provision_new_user_accounts(
+            session,
+            user,
+            admin=admin,
+            raw_password=body.password,
+            resolve_ma_fn=_resolve_ma,
+            sync_ma_abs_fn=_sync_ma_abs,
+        )
+        # Audit account provisioning if any service ran (status != 'skipped')
+        ran_any = any(v.get("status") in ("created", "linked") for v in provisioning_results.values())
+        if ran_any:
+            changes = [
+                {"field": f"provisioning.{svc}", "change": "set", "to": result.get("status")}
+                for svc, result in provisioning_results.items()
+                if result.get("status") in ("created", "linked")
+            ]
+            _audit(request, session, "user.accounts_provisioned", user.username, actor=admin, changes=changes)
+    except Exception as exc:
+        log.warning(f"[onboarding] Unexpected error during account provisioning for {user.username}: {exc}")
+
     return user
 
 def _require_assignment_admin(
@@ -3355,15 +4120,9 @@ def internal_voice_for(
         if chosen(person):
             return {"voice": chosen(person), "person": person.username, "why": "speaker"}
     if entity_id:
-        rows = session.exec(
-            select(DeviceAssignment).where(
-                DeviceAssignment.device_id == entity_id.strip(),
-                DeviceAssignment.revoked == False,  # noqa: E712
-            )
-        ).all()
-        owners = {r.user_id for r in rows}
-        if len(owners) == 1:
-            owner = session.get(User, next(iter(owners)))
+        device = hub_devices.owner_for(session, entity_id)
+        if device and device.get("username"):
+            owner = session.exec(select(User).where(User.username == device["username"])).first()
             if chosen(owner):
                 return {"voice": chosen(owner), "person": owner.username, "why": "device"}
     return {"voice": None, "person": None, "why": "jarvis"}
@@ -3911,6 +4670,82 @@ def music_assistant_clear_stale_urls(body: dict, request: Request, session: Sess
     _audit(request, session, "music_assistant.stale_urls_cleared", None,
            changes=[{"field": r["username"], "change": f"cleared {r['host']}"} for r in cleared])
     return {"retired_hosts": hosts, "cleared": cleared}
+
+
+def _ma_audiobookshelf_plan(session: Session) -> list[dict[str, Any]]:
+    """Dry run: what per-user MA Audiobookshelf provider & filter reconciliation would do."""
+    rows: list[dict[str, Any]] = []
+    for u in session.exec(select(User)).all():
+        if _ma_never_provisioned(u):
+            continue
+        own_abs = _own_service_creds(u, "audiobookshelf")
+        has_abs = bool(
+            (own_abs.get("audiobookshelf_url") or "").strip()
+            and (
+                (own_abs.get("audiobookshelf_api_key") or "").strip()
+                or ((own_abs.get("audiobookshelf_user") or "").strip() and (own_abs.get("audiobookshelf_pass") or "").strip())
+            )
+        )
+        if (u.mass_url or "").strip():
+            action = "own_server"
+        elif has_abs:
+            action = "update_provider" if u.mass_abs_provider_id else "create_provider"
+        else:
+            action = "scope_shared_only"
+        rows.append({
+            "username": u.username,
+            "has_abs_credentials": has_abs,
+            "mass_abs_provider_id": u.mass_abs_provider_id,
+            "action": action,
+        })
+    return sorted(rows, key=lambda r: r["username"])
+
+
+@app.get("/api/admin/music-assistant/audiobookshelf")
+def music_assistant_audiobookshelf_plan(session: Session = Depends(get_session),
+                                        _: Any = Depends(require_admin_or_internal)):
+    """Dry run: each person's dedicated MA Audiobookshelf provider status and planned action."""
+    return {"users": _ma_audiobookshelf_plan(session), "household": music_assistant.household_server()}
+
+
+@app.post("/api/admin/music-assistant/audiobookshelf")
+def music_assistant_audiobookshelf_sync(body: dict, request: Request, session: Session = Depends(get_session),
+                                        _: Any = Depends(require_admin_or_internal)):
+    """``{"confirm": true, "usernames"?: [...], "remove_if_unconfigured"?: false}``:
+    reconcile per-user Audiobookshelf providers and provider_filters on the household MA.
+    """
+    if body.get("confirm") is not True:
+        raise HTTPException(status_code=400, detail="Send confirm: true after reviewing the dry run (GET).")
+    wanted = {str(n).strip().lower() for n in (body.get("usernames") or []) if str(n).strip()} or None
+    remove_unconfigured = bool(body.get("remove_if_unconfigured", False))
+    results: list[dict[str, Any]] = []
+    for row in _ma_audiobookshelf_plan(session):
+        if wanted is not None and row["username"] not in wanted:
+            continue
+        if row["action"] == "own_server":
+            results.append({**row, "result": "skipped_own_server"})
+            continue
+        u = session.exec(select(User).where(User.username == row["username"])).first()
+        if u is None:
+            continue
+        try:
+            synced = _sync_user_ma_audiobookshelf(
+                session,
+                u,
+                best_effort=False,
+                remove_if_unconfigured=remove_unconfigured,
+            )
+            results.append({
+                "username": u.username,
+                "result": (synced or {}).get("action", "unchanged"),
+                "abs_instance_id": (synced or {}).get("abs_instance_id"),
+                "filter_updated": (synced or {}).get("filter_updated"),
+            })
+        except music_assistant.HubUnavailable as exc:
+            results.append({"username": u.username, "result": "failed", "message": str(exc)})
+    _audit(request, session, "music_assistant.audiobookshelf_synced", None,
+           changes=[{"field": r["username"], "change": str(r["result"])} for r in results])
+    return {"users": results}
 
 # Credential Seeding
 
@@ -4478,6 +5313,8 @@ async def create_service_token(
         if not abs_url:
             raise HTTPException(status_code=422, detail="Audiobookshelf is not configured (set audiobookshelf_url first)")
         token = await _exchange_audiobookshelf_token(abs_url, body.get("source_username") or target.username, password)
+        if not target.audiobookshelf_url:
+            target.audiobookshelf_url = normalize_abs_url(abs_url)
         target.audiobookshelf_api_key_enc = encrypt(token)
     else:  # nextcloud
         nc_username = body.get("source_username") or target.nextcloud_user or target.username
@@ -4489,6 +5326,9 @@ async def create_service_token(
     session.commit()
     _audit(request, session, "credential.service_token", target.username, actor=admin,
            changes=[{"field": f"{service}_token", "change": "set", "secret": True}])
+    if service == "audiobookshelf":
+        session.refresh(target)
+        _sync_user_ma_audiobookshelf(session, target, best_effort=True)
 
     return {
         "success": True,
@@ -4615,6 +5455,38 @@ def manual_seed(body: _SeedRequest | None = None, force: bool = False, session: 
     should_force = (body.force if body else False) or force
     count = seed_from_env(session, force=should_force)
     return {"status": "SUCCESS", "count": count}
+
+
+@app.get("/api/admin/prompts")
+def list_prompt_seeds(session: Session = Depends(get_session), _auth: bool = Depends(require_admin_or_internal)):
+    """Each prompts/*.md setting against its repo file.
+
+    ``state`` is current, outdated (untouched; replaced at the next start), edited or
+    missing; ``repo_has_newer_version`` marks an edited prompt whose repo file changed
+    since it was seeded.
+    """
+    return {"prompts": prompt_seed.prompt_statuses(session)}
+
+
+@app.get("/api/admin/prompts/{key}")
+def view_prompt_seed(key: str, session: Session = Depends(get_session), _auth: bool = Depends(require_admin_or_internal)):
+    """One prompt's live value beside the repo's text, to compare before replacing."""
+    repo_text = prompt_seed.repo_prompts().get(key)
+    if repo_text is None:
+        raise HTTPException(status_code=404, detail=f"No prompts/{key}.md in the repo")
+    setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+    live = setting.value if setting else None
+    status = prompt_seed.status_of(live, repo_text, session.get(PromptSeed, key))
+    return {"key": key, **status, "live": live, "repo": repo_text}
+
+
+@app.post("/api/admin/prompts/{key}/replace")
+def replace_prompt_seed(key: str, session: Session = Depends(get_session), _auth: bool = Depends(require_admin_or_internal)):
+    """Replace an edited prompt with the repo's version; it follows the repo again after."""
+    result = prompt_seed.replace_with_repo(session, key)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"No prompts/{key}.md in the repo")
+    return result
 
 # DNS Management
 
@@ -5789,7 +6661,7 @@ def _clean_screen_rules(body: dict) -> dict:
             if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 1440:
                 raise HTTPException(status_code=422, detail=f"{key} must be whole minutes from 0 to 1440")
             out[key] = value
-    # The weekly schedule (Family Link's "a limit per day"): {weekday: minutes},
+    # The weekly schedule (a limit per day): {weekday: minutes},
     # each day overriding the daily and weekend limits.
     if body.get("day_limits") is not None:
         days = body["day_limits"]
@@ -6168,6 +7040,9 @@ def get_screen_rules(
         "parent_contacts": _parent_contacts(session, subject),
         # The parents' offline-code verifiers, for the member's own device only.
         **({"offline_codes": _offline_verifiers(session, _parents_of(session, subject))} if own_device else {}),
+        # A minor's Nearby & offline parts, set by their parents: the phone's
+        # guard applies them on its next status read, with no app open.
+        **({"nearby": nearby_settings.stored(session, subject.username)} if nearby_settings.is_minor(subject) else {}),
     }
 
 
@@ -6527,8 +7402,8 @@ def decide_screen_time_request(request_id: int, body: dict, session: Session = D
 
 @app.post("/api/screen-time/{username}/bonus")
 def give_screen_time_bonus(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
-    """A parent adds minutes to today without being asked (Family Link's bonus
-    time); a grown member may add their own."""
+    """A parent adds minutes to today without being asked (bonus time); a
+    grown member may add their own."""
     subject = _screen_subject(session, username)
     if not _may_edit_screen_time(caller, subject):
         raise HTTPException(status_code=403, detail="Only a parent can add a minor's time")
@@ -6710,11 +7585,22 @@ def internal_decide_chore_check(check_id: int, body: dict, session: Session = De
 GUARD_REQUEST_KINDS = ("app", "app_unblock", "permission", "site")
 
 
+def _guard_request_meta(r: GuardRequest) -> dict:
+    """The app profile the phone sent, or {} when there was none (or it is unreadable)."""
+    if not r.meta:
+        return {}
+    try:
+        value = json.loads(r.meta)
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def _guard_request_read(r: GuardRequest) -> dict:
     return {
         "id": r.id, "username": r.username, "kind": r.kind, "target": r.target, "label": r.label,
-        "note": r.note, "status": r.status, "until": r.until, "decided_by": r.decided_by,
-        "created_at": r.created_at, "decided_at": r.decided_at,
+        "note": r.note, "meta": _guard_request_meta(r), "status": r.status, "until": r.until,
+        "decided_by": r.decided_by, "created_at": r.created_at, "decided_at": r.decided_at,
     }
 
 
@@ -6749,6 +7635,32 @@ def _clean_guard_target(kind: str, target: str) -> str:
     return domain
 
 
+#: The version fields a phone sends with an app request; bounded, never trusted raw.
+_GUARD_PROFILE_VERSION_CHARS = 40
+
+
+def _clean_guard_profile(kind: str, raw: object, target: str) -> dict:
+    """The app profile on a request, cleaned by the same rules as an inventory row.
+
+    A phone sends what its package manager knows about the app it just installed
+    (version, installer, size, what it can reach, who signed it) so the parent is
+    deciding about the app, not its package name. Anything unrecognised is
+    dropped: the scan and the age rating are computed from these fields, so a
+    made-up one must not reach them.
+    """
+    if kind not in ("app", "app_unblock") or not isinstance(raw, dict):
+        return {}
+    cleaned = app_vetting.clean_inventory_app({**raw, "package": target})
+    if not cleaned:
+        return {}
+    version_name = raw.get("version_name")
+    version_code = raw.get("version_code")
+    cleaned["version_name"] = str(version_name)[:_GUARD_PROFILE_VERSION_CHARS] if version_name else None
+    cleaned["version_code"] = (int(version_code) if isinstance(version_code, int) and not isinstance(version_code, bool)
+                              and 0 <= version_code < 10 ** 12 else None)
+    return cleaned
+
+
 @app.post("/api/guard/requests")
 def ask_a_parent(body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
     """A child asks a parent first: ``{"kind": "app"|"app_unblock"|"permission"|"site", "target", "label"?, "note"?}``.
@@ -6769,8 +7681,16 @@ def ask_a_parent(body: dict, session: Session = Depends(get_session), caller: Us
             GuardRequest.username == caller.username, GuardRequest.kind == kind, GuardRequest.target == target
         )
     ).all()
+    profile = _clean_guard_profile(kind, (body or {}).get("profile"), target)
     latest = max(existing, key=lambda r: (r.created_at, r.id or 0)) if existing else None
     if latest is not None and (latest.status == "pending" or kind not in ("site", "app_unblock")):
+        # The answer already stands, but a request made before the phone sent a
+        # profile gains one now: the parent may not have looked at it yet.
+        if profile and not latest.meta:
+            latest.meta = json.dumps(profile)
+            session.add(latest)
+            session.commit()
+            session.refresh(latest)
         return {"request": _guard_request_read(latest), "notify": []}
     request = GuardRequest(
         username=caller.username,
@@ -6778,6 +7698,7 @@ def ask_a_parent(body: dict, session: Session = Depends(get_session), caller: Us
         target=target,
         label=str((body or {}).get("label") or "")[:120],
         note=str((body or {}).get("note") or "")[:200],
+        meta=json.dumps(profile) if profile else "",
     )
     session.add(request)
     session.commit()
@@ -8832,6 +9753,10 @@ class LocationUpdate(BaseModel):
     #: (location_devices). Newer app builds only.
     device_id: str | None = None
     device_name: str | None = None
+    #: Hardware addresses of the linked vehicle Bluetooth devices the phone was
+    #: connected to at the fix (geo's vehicle_bluetooth matches them to a
+    #: vehicle). Only linked ones, never a name. Newer app builds only.
+    bt_devices: list[str] | None = None
 
 
 async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
@@ -8990,6 +9915,8 @@ async def _forward_location_to_geo(user_id: str, location: LocationUpdate):
         if location.device_id:
             from services.identity.location_devices import device_key
             payload["device"] = device_key(location.device_id)[:12]
+        if location.bt_devices:
+            payload["bt"] = [str(a)[:32] for a in location.bt_devices[:8]]
         async with get_client_insecure() as client, client.post(
             f"{geo_url}/people/{clean_user}/record",
             headers={"X-Internal-Secret": INTERNAL_SECRET, "Content-Type": "application/json"},
@@ -9641,7 +10568,8 @@ def list_user_panel_devices(
     the app itself and not just from an admin screen. Archived devices
     (device_archive.py) are left out unless ``include_archived``.
     """
-    stmt = select(Device)
+    # HomeHub's satellites, speakers and TVs have their own admin list (hub_devices.py).
+    stmt = select(Device).where(Device.hardware_id.is_(None))  # type: ignore[union-attr]
     if not include_archived:
         stmt = stmt.where(Device.archived_at.is_(None))  # type: ignore[union-attr]
     if not _is_device_admin(caller, session):

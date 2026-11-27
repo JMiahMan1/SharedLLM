@@ -260,10 +260,29 @@ BIBLE_DATABASE_URL = os.getenv("BIBLE_DATABASE_URL")
 # must produce a visible "configure this" state in the devotional card, not a
 # deep link guessed at some host that may not be blb.org's.
 BLB_BASE_URL = os.getenv("BLB_BASE_URL")
+# Megabytes of opened library books (file plus parsed chapters) storage keeps in
+# memory, least recently read dropped first, so a second read of a book's chapter
+# needs no download and no parse.
+CALIBRE_BOOK_CACHE_MB = float(os.getenv("CALIBRE_BOOK_CACHE_MB") or 256)
+# Seconds between checks (a WebDAV PROPFIND) that the Calibre metadata.db is
+# unchanged; the catalogue is downloaded again only when its ETag, size or
+# modification time changed.
+CALIBRE_CATALOG_CHECK_S = float(os.getenv("CALIBRE_CATALOG_CHECK_S") or 30)
 # Root of the Nextcloud library, e.g. /Books/Text. Blank refuses to browse
 # rather than guessing a shelf, because a wrong guess reports itself as an
 # empty library and reads like "we have no Bibles".
 CALIBRE_LIBRARY_PATH = os.getenv("CALIBRE_LIBRARY_PATH")
+# Seconds between checks that the Calibre catalogue (metadata.db) changed; on a
+# change storage indexes the new or edited books' catalogue cards by itself. 0
+# turns the automatic indexing off (a reindex is then only done on request).
+CALIBRE_INDEX_INTERVAL_S = float(os.getenv("CALIBRE_INDEX_INTERVAL_S") or 900)
+# Characters of one chapter returned by CalibreRequest fetch_text with a chapter;
+# a longer chapter comes back in numbered parts.
+CALIBRE_CHAPTER_MAX_CHARS = int(os.getenv("CALIBRE_CHAPTER_MAX_CHARS") or 60000)
+# Characters of text read from one PDF when storage indexes it (a Calibre book or a
+# Nextcloud file). Pages are read in order and reading stops here, so one huge PDF
+# cannot hold the whole crawl's memory; 3,000,000 is about 1,500 printed pages.
+STORAGE_PDF_MAX_CHARS = int(os.getenv("STORAGE_PDF_MAX_CHARS") or 3_000_000)
 BIBLE_DEVOTIONAL_DIR = os.getenv("BIBLE_DEVOTIONAL_DIR")
 # The translation whose verses are embedded for meaning search. Unset: the
 # installed translation whose wording is most modern (see bible/meaning.py).
@@ -411,14 +430,23 @@ def _log_integrations() -> None:
         log.info("Integrations off (not configured, never contacted): %s", ", ".join(off))
 
 
-async def resolve_runtime_config():
+#: True once runtime config has been loaded from Identity (see keep_resolving_runtime_config).
+RUNTIME_CONFIG_LOADED = False
+
+
+async def resolve_runtime_config(
+    max_retries: int = 5, retry_delay: float = 2.0, timeout: float = 10.0, quiet: bool = False,
+) -> bool:
     """Fetch all runtime configuration from Identity service.
 
     The .env file is seed-only; Identity holds the authoritative runtime values.
-    Call this at service startup before handling any requests.
+    Call this at service startup before handling any requests. Returns True once
+    the settings are applied, False when Identity could not be read (the .env
+    seed values stay in effect; keep_resolving_runtime_config retries).
     """
+    global RUNTIME_CONFIG_LOADED
     if _is_testing():
-        return
+        return True
 
     import aiohttp
 
@@ -506,17 +534,17 @@ async def resolve_runtime_config():
 
     import asyncio
 
-    max_retries = 5
+    max_retries = max(1, max_retries)
     for attempt in range(max_retries):
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as client:
                 resp = await client.get(
                     f"{IDENTITY_SVC_URL}/api/settings",
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
                 if resp.status != 200:
                     log.warning(f"Failed to fetch runtime config from Identity (HTTP {resp.status})")
-                    return
+                    return False
 
                 settings = {s["key"]: s["value"] for s in await resp.json()}
 
@@ -539,13 +567,41 @@ async def resolve_runtime_config():
                 # Check if special variables were updated in UI and sync to .env
                 _sync_special_vars_to_env()
 
-                return
+                RUNTIME_CONFIG_LOADED = True
+                return True
         except Exception as e:
+            reason = f"{type(e).__name__}: {e}"
             if attempt < max_retries - 1:
-                log.warning(f"Identity not ready (attempt {attempt+1}/{max_retries}): {e}")
-                await asyncio.sleep(2)
-            else:
-                log.warning(f"Failed to resolve runtime config from Identity after {max_retries} attempts: {e}")
+                log.warning(f"Identity not ready (attempt {attempt+1}/{max_retries}): {reason}")
+                await asyncio.sleep(retry_delay)
+            elif not quiet:
+                log.warning(f"Failed to resolve runtime config from Identity after {max_retries} attempts: {reason}")
+    return False
+
+
+async def keep_resolving_runtime_config(
+    first_delay: float = 2.0, max_delay: float = 60.0, sleep=None,
+) -> None:
+    """Retry resolve_runtime_config with backoff until Identity answers.
+
+    For a service that started while Identity was away (an update swapping it,
+    a restart): it keeps serving on its .env seed values, reports itself
+    degraded, and picks up the real settings as soon as Identity is back,
+    instead of giving up after a few attempts and never loading them.
+    """
+    import asyncio
+
+    sleep = sleep or asyncio.sleep
+    delay = first_delay
+    attempts = 0
+    log.warning("Runtime config not loaded from Identity yet; retrying in the background with backoff")
+    while True:
+        await sleep(delay)
+        attempts += 1
+        if await resolve_runtime_config(max_retries=1, timeout=5.0, quiet=True):
+            log.warning(f"Runtime config loaded from Identity after {attempts} background attempt(s)")
+            return
+        delay = min(max_delay, delay * 2)
 
 
 def _sync_special_vars_to_env():

@@ -41,7 +41,7 @@ function HeatmapCard({ username }: { username: string }) {
   );
 }
 
-/** Time controls (Family Link's Controls tab): the weekly schedule and routines, their chores and earned time, the heatmap, requests answered, the offline code. */
+/** Time controls (the controls tab): the weekly schedule and routines, their chores and earned time, the heatmap, requests answered, the offline code. */
 export default function TimeSection({ username, name }: { username: string; name: string }) {
   return (
     <>

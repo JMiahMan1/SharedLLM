@@ -114,8 +114,34 @@ async def test_an_unreachable_first_server_falls_back_to_the_next(monkeypatch, c
 
 @pytest.mark.asyncio
 async def test_an_unsure_match_records_nobody(monkeypatch):
-    _, _, reply, redis = await _run({"matched": False, "score": 0.7}, monkeypatch)
+    """Nobody is named, but the two best scores and the speech length are kept
+    for the gateway's decision line; a command this far from anyone is no candidate."""
+    verdict = {"matched": False, "score": 0.5, "threshold": 0.8, "margin": 0.2, "speech_seconds": 1.9,
+               "candidates": [{"username": "sam", "score": 0.5}, {"username": "alex", "score": 0.3}],
+               "embedding": [0.01] * 256}
+    _, _, reply, redis = await _run(verdict, monkeypatch)
     assert reply.type == "transcript"
+    value, _ttl = redis.values[voice_speaker.key("turn on the kitchen lights")]
+    assert voice_speaker.decode(value) is None
+    record = voice_speaker.decode_record(value)
+    assert record["top"] == [{"username": "sam", "score": 0.5}, {"username": "alex", "score": 0.3}]
+    assert record["speech_seconds"] == 1.9 and "embedding" not in value
+    assert voice_speaker.candidate_key("turn on the kitchen lights") not in redis.values
+
+
+@pytest.mark.asyncio
+async def test_a_close_but_unrecognised_command_keeps_its_signature_briefly_for_a_candidate(monkeypatch):
+    verdict = {"matched": False, "score": 0.66, "speech_seconds": 2.2, "model": "resemblyzer-ge2e-256",
+               "candidates": [{"username": "sam", "score": 0.66}], "embedding": [0.01] * 256}
+    _, _, _, redis = await _run(verdict, monkeypatch)
+    value, ttl = redis.values[voice_speaker.candidate_key("turn on the kitchen lights")]
+    assert ttl == voice_speaker.TTL_SECONDS
+    assert voice_enroll.decode_take(value)["embedding"] == [0.01] * 256
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_recorded_when_nobody_is_enrolled(monkeypatch):
+    _, _, _, redis = await _run({"matched": False, "nobody_enrolled": True, "embedding": [0.01] * 256}, monkeypatch)
     assert redis.values == {}
 
 
@@ -231,6 +257,10 @@ def test_a_voice_never_opens_the_house_even_an_admins():
     assert not authorize_action(admin_by_voice, "cover", "open")
     assert authorize_action(admin_by_voice, "light", "turn_on")
     assert authorize_action({"user": "alex", "is_admin": True}, "lock", "unlock")
+    # A satellite assigned to someone proves no more than a voice does.
+    by_device = {"user": "alex", "is_admin": True, "identified_by": "device"}
+    assert not authorize_action(by_device, "lock", "unlock")
+    assert authorize_action(by_device, "light", "turn_on")
 
 
 @pytest.mark.asyncio
@@ -238,7 +268,7 @@ async def test_a_take_is_kept_only_while_a_teaching_session_is_open(monkeypatch)
     verdict = {"matched": False, "score": 0.4, "embedding": [0.02] * 256, "speech_seconds": 3.0,
                "model": wyoming_stt.voiceprint.MODEL}
     _, _, _, redis = await _run(dict(verdict), monkeypatch)
-    assert redis.values == {}
+    assert not [k for k in redis.values if k.startswith("voice:enroll")]
 
     original = _FakeRedis.__init__
 
@@ -330,3 +360,48 @@ async def test_identify_passes_identitys_verdict_on(monkeypatch):
     _identity_answering(monkeypatch, _IdentityAnswer(200, {"matched": True, "matched_username": "sam", "score": 0.9}))
     verdict = await wyoming_stt.identify(np.zeros(16000, dtype=np.float32))
     assert verdict["matched_username"] == "sam" and verdict["speech_seconds"] == 2.0
+
+
+# -- a voice nobody enrolled ------------------------------------------------------------------
+_FAR = {"matched": False, "score": 0.41, "threshold": 0.8, "margin": 0.1, "speech_seconds": 2.6, "snr_db": 24.0,
+        "model": "resemblyzer-ge2e-256", "embedding": [0.01] * 256,
+        "candidates": [{"username": "sam", "score": 0.41}, {"username": "alex", "score": 0.31}]}
+
+
+@pytest.mark.asyncio
+async def test_a_voice_far_from_everyone_is_kept_briefly_as_a_possible_new_voice(monkeypatch):
+    _, _, _, redis = await _run(dict(_FAR), monkeypatch)
+    value, ttl = redis.values[voice_speaker.new_voice_key("turn on the kitchen lights")]
+    assert ttl == voice_speaker.TTL_SECONDS and voice_enroll.decode_take(value)["embedding"] == [0.01] * 256
+
+
+@pytest.mark.parametrize("change", [
+    {"score": 0.86, "candidates": [{"username": "sam", "score": 0.86}, {"username": "alex", "score": 0.84}]},
+    {"score": 0.6, "candidates": [{"username": "sam", "score": 0.6}]},  # could be sam, far from the mic
+    {"speech_seconds": 1.4},
+    {"snr_db": 6.0},
+    {"matched": True, "matched_username": "sam"},
+])
+@pytest.mark.asyncio
+async def test_unsure_close_short_or_noisy_commands_are_not_new_voices(monkeypatch, change):
+    _, _, _, redis = await _run({**_FAR, **change}, monkeypatch)
+    assert voice_speaker.new_voice_key("turn on the kitchen lights") not in redis.values
+
+
+def test_the_new_voice_rule_needs_every_part():
+    assert voice_speaker.looks_new(_FAR)
+    assert not voice_speaker.looks_new({**_FAR, "threshold": 0.55})  # within NEW_VOICE_GAP of the threshold
+    assert not voice_speaker.looks_new({**_FAR, "candidates": []})
+    assert not voice_speaker.looks_new({**_FAR, "nobody_enrolled": True})
+    assert not voice_speaker.looks_new({**_FAR, "embedding": None})
+    assert voice_speaker.looks_new({k: v for k, v in _FAR.items() if k != "snr_db"})  # not measured: not held against it
+
+
+@pytest.mark.asyncio
+async def test_identify_reports_how_clean_the_speech_was(monkeypatch):
+    _identity_answering(monkeypatch, _IdentityAnswer(200, {"matched": False, "score": 0.3}))
+    t = np.arange(32000) / 16000
+    samples = np.concatenate([np.zeros(8000), 0.3 * np.sin(2 * np.pi * 200 * t), np.zeros(8000)]).astype(np.float32)
+    samples += np.random.default_rng(0).standard_normal(len(samples)).astype(np.float32) * 1e-4
+    verdict = await wyoming_stt.identify(samples)
+    assert verdict["snr_db"] is not None and verdict["snr_db"] > 40

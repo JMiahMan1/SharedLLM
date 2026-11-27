@@ -47,7 +47,8 @@ not "multi-region, on-call rota, 99.99%". The bar is:
 - **Accessibility**: WCAG 2.2 AA. The most common real-world failures, in order, are low-contrast
   text, missing alt text, missing form labels, empty links and empty buttons (WebAIM Million).
   WCAG 2.2 adds target size (2.5.8), focus not obscured (2.4.11) and stronger focus visibility.
-- **Parental controls**: Family Link and Apple Screen Time set the free baseline - app limits,
+- **Parental controls**: the phone's built-in controls (Android's own screen-time tools, Apple
+  Screen Time) set the free baseline - app limits,
   downtime/bedtime schedules, app blocking, content restrictions, app-approval requests. Qustodio
   and Bark add category-based web filtering, daily/weekly emailed reports, location + geofencing,
   and a panic button. Bark's strength is *reporting* (a readable activity feed) rather than raw

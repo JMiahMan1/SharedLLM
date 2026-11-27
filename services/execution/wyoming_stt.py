@@ -25,7 +25,7 @@ import numpy as np
 
 from services.common import voice_enroll, voice_learning, voice_speaker
 from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, REDIS_URL
-from services.execution import voiceprint
+from services.execution import media_vocabulary, voiceprint
 
 log = logging.getLogger("execution.wyoming_stt")
 #: Every recognition outcome is logged at INFO (who, score, timing; never the
@@ -61,6 +61,7 @@ class Event:
     """One Wyoming event, with the exact bytes it arrived as (to pass on)."""
 
     def __init__(self, header: dict, data: dict, payload: bytes, raw: bytes):
+        self.header = header
         self.type = header.get("type")
         self.data = data
         self.payload = payload
@@ -83,6 +84,37 @@ async def read_event(reader: asyncio.StreamReader) -> Event | None:
         payload = await reader.readexactly(header["payload_length"])
         raw.append(payload)
     return Event(header, data, payload, b"".join(raw))
+
+
+#: Where a ``transcribe`` event carries the library's names (``media_vocabulary.initial_prompt``).
+#: Wyoming's Transcribe has a free-form ``context``; an engine that biases per request reads the
+#: prompt from it. wyoming-faster-whisper 3.8.1 (docker-compose ``whisper``) does not: it only
+#: takes a fixed ``--initial-prompt`` at start, so there the misheard-name correction in the media
+#: handlers (``media_vocabulary.correct``) is what catches "brand in Lake".
+HINTS_CONTEXT_KEY = "initial_prompt"
+
+
+def with_name_hints(event: Event) -> bytes:
+    """A ``transcribe`` event's bytes with the library's names added to its context.
+
+    Anything else, an empty vocabulary, or a context that already has a prompt
+    passes through byte for byte.
+    """
+    if event.type != "transcribe":
+        return event.raw
+    prompt = media_vocabulary.initial_prompt()
+    context = event.data.get("context")
+    context = dict(context) if isinstance(context, dict) else {}
+    if not prompt or context.get(HINTS_CONTEXT_KEY):
+        return event.raw
+    context[HINTS_CONTEXT_KEY] = prompt
+    data = {**event.data, "context": context}
+    header = {k: v for k, v in event.header.items() if k not in ("data", "data_length", "payload_length")}
+    header["data"] = data
+    if event.payload:
+        header["payload_length"] = len(event.payload)
+    log.debug("[voice] %d library name(s) offered to speech to text", prompt.count(",") + 1)
+    return (json.dumps(header) + "\n").encode() + event.payload
 
 
 def to_samples(pcm: bytes, rate: int, width: int, channels: int) -> np.ndarray:
@@ -114,13 +146,19 @@ async def identify(samples: np.ndarray) -> dict | None:
     except voiceprint.VoiceprintError as e:
         log.info("[voice] not matching this command: %s", e)
         return None
+    # How far the speech stood above the room: a new voice is only suggested from a clean take.
+    snr_db = voiceprint.quality(samples).get("snr_db")
     embedded = time.monotonic()
     verdict: dict = {"matched": False, "score": None}
     try:
         async with aiohttp.ClientSession() as client:
             resp = await client.post(
                 f"{IDENTITY_SVC_URL}/api/voice/identify",
-                json={"embedding": signature["embedding"], "model": signature["model"]},
+                json={
+                    "embedding": signature["embedding"],
+                    "partials": signature.get("partials") or [],
+                    "model": signature["model"],
+                },
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=_IDENTIFY_TIMEOUT,
             )
@@ -137,8 +175,10 @@ async def identify(samples: np.ndarray) -> dict | None:
     # Identity only returns the verdict. The proxy needs the signature to offer
     # this take to a learning or teaching session without running the model twice.
     verdict["embedding"] = signature["embedding"]
+    verdict["partials"] = signature.get("partials") or []
     verdict["model"] = signature.get("model")
     verdict["speech_seconds"] = signature.get("speech_seconds")
+    verdict["snr_db"] = snr_db
     verdict["embed_ms"] = round((embedded - started) * 1000)
     verdict["total_ms"] = round((time.monotonic() - started) * 1000)
     return verdict
@@ -272,6 +312,41 @@ async def _keep_take(redis, text: str, verdict: dict | None) -> None:
         log.warning("[voice] could not keep the take for teaching: %s", e)
 
 
+async def _keep_candidate(redis, text: str, verdict: dict) -> None:
+    """Keep an unrecognised but close command's signature for a few seconds, so the
+    gateway can offer it as a candidate sample when its satellite is assigned to
+    one person (identity decides; an admin approves). Never logged."""
+    if not voice_speaker.worth_offering(verdict):
+        return
+    key = voice_speaker.candidate_key(text)
+    take = voice_enroll.encode_take(verdict)
+    if not key or not take:
+        return
+    try:
+        await redis.set(key, take, ex=voice_speaker.TTL_SECONDS)
+    except Exception as e:  # a candidate is optional
+        log.warning("[voice] could not keep a candidate sample: %s", e)
+
+
+async def _keep_new_voice(redis, text: str, verdict: dict) -> bool:
+    """Keep the signature of a command that sounds like nobody enrolled for a few
+    seconds (``voice_speaker.looks_new``), so the gateway, which knows the
+    satellite, can count it as a possible new voice. Never logged. Returns whether
+    it was kept."""
+    if not voice_speaker.looks_new(verdict):
+        return False
+    key = voice_speaker.new_voice_key(text)
+    take = voice_enroll.encode_take(verdict)
+    if not key or not take:
+        return False
+    try:
+        await redis.set(key, take, ex=voice_speaker.TTL_SECONDS)
+    except Exception as e:  # a new-voice hint is optional
+        log.warning("[voice] could not keep a new-voice take: %s", e)
+        return False
+    return True
+
+
 async def _connect_upstream():
     """(reader, writer) of the first speech-to-text server that answers, else None."""
     for i, upstream in enumerate(UPSTREAMS):
@@ -307,7 +382,7 @@ async def _handle(ha_reader, ha_writer, redis) -> None:
                 utterance.add(event)
             elif event.type == "audio-stop":
                 utterance.start_matching()
-            up_writer.write(event.raw)
+            up_writer.write(with_name_hints(event))
             await up_writer.drain()
 
     async def to_ha() -> None:
@@ -322,16 +397,21 @@ async def _handle(ha_reader, ha_writer, redis) -> None:
                 if teaching:
                     await _keep_take(redis, text, verdict)
                 key = voice_speaker.key(text)
-                if verdict and verdict.get("matched") and key:
+                if verdict and key and not verdict.get("nobody_enrolled") and not verdict.get("error"):
+                    # Matched or not, so the gateway can log the decision and the two best scores.
+                    matched = verdict.get("matched_username") if verdict.get("matched") else None
                     await redis.set(
                         key,
-                        voice_speaker.encode(verdict["matched_username"], verdict.get("score")),
+                        voice_speaker.encode(matched, verdict.get("score"), verdict),
                         ex=voice_speaker.TTL_SECONDS,
                     )
-                    if verdict.get("embedding"):
-                        task = asyncio.create_task(_learn(redis, verdict))
-                        _LEARNING_TASKS.add(task)
-                        task.add_done_callback(_LEARNING_TASKS.discard)
+                    await _keep_candidate(redis, text, verdict)
+                    if await _keep_new_voice(redis, text, verdict):
+                        log.info("[voice] this voice is far from every enrolled one: offered as a possible new voice")
+                if verdict and verdict.get("matched") and key and verdict.get("embedding"):
+                    task = asyncio.create_task(_learn(redis, verdict))
+                    _LEARNING_TASKS.add(task)
+                    task.add_done_callback(_LEARNING_TASKS.discard)
             ha_writer.write(event.raw)
             await ha_writer.drain()
 

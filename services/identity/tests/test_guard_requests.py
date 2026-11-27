@@ -193,3 +193,72 @@ def test_locked_sections_are_validated_saved_and_offered_to_the_parent(family):
     assert read["rules"]["locked_sections"] == ["chat", "bible", "chores"]
     ids = [c["id"] for c in read["locked_section_choices"]]
     assert ids[0] == "chat" and "bible" in ids and "devices" in ids
+
+
+def test_an_app_request_carries_the_apps_own_profile(family):
+    """The phone sends what it knows about the app, and the parent's card reads it back."""
+    profile = {
+        "label": "Star Chart",
+        "version_name": "4.2.1",
+        "version_code": 4210,
+        "installer": None,  # not from a store
+        "size_bytes": 12 * 1024 * 1024,
+        "permissions": ["camera", "location", "not-a-group"],
+        "capabilities": ["sms_send", "made_up"],
+        "special_access": ["accessibility"],
+        "cert_sha1": ["AB" * 20],
+        "apk_sha256": "a" * 64,
+        "apk_hash_state": "ok",
+        # A phone cannot rename the app it is asking about.
+        "package": "com.somewhere.else",
+    }
+    body = family("kid").post("/api/guard/requests", json={
+        "kind": "app", "target": "com.example.starchart", "label": "Star Chart", "profile": profile,
+    }).json()
+
+    meta = body["request"]["meta"]
+    assert meta["version_name"] == "4.2.1" and meta["version_code"] == 4210
+    assert meta["installer"] is None
+    assert meta["permissions"] == ["camera", "location"]
+    assert meta["capabilities"] == ["sms_send"]
+    assert meta["special_access"] == ["accessibility"]
+    assert meta["apk_sha256"] == "a" * 64
+    assert meta["package"] == "com.example.starchart"
+    # The answer a parent gives is unaffected: it is still per package.
+    assert family("kid").get("/api/screen-time/kid/rules").json()["approvals"]["apps"] == {
+        "com.example.starchart": "pending"
+    }
+
+
+def test_a_profile_that_makes_no_sense_is_dropped_not_guessed(family):
+    rid = family("kid").post("/api/guard/requests", json={
+        "kind": "app", "target": "com.example.puzzle", "label": "Puzzle",
+        "profile": {"version_name": "x" * 500, "version_code": "not a number", "size_bytes": -5,
+                    "permissions": "camera", "cert_sha1": ["nope"], "apk_sha256": "zz"},
+    }).json()["request"]
+    assert rid["meta"]["version_name"] == "x" * 40  # bounded, not refused
+    assert rid["meta"]["version_code"] is None and rid["meta"]["size_bytes"] is None
+    assert rid["meta"]["permissions"] == [] and rid["meta"]["cert_sha1"] == [] and rid["meta"]["apk_sha256"] is None
+
+    site = family("kid").post("/api/guard/requests", json={
+        "kind": "site", "target": "example.com", "profile": {"version_name": "1.0"},
+    }).json()["request"]
+    assert site["meta"] == {}  # a site has no app profile
+
+
+def test_a_request_waiting_from_before_the_phone_knew_its_profile_gains_one(family):
+    first = family("kid").post("/api/guard/requests", json={
+        "kind": "app", "target": "com.example.notes", "label": "Notes",
+    }).json()["request"]
+    assert first["meta"] == {}
+    again = family("kid").post("/api/guard/requests", json={
+        "kind": "app", "target": "com.example.notes", "label": "Notes",
+        "profile": {"version_name": "1.1", "version_code": 11},
+    }).json()["request"]
+    assert again["id"] == first["id"] and again["meta"]["version_name"] == "1.1"
+    # Once it is filled, the profile stays: it is the version the parent was asked
+    # about, not whatever the app looks like by the next refresh.
+    assert family("kid").post("/api/guard/requests", json={
+        "kind": "app", "target": "com.example.notes",
+        "profile": {"version_name": "9.9"},
+    }).json()["request"]["meta"]["version_name"] == "1.1"

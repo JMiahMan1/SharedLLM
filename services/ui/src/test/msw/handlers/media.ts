@@ -38,6 +38,9 @@ export const mediaHandlers = [
     HttpResponse.json(absLastPlayedFixture)
   ),
   http.post('/execute/audiobookshelf', () => HttpResponse.json(absExecuteFixture)),
+  // No podcasts: a test that wants some says so with server.use.
+  http.get('/api/media/audiobookshelf/podcasts', () =>
+    HttpResponse.json({ status: 'SUCCESS', libraries: [], shows: [], behind_days: 21, stale_check_days: 7 })),
   // Unified media endpoints (docs/MEDIA_OVERHAUL.md §7.5), real gateway shapes.
   http.get('/api/media/home', () => HttpResponse.json(mediaHomeFixture)),
   http.get('/api/media/search', () => HttpResponse.json(mediaSearchFixture)),

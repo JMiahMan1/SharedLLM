@@ -115,7 +115,8 @@ export function threadMessages(messages: TalkMessage[], opened: Record<string, P
   return messages.filter((m) => {
     if (m.deleted) return false;
     const payload = opened[String(m.id)];
-    return !(payload && payload !== 'unreadable' && payload.t === 'added');
+    // Gallery records (membership, the opt-in start) are gallery entries too, never something said.
+    return !(payload && payload !== 'unreadable' && (payload.t === 'added' || payload.t === 'gallery' || payload.t === 'gallery_start'));
   });
 }
 

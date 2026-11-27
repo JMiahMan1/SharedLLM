@@ -69,6 +69,10 @@ services:
       # The companion app's host name and the hub behind it (Caddyfile; homehub mobile_app_api).
       - HOMEHUB_EXTERNAL_HOST=${HOMEHUB_EXTERNAL_HOST:-homehub.invalid}
       - HOMEHUB_UPSTREAM=${HOMEHUB_UPSTREAM:-host.docker.internal:8123}
+      # Music Assistant's own web interface, at its own hostname (Caddyfile; the
+      # default name never resolves, so nothing is published until .env names one).
+      - MUSIC_ASSISTANT_EXTERNAL_HOST=${MUSIC_ASSISTANT_EXTERNAL_HOST:-music.invalid}
+      - MUSIC_ASSISTANT_UPSTREAM=${MUSIC_ASSISTANT_UPSTREAM:-host.docker.internal:8095}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -569,6 +573,7 @@ services:
       - NEXTCLOUD_USER=${NEXTCLOUD_USER:-}
       - NEXTCLOUD_PASS=${NEXTCLOUD_PASS:-}
       - STORAGE_CHECKPOINT_PATH=${STORAGE_CHECKPOINT_PATH:-/data/index_checkpoint.json}
+      - CALIBRE_INDEX_INTERVAL_S=${CALIBRE_INDEX_INTERVAL_S:-900}
       - ARTIFACTS_ROOT=/artifacts
       - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
     volumes:
@@ -649,6 +654,10 @@ services:
         - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
         - SERVICE_NAME=${SERVICE_NAME:-ui}
     container_name: sharedllm_ui
+    labels:
+      # Stateless (static files from the image, tmpfs only): the control plane may start the new
+      # container beside the old one on an update (services/control_plane/recreate.py).
+      sharedllm.update: start-first
     restart: unless-stopped
     mem_limit: 256m
     # nginx serves the app as the host user. It needs a writable cache (proxy
@@ -828,6 +837,10 @@ services:
   osrm:
     image: ghcr.io/jmiahman1/sharedllm-osrm:latest
     container_name: sharedllm_osrm
+    labels:
+      # Stateless (routing graph baked into the image, no volumes): the control plane may start the new
+      # container beside the old one on an update (services/control_plane/recreate.py).
+      sharedllm.update: start-first
     restart: unless-stopped
     mem_limit: 1536m
     networks:
@@ -837,6 +850,10 @@ services:
   osrm-foot:
     image: ghcr.io/jmiahman1/sharedllm-osrm-foot:latest
     container_name: sharedllm_osrm_foot
+    labels:
+      # Stateless (routing graph baked into the image, no volumes): the control plane may start the new
+      # container beside the old one on an update (services/control_plane/recreate.py).
+      sharedllm.update: start-first
     restart: unless-stopped
     # The foot graph is bigger than the road one (paths, sidewalks): ~1.2 GB idle
     mem_limit: 2g
@@ -1102,6 +1119,13 @@ services:
       - --language=${WHISPER_LANGUAGE:-en}
       - --beam-size=${WHISPER_BEAM_SIZE:-2}
       - --data-dir=/data
+    environment:
+      # The household's names in Whisper's prompt (docs/VOICE_RECOGNITION.md, "The household's
+      # words"): the gateway serves them in the shape of Home Assistant's names API, which this
+      # image reads on every utterance. WHISPER_VOCABULARY_KEY is a Jarvis API key; unset, no biasing.
+      - WYO_WHISPER_HASS_TOKEN=${WHISPER_VOCABULARY_KEY:-}
+      - WYO_WHISPER_HASS_API=${WHISPER_VOCABULARY_API:-http://127.0.0.1:11435/stt-vocabulary}
+      - WYO_WHISPER_HASS_REFRESH_SECONDS=${WHISPER_VOCABULARY_REFRESH_S:-60}
     volumes:
       - ./data/whisper:/data
 
@@ -1257,6 +1281,9 @@ services:
       - GHCR_TOKEN=${GHCR_TOKEN:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - ROUTER_SYSLOG_PORT=${ROUTER_SYSLOG_PORT:-5514}
+      # Admin > Network reads HomeHub's mDNS table (GET /api/network/mdns) to identify
+      # devices with no Jarvis app; empty = that source is off.
+      - HOMEHUB_URL=${HOMEHUB_URL:-}
       - NETWORK_DATA_DIR=/data/network
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

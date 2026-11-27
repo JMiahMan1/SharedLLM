@@ -46,6 +46,7 @@ if [ -z "$SERVICES" ]; then
     echo "       $0 <host> <path> <service> [service...]"
     exit 1
 fi
+
 echo "[OK] Services to deploy on ${HOST}: $SERVICES"
 
 # Function to wait ONLY for the image build (Build & Push Images) to finish.
@@ -119,6 +120,20 @@ wait_for_build() {
 # services/common since (CI only rebuilds changed services, so an unchanged
 # one legitimately keeps the image of the last commit that changed it).
 # Anything else, or no report at all, fails the deploy and names the service.
+#: The paths an image is built from, for "did CI rebuild this service since
+#: that revision" questions. Caddy is the one service whose image comes from a
+#: file at the repository root rather than services/<name>, so testing it
+#: against services/caddy claimed a stale image every time services/common
+#: moved, and failed a deploy whose caddy image was in fact current.
+built_from() {
+    case "$1" in
+        caddy) echo "Caddyfile" ;;
+        ui) echo "services/ui" ;;
+        *) echo "services/$1 services/common" ;;
+    esac
+}
+
+
 verify_deployed_revisions() {
     local expect="$1" log="$2" service rev bad=0
     shift 2
@@ -140,7 +155,7 @@ verify_deployed_revisions() {
             echo "[OK] $service is on ${expect:0:12}"
         elif git cat-file -e "${rev}^{commit}" 2>/dev/null \
             && git merge-base --is-ancestor "$rev" "$expect" 2>/dev/null \
-            && [ -z "$(git log --format=%H "${rev}..${expect}" -- "services/${service}" services/common 2>/dev/null)" ]; then
+            && [ -z "$(git log --format=%H "${rev}..${expect}" -- $(built_from "$service") 2>/dev/null)" ]; then
             echo "[OK] $service is on ${rev:0:12} (unchanged since; CI did not rebuild it)"
         else
             echo "[FAIL] $service is running revision ${rev:0:12}, expected ${expect:0:12}"
@@ -401,6 +416,24 @@ if ssh $SSH_OPTS "$HOST" << EOF | tee "$REMOTE_LOG"
     DEPLOYED_SHA=\$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
     echo "Server now at commit: \$DEPLOYED_SHA"
 
+    # A name that is not in the compose file does not fail just itself: docker
+    # compose rejects the whole invocation ("no such service: cast_watch") and
+    # both the pull and the recreate do nothing, so the deploy then fails
+    # verification with every service still on its old image. Checked here,
+    # where the .env the compose file needs is present, and before anything is
+    # pulled or recreated.
+    UNKNOWN=""
+    for service in $SERVICES; do
+        docker compose config --services 2>/dev/null | grep -qx "\$service" || UNKNOWN="\$UNKNOWN \$service"
+    done
+    if [ -n "\$UNKNOWN" ]; then
+        echo "[FAIL] Not a service in docker-compose.yml:\$UNKNOWN"
+        echo "       Compose would refuse the whole deploy. Known services:"
+        docker compose config --services 2>/dev/null | tr '\\n' ' ' | fold -s -w 100 | sed 's/^/       /'
+        echo ""
+        exit 1
+    fi
+
     echo "Pulling latest images from GHCR and starting Docker containers..."
     # Scoped to the services this deploy rebuilt. With no service names this
     # recreates every container in the project, including unrelated wsbox-*
@@ -416,26 +449,40 @@ if ssh $SSH_OPTS "$HOST" << EOF | tee "$REMOTE_LOG"
     # reporting success. The SHA tag cannot be overwritten that way, so it is
     # what we go by; "latest" is only a fallback for services this commit did
     # not change, which CI therefore never retagged.
-    SHA_TAG=\$(git rev-parse --short=8 HEAD 2>/dev/null || true)
-    if [ -n "\$SHA_TAG" ] && [ -n "$SERVICES" ]; then
+    # CI tags an image with "git rev-parse --short HEAD", whose length is the
+    # repository's core.abbrev and can differ from this clone's: a runner's
+    # fresh clone shortened 5dc10f9ac to 5dc10f9, while a developer clone with
+    # every branch holds enough look-alike objects to need 5dc10f9a. Asking for
+    # one fixed width therefore never matched and every deploy quietly fell back
+    # to :latest, which is exactly the tag the SHA tag exists to distrust. Try
+    # the prefixes longest-last until one exists.
+    FULL_SHA=\$(git rev-parse HEAD 2>/dev/null || true)
+    if [ -n "$SERVICES" ] && [ -n "\$FULL_SHA" ]; then
         for service in $SERVICES; do
             # Upstream images (ntfy, redis, nominatim) have no SHA tags.
             docker compose config --images "\$service" 2>/dev/null | grep -q "/sharedllm-" || continue
             repo="ghcr.io/jmiahman1/sharedllm-\$service"
-            if docker pull -q "\$repo:\$SHA_TAG" >/dev/null 2>&1; then
-                docker tag "\$repo:\$SHA_TAG" "\$repo:latest"
-                echo "Pinned \$service to \$SHA_TAG"
-            else
-                # This commit changed nothing this image is built from (a
-                # compose-only or docs-only push), so CI never retagged it. Pull
-                # :latest rather than trusting whatever the local daemon holds:
-                # a stale local :latest is how a recreate once came up on an
-                # image four hours older than the one in the registry.
-                if docker pull -q "\$repo:latest" >/dev/null 2>&1; then
-                    echo "[WARN] No image tagged \$SHA_TAG for \$service; refreshed :latest from the registry."
-                else
-                    echo "[WARN] No image tagged \$SHA_TAG for \$service; could not reach the registry, using the local :latest."
+            pinned=""
+            for candidate in \${FULL_SHA:0:7} \${FULL_SHA:0:8} \${FULL_SHA:0:12}; do
+                if docker pull -q "\$repo:\$candidate" >/dev/null 2>&1; then
+                    docker tag "\$repo:\$candidate" "\$repo:latest"
+                    pinned="\$candidate"
+                    echo "Pinned \$service to \$candidate"
+                    break
                 fi
+            done
+            if [ -n "\$pinned" ]; then
+                continue
+            fi
+            # This commit changed nothing this image is built from (a
+            # compose-only or docs-only push), so CI never retagged it. Pull
+            # :latest rather than trusting whatever the local daemon holds:
+            # a stale local :latest is how a recreate once came up on an
+            # image four hours older than the one in the registry.
+            if docker pull -q "\$repo:latest" >/dev/null 2>&1; then
+                echo "[WARN] No image tagged with \${FULL_SHA:0:7} for \$service; refreshed :latest from the registry."
+            else
+                echo "[WARN] No image tagged with \${FULL_SHA:0:7} for \$service; could not reach the registry, using the local :latest."
             fi
         done
     fi

@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import contextlib
+import hashlib
 import json
 import logging
 import mimetypes
@@ -32,6 +33,7 @@ from services.gateway.config import (
     STORAGE_SVC,
     WORKSPACE_RUNTIME_SVC,
 )
+from services.gateway.mission_discipline import Discipline
 from services.gateway.llm_providers import (
     BaseLLMProvider,
     StreamingThinkingFilter,
@@ -43,7 +45,7 @@ from services.gateway.prompts import PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION,
 from services.gateway.schemas import ResolvedCredentials
 from services.gateway.studio import actions as studio_actions
 from services.gateway.studio import tools as studio_tools
-from services.gateway.tool_registry import hub_tool_prompt, hub_tool_withheld
+from services.gateway.tool_registry import hub_tool_prompt, hub_tool_withheld, promote_tool_discriminator
 from services.shared.media_validation import MEDIA_EXTS, media_extension, rewrite_media_extension, validate_media_bytes
 
 _LESSON_MARKERS = ("RULE:", "ROOT CAUSE:", "OUTCOME:", "CONFIDENCE:", "SUPERSEDES:")
@@ -122,7 +124,8 @@ THINKING_PATTERNS = [
 WORKSPACE_TOOL_ACTIONS = {
     "workspacefilereadrequest", "workspacefilewriterequest",
     "workspacefilepatchrequest", "workspaceshellrequest",
-    "workspacesearchrequest", "workspacelintrequest",
+    "workspacesearchrequest", "workspacelistrequest",
+    "workspacelintrequest",
     "gitoperationrequest", "workspacebootstraprequest",
     "workspacesettingsupdaterequest", "workspaceportexposerequest",
 }
@@ -408,7 +411,13 @@ class OllamaProvider(BaseLLMProvider):
         options: dict[str, Any] | None = None,
         chunk_callback: Callable[[str], Awaitable[None]] | None = None
     ) -> str:
-        opts = options or {}
+        opts = dict(options or {})
+        raw_priority = opts.pop("priority", None)
+        request_source = str(opts.pop("request_source", None) or "shared-llm/app")
+        headers = {"X-Request-Source": request_source}
+        if raw_priority is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                headers["X-Priority"] = str(int(raw_priority))
         show_thinking = opts.get("show_thinking", False)
 
         payload = {
@@ -432,7 +441,7 @@ class OllamaProvider(BaseLLMProvider):
 
             log.info(f"[OllamaProvider-Hardened] Calling {self.base_url}/api/chat for model {model}")
             if not chunk_callback:
-                resp = await client.post(f"{self.base_url}/api/chat", json=payload, headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout)
+                resp = await client.post(f"{self.base_url}/api/chat", json=payload, headers=headers, timeout=self.timeout)
                 resp.raise_for_status()
                 raw_text = (await resp.text()).strip()
                 if not raw_text:
@@ -498,7 +507,7 @@ class OllamaProvider(BaseLLMProvider):
                 try:
                     async with client.post(
                         f"{self.base_url}/api/chat", json=payload,
-                        headers={"X-Request-Source": "shared-llm/app"},
+                        headers=headers,
                         timeout=self.timeout,
                     ) as response:
                         response.raise_for_status()
@@ -574,14 +583,15 @@ ALLOWED_TOOLS = {
     "volumeinventoryrequest", "workspacefilereadrequest",
     "workspacefilewriterequest", "workspacefilepatchrequest",
     "workspacelintrequest", "workspacesearchrequest",
-    "workspaceshellrequest", "storagefilereadrequest",
+    "workspaceshellrequest", "workspacelistrequest",
+    "storagefilereadrequest",
     "storagefilewriterequest", "storagelistrequest", "workspacebootstraprequest",
     "workspacecreaterequest", "workspacesettingsupdaterequest",
     "systemlearningrequest", "redisinspectrequest", "discoverysyncrequest", "storageindexrequest",
     "dockercomposerequest", "identityrequest", "identitymanagerequest", "controlplanerequest", "restart_service",
     "audiobookshelfrequest", "biblerequest", "calibrerequest", "llminforequest", "contextsearchrequest", "haconfigrequest",
     "entitysearchrequest", "logbookrequest", "executionlogrequest",
-    "documentbroadcastrequest", "nightmoderequest", "ttsrequest", "sttrequest", "storagetexttorequest",
+    "documentbroadcastrequest", "nightmoderequest", "dropinrequest", "ttsrequest", "sttrequest", "storagetexttorequest",
     "audiobookregeneraterequest",
     "aicapabilitiesrequest",
     # Advertised by tool_builder._Tool and dispatched by prose_tools, but absent
@@ -611,6 +621,8 @@ ALLOWED_TOOLS = {
     "ghrequest",
     "ravenrecallrequest",
     "workspaceportexposerequest", "workspace_expose_port", "expose_port", "port_expose",
+    # Mission discipline: the objectives checklist and the debrief (services/gateway/mission_discipline.py).
+    "missionobjectivesrequest", "missioncompleterequest",
     # Aliases and Hallucination-prefixed tools
     "git_status", "git_diff", "git_log", "git_add", "git_commit", "git_push", "git_pull", "git_sync",
     "workspace_file_read", "workspace_file_write", "workspace_file_patch",
@@ -833,17 +845,7 @@ def _normalize_tool(obj: dict) -> dict | None:
                 break
 
     # Prioritize tool class name from discriminator over device verb action
-    for t_key in ("tool", "@type", "type"):
-        if t_key in obj and isinstance(obj[t_key], str) and obj[t_key] not in ("function",):
-            cand_tool = obj[t_key]
-            cand_tool_norm = re.sub(r'[\s_]+', '', cand_tool).lower()
-            if cand_tool_norm in ALLOWED_TOOLS or cand_tool_norm.endswith("request"):
-                act_norm = re.sub(r'[\s_]+', '', str(obj.get("action", ""))).lower()
-                if act_norm not in ALLOWED_TOOLS:
-                    if "action" in obj:
-                        obj["sub_action"] = obj["action"]
-                        obj["device_action"] = obj["action"]
-                    obj["action"] = cand_tool
+    promote_tool_discriminator(obj, lambda n: n in ALLOWED_TOOLS or n.endswith("request"))
 
     # Set action from any known discriminator
     if "action" not in obj:
@@ -1310,12 +1312,45 @@ def _repair_json_control_chars(text: str) -> str:
 # These are pure functions so the gating logic can be unit-tested without a live
 # model or any downstream service.
 
+# Payload keys that are volatile or per-call and must NOT be part of a tool's
+# signature: they differ between identical calls and would hide real repetition.
+_SIG_VOLATILE_KEYS = {"user_context", "action", "@type", "type", "tool"}
+
+
+def _payload_signature_digest(payload: dict) -> str:
+    """Short stable digest of a payload that carries no identifying key.
+
+    Used as the signature tail for tools keyed by something other than the
+    known path/command/query fields (e.g. WebReadRequest keyed by `url`).
+    Volatile and per-call keys are dropped first so two calls that differ only
+    in them produce identical signatures. A payload left with nothing (missing,
+    empty, or only volatile keys) has the empty tail, as it did before.
+    """
+    cleaned = {
+        k: v
+        for k, v in payload.items()
+        if k not in _SIG_VOLATILE_KEYS
+        and not str(k).startswith("_")
+        and v not in (None, "", [], {})
+    }
+    if not cleaned:
+        # Nothing identifies the call, so there is nothing to tell it apart by:
+        # keep the empty tail every such call had before the digest existed.
+        return ""
+    canonical = json.dumps(cleaned, sort_keys=True, default=str)
+    return hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:12]
+
+
 def action_signature(action_name: str, payload: dict | None) -> str:
     """Stable signature of a dispatched tool action for repetition detection.
 
     Combines the canonical action name with the most identifying payload field
-    (file path or shell command) so the loop can tell apart 'wrote game.py' from
-    'wrote README.md' and from 'ran ruff', which matters for stagnation checks.
+    (file path, shell command, query, or URL) so the loop can tell apart calls
+    that touch different targets, which matters for stagnation checks.
+    When the payload carries none of the known identifying keys, fall back to a
+    short digest of the canonical payload (volatile keys removed) so tools
+    keyed by anything else still get distinct, stable signatures instead of all
+    collapsing to ``<action>::''``.
     """
     action_name = (action_name or "").lower()
     if not isinstance(payload, dict):
@@ -1327,11 +1362,15 @@ def action_signature(action_name: str, payload: dict | None) -> str:
         or payload.get("command")
         or payload.get("commands")
         or payload.get("query")
+        or payload.get("url")
+        or payload.get("urls")
         or ""
     )
     if isinstance(key, (list, tuple)):
         key = " ".join(str(k) for k in key)
-    return f"{action_name}::{key!r}"
+    if key:
+        return f"{action_name}::{key!r}"
+    return f"{action_name}::{_payload_signature_digest(payload)!r}"
 
 
 def detect_repetitive_failure(recent: list[tuple[str, bool]], window: int = 3) -> bool:
@@ -1910,11 +1949,59 @@ async def get_dynamic_llm_settings() -> dict:
         log.error(f"[AgentLoop] Failed to fetch dynamic LLM settings: {e}")
     return {}
 
+# The local server's live context per (url, model): (n_ctx, monotonic time).
+# Only a reported value is kept, so a model that is not loaded yet is asked again.
+_LIVE_CTX_TTL_S = 60.0
+_live_ctx_cache: dict[tuple[str, str], tuple[int, float]] = {}
+
+
+async def _live_local_ctx(local_url: str, model: str) -> tuple[int | None, str]:
+    """Ask the local server (alpaca-proxy GET /admin/context) for the model's live context.
+
+    Returns (n_ctx_per_slot, or n_ctx when per-slot is null; reason). The value is
+    None when the endpoint is missing (older proxy, 404), the model is not loaded,
+    or the call failed; the reason says which. The endpoint never loads a model.
+    """
+    key = (local_url.rstrip("/"), model)
+    hit = _live_ctx_cache.get(key)
+    if hit is not None and time.monotonic() - hit[1] < _LIVE_CTX_TTL_S:
+        return hit[0], "cached"
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(f"{key[0]}/admin/context", params={"model": model},
+                                    timeout=aiohttp.ClientTimeout(total=3.0, sock_connect=2.5))
+            if resp.status == 404:
+                return None, "the server has no /admin/context (404)"
+            if resp.status != 200:
+                return None, f"/admin/context answered HTTP {resp.status}"
+            data = json.loads((await resp.text()).strip() or "{}")
+    except Exception as e:
+        if local_ai.LLM.record_failure(e):
+            return None, "unreachable"  # logged once by the breaker
+        return None, f"/admin/context failed ({e!r})"
+    per_slot, total = data.get("n_ctx_per_slot"), data.get("n_ctx")
+    live = per_slot if per_slot is not None else total
+    if not data.get("loaded") or live is None:
+        return None, f"{model} is not loaded on the server yet"
+    try:
+        live = int(live)
+    except (TypeError, ValueError):
+        return None, f"/admin/context reported a bad n_ctx ({live!r})"
+    if live <= 0:
+        return None, f"/admin/context reported a bad n_ctx ({live!r})"
+    _live_ctx_cache[key] = (live, time.monotonic())
+    return live, "n_ctx_per_slot" if per_slot is not None else "n_ctx"
+
+
 async def get_vram_safe_params(model: str, settings: dict) -> dict:
     """Dynamically checks VRAM pressure using DB constraints."""
     local_url = settings.get("llm_local_url", "")
-    max_ctx = int(settings.get("llm_local_max_ctx", "16384"))
-    # P1: ALWAYS honor the configured context as the baseline. The previous
+    # llm_local_max_ctx is an optional CAP on the server's live context; when the
+    # live context is unknown it is the context, else 16384.
+    cap_setting = str(settings.get("llm_local_max_ctx") or "").strip()
+    cap = int(cap_setting) if cap_setting else None
+    max_ctx = cap if cap is not None else 16384
+    # P1: ALWAYS honor a known context (live, capped, or configured) as the baseline. The previous
     # behaviour only set num_ctx inside the successful /api/ps branch, so any
     # transient failure to reach Ollama silently fell back to Ollama's tiny
     # default context (context starvation -> 40-60 iterations). Now num_ctx is
@@ -1953,6 +2040,17 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
         # The breaker already knows the machine is off: no 3-second timeout (and
         # no warning) on every request just to learn it again.
         return params
+    live_ctx, why = await _live_local_ctx(local_url, model)
+    if live_ctx is not None:
+        max_ctx = min(live_ctx, cap) if cap is not None else live_ctx
+        params["num_ctx"] = max_ctx
+        log.info(f"[AgentLoop] {model}: live context {live_ctx} ({why}), cap {cap if cap is not None else 'none'}"
+                 f" -> num_ctx={max_ctx}")
+    elif local_ai.LLM.is_down():
+        return params  # the /admin/context call just opened the breaker; it logged once
+    else:
+        log.warning(f"[AgentLoop] {model}: live context unknown ({why}); using "
+                    f"{'llm_local_max_ctx' if cap is not None else 'the default'} num_ctx={max_ctx}")
     try:
         async with shared_http_client() as client:
             resp = await client.get(f"{local_url.rstrip('/')}/api/ps",
@@ -1970,14 +2068,14 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
                         safe_ctx = max(4096, max_ctx // 2)
                         params["num_ctx"] = safe_ctx
                         log.info(f"[AgentLoop] VRAM PRESSURE. Scaling context down to {safe_ctx}.")
-                    # else: keep the configured max_ctx baseline
+                    # else: keep the max_ctx baseline
                 except json.JSONDecodeError:
-                    log.warning(f"[AgentLoop] Failed to parse VRAM status (api/ps) from {local_url}; using configured num_ctx={max_ctx}")
+                    log.warning(f"[AgentLoop] Failed to parse VRAM status (api/ps) from {local_url}; using num_ctx={max_ctx}")
     except Exception as e:
         # Never let a transient VRAM check drop the context to Ollama's default.
         if local_ai.LLM.record_failure(e):
             return params  # logged once by the breaker, not on every request
-        log.warning(f"[AgentLoop] VRAM status check failed ({e!r}); using configured num_ctx={max_ctx}")
+        log.warning(f"[AgentLoop] VRAM status check failed ({e!r}); using num_ctx={max_ctx}")
     return params
 
 
@@ -2021,8 +2119,14 @@ async def execute_inference_with_kill(
     if not mission_id:
         return await execute_inference(provider, model, messages, options, chunk_callback=chunk_callback)
 
+    from services.gateway.messaging import PRIORITY_LOW
+
+    mission_options = dict(options or {})
+    mission_options.setdefault("priority", PRIORITY_LOW)
+    mission_options.setdefault("request_source", "shared-llm/raven")
+
     inf_task = asyncio.create_task(
-        execute_inference(provider, model, messages, options, chunk_callback=chunk_callback)
+        execute_inference(provider, model, messages, mission_options, chunk_callback=chunk_callback)
     )
 
     async def _kill_watch() -> None:
@@ -2888,6 +2992,170 @@ class MissionEventStream:
             log.warning(f"Failed to stream event: {e}")
 
 
+# --- FUEL GAUGE (token-based context budgeting) ---
+# Estimate tokens from text length using 4 chars/token + 10% margin.
+# Matches the estimator in prompt_budget.py; no real tokenizer dependency exists.
+_FUEL_EST_CHARS_PER_TOKEN = 4
+_FUEL_TOKEN_MARGIN = 1.1
+
+# Context overflow error signatures (detected from provider error messages)
+_FUEL_CONTEXT_OVERFLOW_PATTERNS = (
+    "exceeds the available context size",
+    "exceed_context_size_error",
+    "context_length_exceeded",
+    "context length",
+)
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count from character length."""
+    if not text:
+        return 0
+    return int(len(text) / _FUEL_EST_CHARS_PER_TOKEN * _FUEL_TOKEN_MARGIN)
+
+
+def _conversation_token_budget(conv: list[dict]) -> int:
+    """Estimate total tokens in a conversation list."""
+    return sum(_estimate_tokens(m.get("content", "") or "") for m in conv)
+
+
+def _stub_old_turns(conv: list[dict]) -> list[dict]:
+    """Replace old assistant file writes and large tool results with stubs.
+
+    The most recent assistant turn stays whole; all prior assistant turns
+    have their content replaced with a concise summary. Large user tool
+    results (>3000 chars) are also stubbed to save context for later turns.
+    """
+    result = []
+    last_assistant_idx = None
+    last_user_idx = None
+    # The newest assistant turn and the newest user turn (the current tool result) stay whole.
+    for i in range(len(conv) - 1, -1, -1):
+        if last_assistant_idx is None and conv[i].get("role") == "assistant":
+            last_assistant_idx = i
+        if last_user_idx is None and conv[i].get("role") == "user":
+            last_user_idx = i
+        if last_assistant_idx is not None and last_user_idx is not None:
+            break
+
+    for i, m in enumerate(conv):
+        role = m.get("role", "")
+        content = m.get("content", "") or ""
+        if role == "assistant" and i != last_assistant_idx:
+            # Stub old assistant turns: preserve the action summary but drop file contents
+            stub_lines = []
+            for line in content.split("\n"):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    continue
+                if stripped:
+                    stub_lines.append(stripped[:200])
+            stubbed = "\n".join(stub_lines)[:150]
+            if not stubbed:
+                stubbed = "assistant: [previous turn stubbed]"
+            result.append({"role": role, "content": stubbed})
+        elif role == "user" and i != last_user_idx and len(content) > 3000:
+            # Stub large tool results but keep the role and a hint
+            result.append({"role": role, "content": f"[tool result: {len(content)} chars, truncated for context]"})
+        else:
+            result.append(m)
+    return result
+
+
+def _is_context_overflow_error(error_msg: str) -> bool:
+    """Check if an error indicates the conversation exceeded the context window."""
+    lower = error_msg.lower()
+    return any(p in lower for p in _FUEL_CONTEXT_OVERFLOW_PATTERNS)
+
+
+def _compact_conversation(conv: list[dict], mission_vram_params: dict | None = None) -> list[dict]:
+    """Token-based conversation compaction with bounded mission log note.
+
+    Budget = num_ctx - num_predict - 1024-token reserve.
+    When system + messages exceed 70% of budget, older turns are compacted
+    into a single bounded "Mission log so far" note appended to system.
+    The most recent ~35% of budget is kept verbatim (at least 2 turns).
+    """
+    # Compute budget from VRAM params
+    if mission_vram_params:
+        num_ctx = int(mission_vram_params.get("num_ctx", 16384))
+        num_predict = int(mission_vram_params.get("num_predict", 3072))
+        budget = num_ctx - num_predict - 1024
+    else:
+        budget = 16384 - 3072 - 1024  # default fallback
+
+    if budget <= 0:
+        budget = 8192  # safety floor
+
+    total_tokens = _conversation_token_budget(conv)
+
+    # Check if compaction is needed (70% threshold)
+    if total_tokens <= int(budget * 0.70):
+        return conv
+
+    system_msgs = [m for m in conv if m.get("role") == "system"]
+    # Old file writes and big old tool results become short stubs before anything is dropped.
+    body = _stub_old_turns([m for m in conv if m.get("role") != "system"])
+
+    if len(body) < 2:
+        return conv
+
+    # Keep recent turns within ~35% of budget (at least last 2 turns)
+    keep_token_budget = int(budget * 0.35)
+
+    # Greedily keep recent turns until we hit the keep budget
+    kept_tokens = 0
+    recent = []
+    older = []
+    for m in reversed(body):
+        t = _estimate_tokens(m.get("content", "") or "")
+        if kept_tokens + t <= keep_token_budget and len(recent) < len(body):
+            recent.append(m)
+            kept_tokens += t
+        else:
+            older.append(m)
+
+    recent.reverse()  # restore original order
+    older.reverse()
+
+    # Build bounded mission log note (cap ~1500 tokens)
+    note_cap_tokens = 1500
+    note_lines = []
+    note_tokens = 0
+    # Newest first, so the entries closest to now survive the cap; shown oldest first.
+    for m in reversed(older):
+        role = m.get("role", "user")
+        content = m.get("content", "") or ""
+        t = _estimate_tokens(content)
+        if note_tokens + t > note_cap_tokens and note_lines:
+            break
+        # Truncate long entries to fit budget
+        max_chars = int((note_cap_tokens - note_tokens) * _FUEL_EST_CHARS_PER_TOKEN / _FUEL_TOKEN_MARGIN)
+        if len(content) > max_chars and max_chars > 50:
+            note_lines.append(f"[{role}] {content[:max_chars]}...")
+        else:
+            note_lines.append(f"[{role}] {content}")
+        note_tokens += t
+
+    note_lines.reverse()
+    compact_note = (
+        "MISSION LOG SO FAR (preserved learnings; do not re-derive):\n"
+        + "\n".join(note_lines)
+    )
+
+    # Replace system message with compacted version (never append repeatedly)
+    base_system = system_msgs[0]["content"] if system_msgs else ""
+    # Strip any previous compact note to avoid accumulation
+    base_system = re.sub(
+        r"\n\nMISSION LOG SO FAR.*",
+        "",
+        base_system,
+        flags=re.DOTALL,
+    )
+    new_system = {"role": "system", "content": base_system + "\n\n" + compact_note}
+    return [new_system, *recent]
+
+
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False, workspace_id: str | None = None, history_log: str | None = None) -> Any:
     full_audit_log: list[dict] = []
     events = MissionEventStream(mission_id, full_audit_log)
@@ -3098,6 +3366,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # caught even when the literal command string varies between iterations.
     _recent_shell_runs: list[tuple[str, str]] = []
     _written_files: set[str] = set()
+    # Mission discipline: the objectives checklist and the runtime-checked debrief.
+    _discipline = Discipline()
+    _debrief_answer: str | None = None
     _verified_files: set[str] = set()
     _verification_nudge_sent = False
     _stagnation_nudge_sent = False
@@ -3160,6 +3431,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 _cp_files = cp.get("written_files")
                 if isinstance(_cp_files, list):
                     _written_files.update(_cp_files)
+                _discipline.restore(cp)
                 log.info(f"[AgentLoop] Resuming mission {mission_id} from iteration {start_iteration} (restored {len(action_log)} action log entries)")
             # NOTE: do NOT close r_cp; it is the module-level shared singleton
             # returned by _get_redis_cmd(). Closing it here would set the
@@ -3220,36 +3492,6 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         log.info(f"[AgentLoop] Context compressed: {len(older)} older entries summarized, {len(recent)} recent kept")
         return summary, recent_joined
 
-    def _compact_conversation(conv: list[dict], keep_last: int = 10, threshold: int = 48000) -> list[dict]:
-        """Keep a running, compacted conversation so the model retains learned context
-        across a long mission instead of only seeing the last tool result each turn.
-
-        When the total context exceeds `threshold`, older turns are folded into the
-        system prompt (preserved learnings) while the most recent `keep_last` turns are
-        kept verbatim. This prevents the model from 'forgetting' earlier decisions while
-        bounding token usage / llama.cpp cache thrashing.
-        """
-        total = sum(len(m.get("content", "")) for m in conv)
-        if total <= threshold:
-            return conv
-        system_msgs = [m for m in conv if m.get("role") == "system"]
-        body = [m for m in conv if m.get("role") != "system"]
-        if len(body) <= keep_last:
-            return conv
-        older = body[:-keep_last]
-        recent = body[-keep_last:]
-        note_lines = []
-        for m in older:
-            c = m.get("content", "") or ""
-            note_lines.append(f"[{m.get('role', 'user')}] {c[:240]}{'…' if len(c) > 240 else ''}")
-        compact_note = (
-            "COMPACTED EARLIER CONTEXT (preserved learnings; do not re-derive):\n"
-            + "\n".join(note_lines)
-        )
-        base_system = system_msgs[0]["content"] if system_msgs else ""
-        new_system = {"role": "system", "content": base_system + "\n\n" + compact_note}
-        return [new_system, *recent]
-
     async def _save_checkpoint(iter_num: int) -> None:
         if not mission_id:
             return
@@ -3267,6 +3509,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # workspace_id could leak into payloads.
                 "workspace_id": workspace_id,
                 "written_files": sorted(_written_files),
+                **_discipline.to_checkpoint(),
                 "updated_at": asyncio.get_event_loop().time(),
             }
             await r_cp.setex(
@@ -3546,12 +3789,22 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             )
             if _guidance:
                 user_content += "\n\n" + _guidance
+            _objectives_line = _discipline.line()
+            if _objectives_line:
+                user_content += "\n\n" + _objectives_line
 
             # Maintain a running, compacted conversation so the model retains learned
             # context across the mission instead of only seeing the last tool result.
             conversation.append({"role": "user", "content": user_content})
-            conversation = _compact_conversation(conversation)
+            conversation = _compact_conversation(conversation, mission_vram_params)
             ollama_payload["messages"] = conversation
+
+            # --- FUEL EVENT: record token budget per iteration ---
+            fuel_tokens = _conversation_token_budget(conversation)
+            num_ctx_val = int(mission_vram_params.get("num_ctx", 16384)) if mission_vram_params else 16384
+            num_predict_val = int(mission_vram_params.get("num_predict", 3072)) if mission_vram_params else 3072
+            fuel_budget = num_ctx_val - num_predict_val - 1024
+            await stream_event("fuel", {"fuel_used": fuel_tokens, "fuel_budget": fuel_budget})
 
             # --- RETRY LOGIC ---
             MAX_INFERENCE_RETRIES = 3
@@ -3609,8 +3862,58 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 except BackendUnavailable:
                     raise  # the machine is off: retrying in 5 and 10 s cannot help
                 except Exception as e:
+                    error_str = str(e)
+                    # Overflow recovery: if context exceeded, do NOT retry identical
+                    # messages. Compact hard (to 50% of budget) and retry once.
+                    if _is_context_overflow_error(error_str) and retry_count == 0:
+                        log.warning(
+                            f"[AgentLoop] Context overflow detected on attempt 1: {error_str[:200]}. "
+                            "Hard-compacting conversation and retrying once."
+                        )
+                        # Hard compact: keep only the last 2 turns within 50% of budget
+                        system_msgs = [m for m in conversation if m.get("role") == "system"]
+                        body_msgs = [m for m in conversation if m.get("role") != "system"]
+                        hard_keep_tokens = int(fuel_budget * 0.50)
+                        hard_kept = []
+                        hard_tokens = 0
+                        for m in reversed(body_msgs):
+                            t = _estimate_tokens(m.get("content", "") or "")
+                            if hard_tokens + t <= hard_keep_tokens:
+                                hard_kept.append(m)
+                                hard_tokens += t
+                            if len(hard_kept) >= 4:  # cap at 4 most recent turns
+                                break
+                        hard_kept.reverse()
+                        if not hard_kept and body_msgs:
+                            # The newest turn alone is too big: keep its tail so the current
+                            # tool result is never lost.
+                            newest = dict(body_msgs[-1])
+                            keep_chars = int(hard_keep_tokens * _FUEL_EST_CHARS_PER_TOKEN / _FUEL_TOKEN_MARGIN)
+                            newest["content"] = "[truncated]\n" + (newest.get("content", "") or "")[-keep_chars:]
+                            hard_kept = [newest]
+                        conversation = [system_msgs[0] if system_msgs else conversation[0], *hard_kept]
+                        ollama_payload["messages"] = conversation
+                        # Record the hard-compact fuel event
+                        fuel_tokens = _conversation_token_budget(conversation)
+                        await stream_event("fuel", {"fuel_used": fuel_tokens, "fuel_budget": fuel_budget, "compacted": True})
+                        # Retry once with compacted context
+                        wait_time = 5
+                        log.info(f"[AgentLoop] Retrying after hard-compact in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                        continue
                     log.warning(f"[AgentLoop] Inference attempt {retry_count + 1} failed: {e}")
                     if retry_count < MAX_INFERENCE_RETRIES - 1:
+                        # If this was an overflow error, do NOT retry again (already retried once)
+                        if _is_context_overflow_error(error_str) and retry_count >= 1:
+                            log.error(
+                                "[AgentLoop] Context overflow persists after hard-compact retry. "
+                                "Ending mission."
+                            )
+                            await stream_event("system", "MISSION FAILED: Context window exceeded even after compaction. The mission was too complex for the available context.")
+                            heartbeat_stop.set()
+                            await hb_task
+                            await _clear_checkpoint()
+                            return "MISSION FAILED: Context window exceeded. The mission requirements exceeded the model's context capacity."
                         wait_time = 5 * (retry_count + 1)
                         log.info(f"[AgentLoop] Retrying in {wait_time}s...")
                         await asyncio.sleep(wait_time)
@@ -3783,7 +4086,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # MAX_IDLE_NUDGES turns.
             if successful_tool_calls > 0 and ans:
                 _ans_l = ans.lower()
-                if any(ind in _ans_l for ind in COMPLETION_INDICATORS):
+                _still_open = _discipline.open_objectives()
+                if any(ind in _ans_l for ind in COMPLETION_INDICATORS) and _still_open:
+                    # Objectives were set and are not all done: words alone do not end it.
+                    log.info(f"[AgentLoop] Completion phrase with open objectives {_still_open}; asking for the debrief.")
+                    action_log.append(
+                        f"ITERATION {iter_num}: You said the mission is complete, but these objectives are not "
+                        f"done or dropped: {', '.join(_still_open)}. Finish them (or drop them with a note via "
+                        f"MissionObjectivesRequest), then call MissionCompleteRequest."
+                    )
+                elif any(ind in _ans_l for ind in COMPLETION_INDICATORS):
                     log.info(f"[AgentLoop] Completion signal detected in text reply after {successful_tool_calls} tool call(s). Terminating mission as complete.")
                     await _clear_checkpoint()
                     break
@@ -3904,6 +4216,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                         log.warning(f"[AgentLoop] Media validation of {_me_path} failed: {_me_e}")
                         except Exception as _ge:
                             log.warning(f"[AgentLoop] Workspace listing check failed on stall: {_ge}")
+                    if _gate_ok and _discipline.open_objectives():
+                        # A verified stall is not the end while objectives are open; the
+                        # MAX_IDLE_NUDGES guard below still ends a mission that never moves.
+                        _gate_ok = False
+                        action_log.append(
+                            f"ITERATION {iter_num}: Objectives still open: {', '.join(_discipline.open_objectives())}. "
+                            f"Finish them or drop them with a note, then call MissionCompleteRequest."
+                        )
                     if _gate_ok:
                         log.info(f"[AgentLoop] {_consecutive_no_tool} consecutive no-tool replies after {successful_tool_calls} successful tool call(s) with a verified artifact and nothing queued; treating as completion.")
                         await _clear_checkpoint()
@@ -4029,8 +4349,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # Tier 2: Regex patterns for common hallucinations
             if action_name not in ALLOWED_TOOLS:
                 regex_aliases = [
+                    (r'.*mission.*objective.*', "missionobjectivesrequest"),
+                    (r'.*mission.*(complete|debrief).*', "missioncompleterequest"),
                     (r'.*workspace.*shell.*', "workspaceshellrequest"),
                     (r'.*workspace.*search.*', "workspacesearchrequest"),
+                    (r'.*workspace.*list.*', "workspacelistrequest"),
                     (r'.*workspace.*lint.*', "workspacelintrequest"),
                     (r'.*workspace.*read.*', "workspacefilereadrequest"),
                     (r'.*workspace.*write.*', "workspacefilewriterequest"),
@@ -4101,7 +4424,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 else:
                     # Build a helpful tool table for the LLM
                     tool_categories = {
-                        "Workspace Tools": ["workspacefilereadrequest", "workspacefilewriterequest", "workspacefilepatchrequest", "workspacelintrequest", "workspacesearchrequest", "workspaceshellrequest", "workspacebootstraprequest", "workspacecreaterequest", "workspacesettingsupdaterequest"],
+                        "Workspace Tools": ["workspacefilereadrequest", "workspacefilewriterequest", "workspacefilepatchrequest", "workspacelintrequest", "workspacesearchrequest", "workspacelistrequest", "workspacebootstraprequest", "workspacecreaterequest", "workspacesettingsupdaterequest"],
                         "Git Tools": ["gitoperationrequest"],
                         "Storage Tools": ["storagefilereadrequest", "storagefilewriterequest", "storagelistrequest", "storageindexrequest"],
                         "Media Tools": ["mediaplayrequest", "mediatransportrequest", "mediastatusrequest", "videoplayrequest", "ttsrequest", "sttrequest", "audiobookregeneraterequest"],
@@ -4198,6 +4521,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "workspacefilepatchrequest": (EXECUTION_SVC, "/execute/workspace_file_patch"),
                 "workspacelintrequest": (EXECUTION_SVC, "/execute/workspace_lint"),
                 "workspacesearchrequest": (EXECUTION_SVC, "/execute/workspace_search"),
+                "workspacelistrequest": (EXECUTION_SVC, "/execute/workspace_list"),
                 "workspaceshellrequest": (EXECUTION_SVC, "/execute/workspace_shell"),
                 "workspacecreaterequest": (WORKSPACE_RUNTIME_SVC, "/workspaces"),
                 "workspacesettingsupdaterequest": (WORKSPACE_RUNTIME_SVC, "/workspaces/{workspace_id}"),
@@ -4226,6 +4550,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "executionlogrequest": (EXECUTION_SVC, "/execute/logs"),
                 "documentbroadcastrequest": (EXECUTION_SVC, "/execute/composite/broadcast"),
                 "nightmoderequest": (EXECUTION_SVC, "/execute/composite/night_mode"),
+                "dropinrequest": (EXECUTION_SVC, "/execute/drop_in"),
                 "ttsrequest": (EXECUTION_SVC, "/execute/tts"),
                 "sttrequest": (EXECUTION_SVC, "/execute/stt/transcribe_workspace"),
                 "audiobookregeneraterequest": (EXECUTION_SVC, "/execute/audiobook/regenerate"),
@@ -4404,12 +4729,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 _ws_actions = {
                     "workspacefilereadrequest", "workspacefilewriterequest",
                     "workspacefilepatchrequest", "workspaceshellrequest",
-                    "workspacesearchrequest", "workspacelintrequest",
+                    "workspacesearchrequest", "workspacelistrequest",
+                    "workspacelintrequest",
                     "gitoperationrequest", "workspacebootstraprequest",
                     "workspacesettingsupdaterequest",
                     "ocrrequest", "imageeditrequest",
                     "podcastrenderrequest", "speakeridentifyrequest",
                 }
+                if lookup_action == "workspacefilereadrequest" and isinstance(payload, dict):
+                    # Field kit: the agent reads numbered 300-line windows so it can cite and
+                    # continue exact lines; other callers (Raven memory, MDM) get plain text.
+                    payload.setdefault("line_numbers", True)
+                    payload.setdefault("limit_lines", 300)
                 if workspace_id and isinstance(payload, dict) and lookup_action in _ws_actions:
                     payload["workspace_id"] = workspace_id
                     if _git_batch:
@@ -4422,6 +4753,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # workspace. If Raven attempts `gh repo create` (or similar) there, fail
                 # loudly so it creates a workspace first instead of polluting a shared one.
                 _skip_post = False
+
+                # Mission discipline: the checklist and the debrief are handled here,
+                # against the loop's own write/verify tracking (mission_discipline.py).
+                if lookup_action == "missionobjectivesrequest":
+                    exec_data = _discipline.set_objectives(payload)
+                    _skip_post = True
+                elif lookup_action == "missioncompleterequest":
+                    exec_data, _debrief_answer = _discipline.review_debrief(
+                        payload, pending_verification(_written_files, _verified_files)
+                    )
+                    _skip_post = True
 
                 # Workspace Studio: the same handlers as /api/studio/*, run here as
                 # the mission's user. A failed step (tests failing, nothing ran) is
@@ -5289,6 +5631,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             await stream_event("result_error", str(e))
             log.error(f"[AgentLoop] Tool execution failed: {e}")
             exec_data = {"status": "ERROR", "message": str(e)}
+
+        # --- MISSION DISCIPLINE: an accepted debrief ends the mission with its summary ---
+        if _debrief_answer is not None:
+            log.info(f"[AgentLoop] Debrief accepted after {successful_tool_calls} tool call(s); mission complete.")
+            ans = _debrief_answer
+            await _clear_checkpoint()
+            break
 
         # --- STAGNATION ESCALATION (OpenCode: stop blind retries, re-plan/ASK) ---
         # If the same step keeps failing, nudge once to change approach; if it

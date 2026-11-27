@@ -535,3 +535,108 @@ async def capabilities(request: Request):
     allowed = ("ability", "area", "domain", "device_id", "platform", "available")
     params = [(k, v) for k, v in request.query_params.multi_items() if k in allowed]
     return _answer(*await _hub("GET", "/api/homehub/capabilities", params=params or None))
+
+
+# -- Tasmota templates (homehub tasmota_templates.py) -----------------------------------------------
+
+#: Loading a template restarts the device; the hub waits up to 30 s for it and reads it back.
+_TEMPLATE_TIMEOUT = aiohttp.ClientTimeout(total=120, connect=5)
+_TEMPLATE_KIND = re.compile(r"^[a-z]{3,10}$")
+
+
+@router.get("/tasmota/templates")
+async def tasmota_templates(request: Request, kind: str | None = None, q: str | None = None):
+    """The catalog of Tasmota templates, by kind and words."""
+    await _admin(request)
+    params: dict[str, str] = {}
+    if kind:
+        if not _TEMPLATE_KIND.match(kind):
+            raise HTTPException(status_code=400, detail="Unknown kind")
+        params["kind"] = kind
+    if q:
+        params["q"] = q[:100]
+    return _answer(*await _hub("GET", "/hub/tasmota/templates", params=params or None))
+
+
+@router.get("/tasmota/{entry_id}/template")
+async def tasmota_template(entry_id: str, request: Request):
+    """A Tasmota device's template now, the catalog entries it equals, and up to three suggestions."""
+    await _admin(request)
+    return _answer(*await _hub("GET", f"/hub/tasmota/{_rid(entry_id, 'integration')}/template",
+                               timeout=_SCAN_TIMEOUT))
+
+
+@router.post("/tasmota/{entry_id}/template")
+async def tasmota_apply_template(entry_id: str, request: Request):
+    """Load a template: ``{"template"? or "catalog_id"?, "confirm": true}``; the device restarts."""
+    await _admin(request)
+    body = await _json(request)
+    payload = {k: body[k] for k in ("template", "catalog_id", "measured_id", "confirm") if k in body}
+    return _answer(*await _hub("POST", f"/hub/tasmota/{_rid(entry_id, 'integration')}/template", json=payload,
+                               timeout=_TEMPLATE_TIMEOUT))
+
+
+@router.post("/tasmota/{entry_id}/template/restore")
+async def tasmota_restore_template(entry_id: str, request: Request):
+    """Send back the template the last load replaced: ``{"confirm": true}``."""
+    await _admin(request)
+    body = await _json(request)
+    payload = {k: body[k] for k in ("confirm",) if k in body}
+    return _answer(*await _hub("POST", f"/hub/tasmota/{_rid(entry_id, 'integration')}/template/restore",
+                               json=payload, timeout=_TEMPLATE_TIMEOUT))
+
+
+# -- Tasmota pin finder and measured templates (homehub tasmota_pin_finder.py, tasmota_measured.py) ---------
+
+_FINDER_KEYS = {"start": ("confirm", "manufacturer", "model", "kind"), "answer": ("step", "answer"),
+                "cancel": ("confirm",)}
+_MEASURED_ID = re.compile(r"^measured-[a-z0-9-]{1,60}$")
+_MEASURED_KEYS = ("entry_id", "device_name", "manufacturer", "model", "kind", "chip", "template", "commands", "how",
+                  "notes", "measured_at")
+
+
+@router.get("/tasmota/{entry_id}/pinfinder")
+async def tasmota_pin_finder(entry_id: str, request: Request):
+    """The pin finder's state on a Tasmota light: the question to answer, its result, or a run to put back."""
+    await _admin(request)
+    return _answer(*await _hub("GET", f"/hub/tasmota/{_rid(entry_id, 'integration')}/pinfinder"))
+
+
+@router.post("/tasmota/{entry_id}/pinfinder/{action}")
+async def tasmota_pin_finder_action(entry_id: str, action: str, request: Request):
+    """``start`` (``{"confirm", "manufacturer"?, "model"?, "kind"?}``), ``answer`` (``{"step", "answer"}``) or
+    ``cancel`` (``{"confirm"}``). Starting, some answers and cancelling restart the device."""
+    await _admin(request)
+    if action not in _FINDER_KEYS:
+        raise HTTPException(status_code=404, detail="Not found")
+    body = await _json(request)
+    payload = {k: body[k] for k in _FINDER_KEYS[action] if k in body}
+    return _answer(*await _hub("POST", f"/hub/tasmota/{_rid(entry_id, 'integration')}/pinfinder/{action}",
+                               json=payload, timeout=_TEMPLATE_TIMEOUT))
+
+
+@router.post("/tasmota/{entry_id}/measured")
+async def tasmota_save_measured(entry_id: str, request: Request):
+    """Save the template a working device runs as measured on it: ``{"manufacturer", "model", "kind"?, "notes"?}``."""
+    await _admin(request)
+    body = await _json(request)
+    payload = {k: body[k] for k in ("manufacturer", "model", "kind", "notes") if k in body}
+    return _answer(*await _hub("POST", f"/hub/tasmota/{_rid(entry_id, 'integration')}/measured", json=payload,
+                               timeout=_SCAN_TIMEOUT))
+
+
+@router.post("/tasmota/measured")
+async def tasmota_record_measured(request: Request):
+    """Record a template worked out by hand (nothing is sent to the device)."""
+    await _admin(request)
+    body = await _json(request)
+    return _answer(*await _hub("POST", "/hub/tasmota/measured", json={k: body[k] for k in _MEASURED_KEYS if k in body}))
+
+
+@router.delete("/tasmota/measured/{rec_id}")
+async def tasmota_forget_measured(rec_id: str, request: Request):
+    """Forget a measured template."""
+    await _admin(request)
+    if not _MEASURED_ID.match(rec_id or ""):
+        raise HTTPException(status_code=404, detail="No such measured template")
+    return _answer(*await _hub("DELETE", f"/hub/tasmota/measured/{rec_id}"))

@@ -239,14 +239,55 @@ async def test_fetch_text_truncates_with_an_explicit_marker(monkeypatch):
     assert detail["total_chars"] == len(prose)
 
 
-async def test_a_pdf_only_book_is_refused_with_its_actual_problem(monkeypatch):
-    _install(monkeypatch, _identity(), _list(THREE_BOOKS), _fetch("", status=502))
+async def test_a_book_with_no_readable_file_is_refused_with_its_actual_problem(monkeypatch):
+    no_reader = _resp({"detail": "PDF Book is stored only as LIT, which has no chapter reader here."}, status=422)
+    _install(monkeypatch, _identity(), _list(THREE_BOOKS), _fetch("", status=502), no_reader)
     with pytest.raises(calibre_client.CalibreLibraryError, match="no text to fetch"):
         await _client().fetch_text(book_id=5)
 
 
-async def test_an_oversize_fetch_points_at_the_ceiling(monkeypatch):
-    _install(monkeypatch, _identity(), _list(THREE_BOOKS), _fetch("", status=413))
+async def test_a_pdf_only_book_is_read_through_storage(monkeypatch):
+    """Live: "Wild at Heart has no text to fetch: it is stored only as PDF" while storage
+    could read the PDF all along. The whole-book fetch now asks storage for the text."""
+    prose = "The first page of the fake book. " * 40
+    text_body = _resp({"book": {"id": 5}, "format": "PDF", "text": prose[:600],
+                       "total_chars": len(prose), "truncated": True})
+    fake = _install(monkeypatch, _identity(), _list(THREE_BOOKS), _fetch("", status=502), text_body)
+    text, detail = await _client().fetch_text(book_id=5, max_chars=600)
+    call = fake.calls[-1]
+    assert call["url"] == "http://storage:8005/calibre/books/5/text"
+    assert call["json"] == {"library_path": "/Books/Text", "max_chars": 600}
+    assert text.startswith(prose[:600])
+    assert "Truncated" in text and f"{len(prose):,} characters" in text
+    assert detail["truncated"] is True and detail["total_chars"] == len(prose)
+
+
+async def test_the_handler_returns_a_pdf_books_text(monkeypatch):
+    prose = "A short fake pamphlet."
+    text_body = _resp({"book": {"id": 5}, "format": "PDF", "text": prose, "total_chars": len(prose),
+                       "truncated": False})
+    _install(monkeypatch, _identity(), _list(THREE_BOOKS), _fetch("", status=502), text_body)
+    monkeypatch.setattr(calibre_handler, "_client", _client)
+    result = await calibre_handler.handle_calibre(_request("fetch_text", book_id=5))
+    assert result.status == "SUCCESS"
+    assert result.message.startswith("PDF Book by A. Author")
+    assert prose in result.message
+
+
+async def test_an_oversize_fetch_reads_the_book_file_and_cuts_it_honestly(monkeypatch):
+    """A big book (a long PDF, say) is read from its own file, not refused."""
+    prose = "Long book prose. " * 400
+    text_body = _resp({"book": {"id": 617}, "format": "PDF", "text": prose[:2000], "total_chars": len(prose),
+                       "truncated": True})
+    fake = _install(monkeypatch, _identity(), _list(THREE_BOOKS), _fetch("", status=413), text_body)
+    text, detail = await _client().fetch_text(book_id=617, max_chars=2000)
+    assert fake.calls[-1]["url"].endswith("/calibre/books/617/text")
+    assert text.startswith("Long book prose.") and detail["truncated"] is True
+
+
+async def test_an_oversize_fetch_with_no_readable_file_points_at_the_ceiling(monkeypatch):
+    refused = _resp({"detail": "No text reader for DJVU files; convert the book to EPUB in Calibre."}, status=422)
+    _install(monkeypatch, _identity(), _list(THREE_BOOKS), _fetch("", status=413), refused)
     with pytest.raises(calibre_client.CalibreLibraryError, match="too large for one fetch"):
         await _client().fetch_text(book_id=617)
 
@@ -259,7 +300,7 @@ async def test_a_storage_failure_keeps_its_status(monkeypatch):
 
 async def test_the_action_set_is_reads_and_tagging_never_a_delete():
     annotation = CalibreRequest.model_fields["action"].annotation
-    assert set(typing.get_args(annotation)) == {"list", "search", "get_book", "fetch_text", "tags", "by_tag", "audit", "tag"}
+    assert set(typing.get_args(annotation)) == {"list", "search", "get_book", "chapters", "fetch_text", "tags", "by_tag", "audit", "tag"}
 
 
 async def test_delete_is_not_a_nameable_action():

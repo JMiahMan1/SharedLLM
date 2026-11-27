@@ -1,9 +1,10 @@
 {
   "name": "ui",
   "private": true,
-  "version": "1.6.0",
+  "version": "1.8.0",
   "type": "module",
   "scripts": {
+    "prebuild": "node scripts/copy-lens-assets.mjs",
     "dev": "vite",
     "build": "DEBUG=vite:*,rolldown:* node build.js",
     "lint": "eslint .",
@@ -44,6 +45,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@mediapipe/tasks-vision": "1.2.3",
     "@replit/codemirror-vim": "^6.3.0",
     "@sendspin/sendspin-js": "3.2.0",
     "@tailwindcss/vite": "^4.2.4",
@@ -58,6 +60,7 @@
     "docx-preview": "^0.3.2",
     "exceljs": "^4.4.0",
     "framer-motion": "^12.38.0",
+    "gifenc": "1.0.3",
     "jszip": "^3.10.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.14.0",

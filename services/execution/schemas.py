@@ -128,6 +128,8 @@ class UserContext(BaseModel):
     model_config = {"extra": "ignore"}
     user: str
     is_admin: bool = False
+    #: A child or teen (Identity family_role): web video is always searched and screened strictly.
+    is_minor: bool = False
     #: "voice" when the person was recognised by their voice alone.
     identified_by: str | None = None
     #: "assistant" when voice or chat acts: only entities the hub exposes to voice may be controlled
@@ -229,24 +231,37 @@ class MediaPlayRequest(BaseRequest):
     query: str | None = Field(None, description="Search query: song/album/artist name, video title, podcast name, audiobook title, or URL")
     media_type: str | None = Field(None, description="Content type: 'music', 'video', 'podcast', 'audiobook', 'radio', 'url', 'announcement'")
     media_content_id: str | None = Field(None, description="Direct URL or media ID (bypasses search)")
-    media_content_type: str | None = Field(None, description="HA media_content_type hint (e.g., 'music', 'video', 'url', 'audio/wav')")
+    media_content_type: str | None = Field(None, description="HA media_content_type hint (e.g., 'music', 'video', 'url', 'audio/wav'); 'genre' searches Music Assistant playlists and radio first")
+    fallback_query: str | None = Field(None, description="One relaxed search to try when the query finds no music (e.g. 'worship' after 'worship music')")
     enqueue: Literal["add", "next", "replace"] | None = Field("replace", description="Queue behavior for Music Assistant")
     volume: float | None = Field(None, ge=0.0, le=1.0, description="Set volume before playback")
+    search_everywhere: bool = Field(False, description="Search every media source that is set up (Music Assistant, "
+                                    "Audiobookshelf, video on a screen, the book library) for query and play the best "
+                                    "match, ask between two equally good kinds, or say what was searched")
+    pick: dict | None = Field(None, description="An option from a search_everywhere question, played as is")
 
 
 class MediaTransportRequest(BaseRequest):
     user_context: UserContext
-    entity_id: str
+    entity_id: str | None = None
+    device_name: str | None = None
     command: Literal[
         "pause", "resume", "stop", "next", "previous",
-        "volume_up", "volume_down", "volume_set", "volume_mute", "mute",
+        "volume_up", "volume_down", "volume_set", "volume_mute", "mute", "volume_unmute",
         "home", "power_off", "power_on", "back", "play", "seek",
         "shuffle_set", "repeat_set", "join", "unjoin",
+        # Audiobook transport: relative seek, chapter navigation, speed, sleep timer.
+        "seek_relative", "chapter_next", "chapter_previous", "chapter_goto", "speed", "sleep",
         # Remote-control keys (TV d-pad and menu), sent as remote key presses.
         "up", "down", "left", "right", "select", "menu",
     ]
     volume_level: float | None = Field(None, ge=0.0, le=1.0)
     position: float | None = Field(None, ge=0.0, description="Seek target in seconds (command='seek')")
+    seconds: float | None = Field(None, description="Relative seek seconds; negative rewinds (command='seek_relative')")
+    chapter: int | None = Field(None, ge=1, description="1-based chapter number (command='chapter_goto')")
+    rate: float | None = Field(None, ge=0.5, le=3.0, description="Playback speed 0.5..3.0 (command='speed')")
+    minutes: float | None = Field(None, gt=0, description="Sleep timer length in minutes (command='sleep')")
+    end_of_chapter: bool | None = Field(None, description="Pause at the end of the current chapter (command='sleep')")
     muted: bool | None = Field(None, description="Mute target state (command='volume_mute')")
     shuffle: bool | None = Field(None, description="Shuffle target state (command='shuffle_set')")
     repeat: Literal["off", "one", "all"] | None = Field(None, description="Repeat mode (command='repeat_set')")
@@ -384,6 +399,8 @@ class AnnouncementRequest(BaseRequest):
     entity_ids: list[str] | None = Field(None, description="Optional multi-target entity IDs (room/speaker fan-out)")
     rooms: list[str] | None = Field(None, description="Optional room names resolved via room_speakers config / HA areas")
     group_id: str | None = Field(None, description="Optional media group ID whose members receive the announcement")
+    person: str | None = Field(None, description="A family member to announce to: their assigned speakers and satellites, plus their phone")
+    everywhere: bool = Field(False, description="Announce on one reachable speaker in every room")
     message: str
     volume: float | None = Field(0.6, ge=0.0, le=1.0)
     tts_engine: Literal["kokoro", "piper"] | None = "kokoro"
@@ -660,6 +677,7 @@ class WorkspaceFileReadRequest(BaseRequest):
     path: str = Field(..., alias="file_path", description="Path relative to workspace root (e.g. 'services/gateway/main.py')")
     offset_lines: int = Field(0, ge=0, description="Start reading from this line number (1-indexed)")
     limit_lines: int = Field(1000, ge=1, le=5000, description="Max lines to read")
+    line_numbers: bool = Field(False, description="Prefix each line with its number ('  12| text') and report next_offset (the agent's read tool turns this on)")
     summary_only: bool = Field(False, description="If true, returns only class/function signatures and docstrings (semantic map)")
 
     @model_validator(mode="before")
@@ -697,6 +715,7 @@ class ReplacementChunk(BaseModel):
     model_config = {"extra": "ignore", "populate_by_name": True}
     old_text: str = Field(..., alias="target_content", description="The exact text to be replaced")
     new_text: str = Field(..., alias="replacement_content", description="The replacement text")
+    replace_all: bool = Field(False, description="Replace all occurrences instead of requiring exactly one match")
 
     @model_validator(mode="before")
     @classmethod
@@ -811,6 +830,18 @@ class WorkspaceSearchRequest(BaseRequest):
     path: str = Field(".", description="Search directory relative to root")
     include: str | None = Field(None, description="Glob pattern to include (e.g. '*.py')")
     exclude: str | None = Field(None, description="Glob pattern to exclude (e.g. '**/tests/**')")
+    glob: str | None = Field(None, description="Glob pattern to filter result files (e.g. '*.py')")
+    max_results: int = Field(100, ge=1, le=1000, description="Total match cap (default 100)")
+
+class WorkspaceListRequest(BaseRequest):
+    """
+    Lists files under a path in the Git workspace.
+    Honours .gitignore via ripgrep's --files flag.
+    """
+    user_context: UserContext
+    path: str = Field(".", description="Directory to list relative to root")
+    glob: str | None = Field(None, description="Glob pattern to filter (e.g. '*.py')")
+    max_entries: int = Field(300, ge=1, le=5000, description="Max entries to return (default 300)")
 
 class WorkspaceLintRequest(BaseRequest):
     """
@@ -839,11 +870,12 @@ class WorkspaceLintRequest(BaseRequest):
 
 class StorageFileReadRequest(BaseRequest):
     """
-    Reads a file from Nextcloud storage (Documents/Notes).
-    Do NOT use this for code. Use WorkspaceFileReadRequest instead.
+    Reads a file from Nextcloud storage (Documents/Notes). A PDF comes back as
+    its text, page by page. Do NOT use this for code. Use WorkspaceFileReadRequest instead.
     """
     user_context: UserContext
     path: str = Field(..., description="Path within Nextcloud (e.g. '/Documents/memo.txt')")
+    start_page: int = Field(1, ge=1, description="For a PDF: the first page to read (continue a long document)")
 
 class StorageFileWriteRequest(BaseRequest):
     """
@@ -911,10 +943,13 @@ class WebSearchRequest(BaseRequest):
     max_results: int | None = Field(None, description="Maximum number of results to return")
 
 class WebReadRequest(BaseRequest):
-    """Fetches a URL and returns the content as markdown."""
+    """Fetches a URL and returns its readable text: a web page's main content as
+    markdown, a PDF's text page by page, or a plain-text file."""
     user_context: UserContext
     url: str
     use_current_user_auth: bool = False
+    start_page: int = Field(1, ge=1, description="For a PDF: the first page to read (continue a long document)")
+    save: bool = Field(False, description="Also save the downloaded file (PDF or other file) to the user's Downloads folder")
 
 
 class BrowserAction(BaseModel):
@@ -1162,18 +1197,25 @@ class AudiobookshelfRequest(BaseRequest):
     Interacts with Audiobookshelf (ABS) for searching, playing, and tracking audiobooks.
     """
     user_context: UserContext
-    action: Literal["search", "play", "play_podcast_episode", "resume", "progress", "libraries", "list", "get_book", "last_played", "update_progress"]
+    action: Literal["search", "play", "play_by", "play_podcast_episode", "resume", "progress", "libraries", "list", "get_book", "last_played", "update_progress", "podcasts", "podcast_auto_download", "users", "user_create"]
     query: str | None = Field(None, description="Search query or book title")
+    author: str | None = Field(None, description="play_by: the author whose book to play (misheard names are matched to the library)")
+    series: str | None = Field(None, description="play_by: the series whose book to play")
+    latest: bool = Field(False, description="play_by: the newest book (by publication) rather than the one in progress")
     book_id: str | None = Field(None, description="ABS item ID for play/resume/progress")
     item_id: str | None = Field(None, description="ABS item ID for update_progress")
     episode_id: str | None = Field(None, description="ABS episode ID for play_podcast_episode and update_progress")
     entity_id: str | None = Field(None, description="Home Assistant media_player entity to play on")
+    device_name: str | None = Field(None, description="Room/area or device name to resolve to a player")
     library_id: str | None = Field(None, description="ABS library ID to browse")
     current_time: float | None = Field(None, ge=0, description="Playback position in seconds for update_progress")
     duration: float | None = Field(None, gt=0, description="Item duration in seconds for update_progress")
     is_finished: bool = Field(False, description="Mark the item finished for update_progress")
     limit: int = Field(10, ge=1, le=50, description="Max results to return")
     page: int = Field(0, ge=0, description="0-based page for action=list (ABS /api/libraries/{id}/items)")
+    auto_download: bool = Field(False, description="podcast_auto_download: download new episodes automatically")
+    username: str | None = Field(None, description="user_create: the account name to create")
+    password: str | None = Field(None, description="user_create: the password to give the new account")
 
 
 class BibleRequest(BaseRequest):
@@ -1204,7 +1246,9 @@ class BibleRequest(BaseRequest):
 class CalibreRequest(BaseRequest):
     """The family's Calibre library, for Jarvis as its librarian.
 
-    Reads: list, search, get_book, fetch_text, tags (every tag and its count),
+    Reads: list, search, get_book, chapters (a book's chapters from its own
+    contents), fetch_text (the whole book, or one chapter with ``chapter``,
+    long chapters in ``part``s), tags (every tag and its count),
     by_tag (the books with one tag, or untagged ones), audit (copies, other
     editions, books with no file or no readable text, untagged books).
 
@@ -1216,13 +1260,23 @@ class CalibreRequest(BaseRequest):
     """
 
     user_context: UserContext
-    action: Literal["list", "search", "get_book", "fetch_text", "tags", "by_tag", "audit", "tag"]
-    query: str | None = Field(None, description="Words from a title, author or tag; required for action=search")
+    action: Literal["list", "search", "get_book", "chapters", "fetch_text", "tags", "by_tag", "audit", "tag"]
+    query: str | None = Field(
+        None,
+        description="Words from a title, author or tag; required for action=search. For chapters and "
+        "fetch_text, the book's title and/or author (e.g. 'Wild at Heart John Eldredge') in place of book_id",
+    )
+    chapter: str | int | None = Field(
+        None,
+        description="fetch_text: read only this chapter, by number (4, 'four', 'IV') or title; the "
+        "author's numbering, front matter not counted",
+    )
+    part: int = Field(1, ge=1, le=1000, description="fetch_text with chapter: which part of a long chapter (1 first)")
     tag: str | None = Field(None, description="The tag for action=by_tag (e.g. fasting); omit with untagged=true")
     untagged: bool = Field(False, description="action=by_tag: list books with no tags at all")
     add_tags: list[str] = Field(default_factory=list, max_length=20, description="action=tag: tags to add to book_id")
     remove_tags: list[str] = Field(default_factory=list, max_length=20, description="action=tag: tags to remove from book_id")
-    book_id: int | None = Field(None, description="Calibre book id; preferred locator for get_book and fetch_text")
+    book_id: int | None = Field(None, description="Calibre book id; preferred locator for get_book, chapters and fetch_text")
     path: str | None = Field(None, description="Shelf path locator (ends in ' (<id>).txt'); alternative to book_id")
     limit: int = Field(20, ge=1, le=100, description="Max books returned by list and search")
     max_chars: int = Field(20000, ge=500, le=100000, description="Characters of text returned by fetch_text before honest truncation")
@@ -1299,8 +1353,10 @@ class ResolveStreamRequest(BaseRequest):
 
 class OcrRequest(BaseRequest):
     """
-    Extracts all visible text from an image in the workspace using the
-    user-configured vision LLM (vision_ocr_model, e.g. qwen2.5-vl:7b).
+    Extracts all visible text from an image (or a PDF) in the workspace using
+    the user-configured vision LLM (vision_ocr_model, e.g. qwen2.5-vl:7b). A PDF
+    with a text layer is read from it; a scanned PDF's pages are rendered and
+    read by the vision model, a few pages per call (continue with start_page).
 
     Returns structured fields: full_text, headline, subtext, badge.
     """
@@ -1309,6 +1365,9 @@ class OcrRequest(BaseRequest):
     # An image sent inline instead of a workspace file (a photo of a food label
     # from the Health hub): base64 bytes, never written outside a temp file.
     image_base64: str | None = Field(None, description="Base64 image bytes, used instead of image_path")
+    # A PDF is read too: its text layer for 'general'/'document', else its pages
+    # rendered as images, a few pages per call.
+    start_page: int = Field(1, ge=1, description="For a PDF: the first page to read (continue a long document)")
     task: str = Field(
         "general",
         description=(
@@ -1440,3 +1499,45 @@ class LocationRequest(BaseRequest):
     to: str | None = Field(None, description="For detail 'eta' or 'closest': the place, a Home Assistant zone name such as 'home', 'work' or 'school' (eta defaults to 'home')")
     hours: float | None = Field(24.0, description="Hours of history to analyze for telemetry (default: 24.0)")
 
+
+class DropInRequest(BaseRequest):
+    """Start, end, or inspect a Drop In between Echo devices.
+
+    ``target_room`` is what the person called the room (or ``room_of:<person>``
+    for "where <person> is"). ``target_user_id`` resolves that person's room
+    through the hub's Bluetooth room detection. ``target_device`` names one Echo
+    directly. ``source_satellite`` is the Echo that heard the request; it defaults
+    to ``user_context.voice_satellite``.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_action_aliases(cls, data: Any) -> Any:
+        """Map common LLM action aliases to the canonical Literal values."""
+        if isinstance(data, dict):
+            data = dict(data)
+            action = data.get("action")
+            if action is not None:
+                if action in ("hang_up", "hangup", "hang up", "stop", "end_call", "leave"):
+                    data["action"] = "end"
+                elif action in ("begin", "call", "drop_in", "start_call"):
+                    data["action"] = "start"
+                elif action in ("list", "active"):
+                    data["action"] = "status"
+        return data
+
+    action: Literal["start", "end", "status"] = Field(
+        "start", description="start a Drop In, end the active one, or list active Drop Ins."
+    )
+    target_room: str | None = Field(
+        None, description="Room or area name, alias, floor, or 'room_of:<person>'."
+    )
+    target_user_id: str | None = Field(
+        None, description="Person whose current room (hub Bluetooth presence) to drop in on."
+    )
+    target_device: str | None = Field(
+        None, description="Explicit Echo node or friendly name to drop in on."
+    )
+    source_satellite: str | None = Field(
+        None, description="assist_satellite.* entity that heard the request; defaults to the voice satellite."
+    )

@@ -122,6 +122,27 @@ MDNS_TYPES = (
     "_hap._udp.local.",   # HomeKit over Thread
     "_mass._tcp.local.",  # Music Assistant servers
 )
+#: Browsed for device identity only: never turned into findings or notices.
+MDNS_IDENTITY_TYPES = (
+    "_device-info._tcp.local.",   # Apple: model= iPad13,4 / iPhone15,2 / ...
+    "_companion-link._tcp.local.",
+    "_airplay._tcp.local.",       # model=, manufacturer=
+    "_raop._tcp.local.",          # am=
+    "_ipp._tcp.local.",           # ty=, usb_MFG=, usb_MDL=
+    "_printer._tcp.local.",       # ty=, usb_MFG=, usb_MDL=
+    "_spotify-connect._tcp.local.",
+    "_sonos._tcp.local.",
+    "_smb._tcp.local.",
+    "_workstation._tcp.local.",
+    "_amzn-wplay._tcp.local.",
+)
+MDNS_BROWSE_TYPES = MDNS_TYPES + MDNS_IDENTITY_TYPES
+#: TXT keys kept in the identity table (others are dropped).
+MDNS_IDENTITY_TXT_KEYS = ("model", "manufacturer", "am", "md", "fn", "ty", "usb_MFG", "usb_MDL")
+MDNS_IDENTITY_MAX_NAMES = 5
+MDNS_IDENTITY_MAX_VALUE = 120
+MDNS_IDENTITY_EXPIRE_S = 24 * 60 * 60
+MDNS_IDENTITY_MAX_ENTRIES = 1000
 
 LABELS = {
     "esphome": "ESPHome", "wiz": "WiZ", "cast": "Google Cast", "roku": "Roku", "matter": "Matter",
@@ -646,6 +667,7 @@ class DiscoveryManager:
         self.store = store
         self.notifier = notifier or _send_notice
         self.findings: dict[str, dict[str, Any]] = {}
+        self.identity: dict[str, dict[str, Any]] = {}
         self.ignored: dict[str, float] = {}
         self.notified: list[str] = []
         self.last_scan: dict[str, Any] = {}
@@ -984,8 +1006,62 @@ class DiscoveryManager:
         from zeroconf.asyncio import AsyncServiceBrowser
 
         self._azc = self.zeroconf_factory()
-        self._browser = AsyncServiceBrowser(self._azc.zeroconf, list(MDNS_TYPES), handlers=[self._on_mdns])
-        log.info("mDNS discovery browsing %d service types", len(MDNS_TYPES))
+        self._browser = AsyncServiceBrowser(self._azc.zeroconf, list(MDNS_BROWSE_TYPES), handlers=[self._on_mdns])
+        log.info("mDNS discovery browsing %d service types (%d for device identity only)",
+                 len(MDNS_BROWSE_TYPES), len(MDNS_IDENTITY_TYPES))
+
+    @staticmethod
+    def _identity_text(value: Any) -> str:
+        text = value.decode("utf-8", "replace") if isinstance(value, (bytes, bytearray)) else str(value)
+        return text[:MDNS_IDENTITY_MAX_VALUE]
+
+    def record_mdns_identity(self, service_type: str, name: str, host: str | None,
+                             properties: dict[Any, Any] | None, server: str | None) -> None:
+        """Merge one resolved mDNS service into the in-memory identity table."""
+        if not host or ":" in host:
+            return
+        stype = service_type if service_type.endswith(".") else service_type + "."
+        service = stype.removesuffix(".local.")
+        instance = name.removesuffix("." + stype).removesuffix(stype).rstrip(".")
+        t = now()
+        entry = self.identity.get(host)
+        if entry is None:
+            entry = {"names": [], "host": None, "services": [], "txt": {}, "last": t}
+            self.identity[host] = entry
+        entry["last"] = t
+        if server:
+            entry["host"] = self._identity_text(str(server).rstrip("."))
+        iname = self._identity_text(instance)
+        names = entry["names"]
+        if iname and iname not in names and len(names) < MDNS_IDENTITY_MAX_NAMES:
+            names.append(iname)
+        services = entry["services"]
+        if service and service not in services:
+            services.append(service)
+        txt = entry["txt"]
+        props = _props(properties)
+        for key in MDNS_IDENTITY_TXT_KEYS:
+            value = props.get(key)
+            if value:
+                txt[key] = self._identity_text(value)
+        self._prune_identity(t)
+
+    def _prune_identity(self, t: float | None = None) -> None:
+        t = now() if t is None else t
+        expired = [ip for ip, entry in self.identity.items()
+                   if t - float(entry.get("last") or 0) > MDNS_IDENTITY_EXPIRE_S]
+        for ip in expired:
+            self.identity.pop(ip, None)
+        if len(self.identity) <= MDNS_IDENTITY_MAX_ENTRIES:
+            return
+        ordered = sorted(self.identity.items(), key=lambda item: float(item[1].get("last") or 0))
+        for ip, _entry in ordered[: len(self.identity) - MDNS_IDENTITY_MAX_ENTRIES]:
+            self.identity.pop(ip, None)
+
+    def mdns_identities(self) -> dict[str, dict[str, Any]]:
+        """The identity table, pruning expired entries first."""
+        self._prune_identity()
+        return self.identity
 
     def _on_mdns(self, zeroconf: Any = None, service_type: str = "", name: str = "",
                  state_change: Any = None) -> None:
@@ -1022,9 +1098,31 @@ class DiscoveryManager:
         addrs = [a for a in info.parsed_addresses() if ":" not in a] or info.parsed_addresses()
         self.handle_mdns(service_type, name, addrs[0] if addrs else None, info.port, info.properties, info.server)
 
+    def _retry_reappeared(self, host: str | None, service_type: str) -> None:
+        """A device announcing itself again at an entry's address that is failing: retry that entry now.
+
+        Unplugged for a while (an Echo taken apart and put back), a device waits out a retry gap that
+        has grown to minutes; its mDNS announcement on boot says it is back.
+        """
+        runtime = self.runtime
+        if runtime is None or not host or not hasattr(runtime, "retry_now"):
+            return
+        from services.homehub import address_follow
+
+        for entry in list(self.hub.config_entries.values()):
+            if entry.entry_id not in getattr(runtime, "next_retry", {}):
+                continue
+            if any(ip == host for _where, ip in address_follow.addresses(entry).values()):
+                runtime.retry_now(entry.entry_id, f"{entry.title} announced itself over mDNS ({service_type.rstrip('.')})")
+
     def handle_mdns(self, service_type: str, name: str, host: str | None, port: int | None,
                     properties: dict[Any, Any] | None, server: str | None) -> dict[str, Any] | None:
         """One resolved service (the browser's callback, and the tests' entry point)."""
+        self._retry_reappeared(host, service_type)
+        try:
+            self.record_mdns_identity(service_type, name, host, properties, server)
+        except Exception:
+            log.exception("could not record mDNS identity for %s", name)
         try:
             finding = parse_mdns(service_type, name, host, port, properties, server)
         except Exception:

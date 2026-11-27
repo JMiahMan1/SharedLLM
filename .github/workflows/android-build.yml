@@ -26,6 +26,9 @@ on:
       - '.github/workflows/android-build.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   # Two runners at once: the debug APK with its unit tests and lint on one, the
   # release APK on the other. They were five Gradle runs in a row on a single
@@ -371,3 +374,23 @@ jobs:
           exit 1
         fi
         echo "[OK] Published APK build ${GIT_SHA:0:8}."
+
+    # The Releases page is where someone looks for an APK to install by hand.
+    # The hub publish above keeps the phones' in-app update working; this keeps
+    # a downloadable copy next to the Windows installer.
+    - name: Publish to the GitHub release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        APK_PATH: services/ui/android/app/build/outputs/apk/release/app-release.apk
+      run: |
+        if [ ! -f "$APK_PATH" ]; then
+          echo "::error::Built APK not found at $APK_PATH"
+          exit 1
+        fi
+        VERSION=$(python3 -c "import json;print(json.load(open('services/ui/package.json'))['version'])")
+        ASSET="jarvis-os-$VERSION.apk"
+        cp "$APK_PATH" "$ASSET"
+        sha256sum "$ASSET" | tee "$ASSET.sha256"
+        gh release view "v$VERSION" >/dev/null 2>&1 || gh release create "v$VERSION" --title "Jarvis $VERSION" --generate-notes
+        gh release upload "v$VERSION" "$ASSET" "$ASSET.sha256" --clobber
+        echo "[OK] v$VERSION now carries $ASSET."

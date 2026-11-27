@@ -1,4 +1,4 @@
-import { useState, FC } from 'react';
+import { useState, useRef, FC } from 'react';
 import { 
   Cloud, 
   Music, 
@@ -36,10 +36,12 @@ import SystemValueHint from '../components/ui/SystemValueHint';
 import { credentialPayload, inUse, integrationFor, isSecretKey, missingFields, prefill, type Defaults } from '../lib/credentialForm';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
+import { MusicAssistantUsersCard } from '../components/admin/MusicAssistantUsersCard';
 import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel';
 import VoiceSignaturePanel from '../components/settings/VoiceSignaturePanel';
 import SpotifyLinkPanel from '../components/settings/SpotifyLinkPanel';
 import AbuseChKeyTile from '../components/settings/AbuseChKeyTile';
+import BookCatalogueTile from '../components/settings/BookCatalogueTile';
 import HomeHubTile from '../components/settings/HomeHubTile';
 import MusicAssistantTile from '../components/settings/MusicAssistantTile';
 import { HA_OFF_NOTICE } from '../lib/homehub';
@@ -130,14 +132,23 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
       ? (userData as Record<string, string>)?.[connectionKey]?.replace(/^https?:\/\//, '')
       : 'DISCONNECTED';
 
+  const pendingMissingRef = useRef<string[]>([]);
+
   const updateMutation = useMutation({
     mutationFn: (data: Partial<UserProfile>) => api.updateProfile(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['me'] });
       setIsOpen(false);
-      toast.success(`${name} configuration updated`);
+      const missing = pendingMissingRef.current;
+      pendingMissingRef.current = [];
+      if (missing.length) {
+        toast(`Saved. Still needed before it works: ${missing.join(', ')}`, { icon: '⚠️' });
+      } else {
+        toast.success(`${name} configuration updated`);
+      }
     },
     onError: (err: unknown) => {
+      pendingMissingRef.current = [];
       if (err instanceof Error) {
         toast.error(err.message || 'Update failed');
       } else {
@@ -255,9 +266,26 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
 
               return (
                 <div key={key}>
-                  <div className="flex items-center mb-2">
+                  <div className="flex items-center gap-2 mb-2">
                     <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</span>
                     <HelpTooltip docName="INTEGRATIONS.md" sectionTitle={name} label={label} />
+                    {savedSecrets.has(key) && !isReadOnly && (
+                      // Removing one saved value, not the whole login: a token
+                      // that has expired can go without retyping the address.
+                      <button
+                        type="button"
+                        data-testid={`credential-remove-${key}`}
+                        onClick={() => {
+                          setForm({ ...form, [key]: '' });
+                          updateMutation.mutate({ clear_fields: [key] } as Partial<UserProfile>);
+                        }}
+                        disabled={updateMutation.isPending}
+                        className="ml-auto text-[10px] font-bold uppercase tracking-widest text-rose-300 hover:underline min-h-11 px-2"
+                        title={`Remove the saved ${label}`}
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                   {isSecret ? (
                     <SecretInput
@@ -277,6 +305,8 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                         value={String(form[key] ?? '')}
                         aria-label={label}
                         onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                        // Select what is there, so typing replaces it instead of appending.
+                        onFocus={(e) => e.currentTarget.select()}
                         disabled={isReadOnly}
                         className={`glass-input w-full text-sm py-3 bg-black/20 focus:bg-black/40 ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
                         placeholder={isReadOnly ? 'Configured by system administrator' : `Enter ${label}...`}
@@ -382,6 +412,11 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             />
           )}
 
+          {/* The logins people open Music Assistant itself with. Jarvis makes an
+              account for each member but signs in with a token, so their password
+              is a random one until an administrator sets it here. */}
+          {isAdmin && <MusicAssistantUsersCard />}
+
           {testResult && (
             <div className={`p-4 rounded-xl flex items-center gap-3 border ${
               testResult.status === 'SUCCESS' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'
@@ -404,10 +439,9 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             )}
             <button 
               onClick={() => {
-                if (missingList.length) {
-                  toast.error(`Fill in ${missingList.join(', ')} before saving`);
-                  return;
-                }
+                // Saved anyway: a token with no address is a half-finished login,
+                // not a refusal. Show the warning only once the save actually succeeds.
+                pendingMissingRef.current = [...missingList];
                 // Only filled fields: blank keeps what is saved.
                 const finalForm: Record<string, unknown> = {
                   ...credentialPayload(form as Record<string, unknown>, fieldKeys, [], { saved: savedSecrets, prefilled }),
@@ -421,8 +455,8 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                 }
                 updateMutation.mutate(finalForm as Partial<UserProfile>);
               }}
-              disabled={updateMutation.isPending || missingList.length > 0}
-              title={missingList.length ? `Still needed: ${missingList.join(', ')}` : undefined}
+              disabled={updateMutation.isPending}
+              title={missingList.length ? `Still needed before it works: ${missingList.join(', ')}` : undefined}
               className="glass-button flex-1 py-3 bg-purple-600/40 border-purple-500/30 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest"
             >
               <Save size={18} />
@@ -430,7 +464,9 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             </button>
           </div>
           {missingList.length > 0 && (
-            <p className="text-[11px] text-amber-300">Still needed: {missingList.join(', ')}</p>
+            <p className="text-[11px] text-amber-300">
+              Still needed before {name} works: {missingList.join(', ')}. You can save what you have.
+            </p>
           )}
           {isConnected && !(name === 'Skylight' && !userData?.is_system_default) && (
             <div className="border-t border-white/5 pt-3">
@@ -766,6 +802,8 @@ const Identity = () => {
                 }}
               />
               <AbuseChKeyTile userData={fullUser} />
+              <BookCatalogueTile id="google_books" userData={fullUser} />
+              <BookCatalogueTile id="open_library" userData={fullUser} />
             </div>
           </section>
 

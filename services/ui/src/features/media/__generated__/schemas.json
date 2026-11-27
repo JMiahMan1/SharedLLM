@@ -525,6 +525,18 @@
         "title": "Name",
         "type": "string"
       },
+      "start": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Start"
+      },
       "uri": {
         "default": "",
         "title": "Uri",
@@ -628,6 +640,18 @@
             "default": "",
             "title": "Name",
             "type": "string"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Start"
           },
           "uri": {
             "default": "",

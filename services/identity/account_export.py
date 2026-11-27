@@ -44,7 +44,9 @@ from services.identity.models import (
     UserActivitySharing,
     UserAvatarImage,
     UserCalendarSetting,
+    UserNearbySetting,
     UserNotificationPreference,
+    UserProfileSharing,
     UserThemeSetting,
     UserWeatherSetting,
     UserWidget,
@@ -82,6 +84,9 @@ PROFILE_FIELDS = frozenset(
         "skylight_enabled",
         "git_url",
         "git_user",
+        # The book catalogue choices (on/off, order, Open Library contact email).
+        # The Google Books key is google_books_key_enc: a secret, never exported.
+        "book_metadata",
     }
 )
 
@@ -107,7 +112,9 @@ def specs() -> list[Table]:
         Table("weather", UserWeatherSetting, owner="username"),
         Table("calendar_settings", UserCalendarSetting, owner="username"),
         Table("notification_preferences", UserNotificationPreference, owner="username"),
+        Table("nearby_settings", UserNearbySetting, owner="username"),
         Table("activity_sharing", UserActivitySharing, owner="username"),
+        Table("profile_sharing", UserProfileSharing, owner="username"),
         Table("dashboard_widgets", UserWidget, owner="username", natural_key=("widget_key",), updated="updated_at"),
         Table("workspace_sessions", UserWorkspaceSession, owner="username", natural_key=("workspace_id",), updated="updated_at"),
         Table("workspace_chats", WorkspaceChat, owner="username", updated="updated_at"),

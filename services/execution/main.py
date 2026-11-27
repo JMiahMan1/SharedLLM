@@ -1,5 +1,6 @@
 # services/execution/main.py
 import asyncio
+import functools
 import base64
 import hashlib
 import logging
@@ -47,6 +48,7 @@ from services.execution.handlers import (
     climate,
     composite,
     diagnostics,
+    drop_in,
     esphome,
     groups,
     learning,
@@ -141,6 +143,7 @@ from services.execution.schemas import (
     WorkspaceFileReadRequest,
     WorkspaceFileWriteRequest,
     WorkspaceLintRequest,
+    WorkspaceListRequest,
     WorkspaceSearchRequest,
     WorkspaceShellRequest,
 )
@@ -404,13 +407,28 @@ def _download_kokoro_files() -> tuple[list[str], list[str]]:
     return results, failures
 
 
+async def _stop_background(tasks) -> None:
+    """Cancel background loops and wait for each, without letting their
+    CancelledError (a BaseException) abort the rest of shutdown."""
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        with suppress(Exception, asyncio.CancelledError):
+            await task
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import subprocess  # always available for startup shell setup (gh auth, git config)
 
-    # Resolve runtime config from Identity service
-    from services.config import resolve_runtime_config
-    await resolve_runtime_config()
+    # Resolve runtime config from Identity service. Bounded: identity can be away
+    # (an update swapping it), and while lifespan startup runs this service does
+    # not answer /health at all. If it is not back yet, keep serving on the .env
+    # seed values, report degraded, and keep retrying until it is.
+    from services.config import keep_resolving_runtime_config, resolve_runtime_config
+    config_task = None
+    if not await resolve_runtime_config(max_retries=2, retry_delay=2.0, timeout=5.0):
+        config_task = asyncio.create_task(keep_resolving_runtime_config())
 
     # Household time zone: logged once with its source; unset is reported and
     # each feature that needs it fails with the same message.
@@ -487,6 +505,9 @@ async def lifespan(app: FastAPI):
     # Home Assistant's speech-to-text, passed through, recognising who speaks
     from services.execution.wyoming_stt import serve as serve_voice_stt
     voice_stt_task = asyncio.create_task(serve_voice_stt())
+    # The household's names for Whisper's prompt, rebuilt from the integrations (stt_vocabulary.py)
+    from services.execution.stt_vocabulary import refresh_loop as stt_vocabulary_loop
+    stt_vocabulary_task = asyncio.create_task(stt_vocabulary_loop())
 
     # Start ESPresense BLE presence pipeline (E7: was never invoked)
     from services.config import REDIS_URL as _PRESENCE_REDIS_URL
@@ -548,22 +569,15 @@ async def lifespan(app: FastAPI):
         log.warning(f"GitHub CLI startup auth setup failed (non-fatal): {_e}")
 
     yield
-    telemetry_task.cancel()
-    with suppress(Exception):
-        await telemetry_task
-    prune_task.cancel()
-    with suppress(Exception):
-        await prune_task
-    glance_task.cancel()
-    with suppress(Exception):
-        await glance_task
-    leave_by_task.cancel()
-    with suppress(Exception):
-        await leave_by_task
-    for task in [*reminder_tasks, voice_stt_task]:
-        task.cancel()
-        with suppress(Exception):
-            await task
+    # A cancelled task re-raises CancelledError (a BaseException, not an
+    # Exception) when awaited; suppress(Exception) let it escape, so shutdown
+    # failed ("Application shutdown failed. Exiting.") before stopping the rest,
+    # and docker had to kill the container after its 10 s grace.
+    background = [telemetry_task, prune_task, glance_task, leave_by_task, *reminder_tasks, voice_stt_task,
+                  stt_vocabulary_task]
+    if config_task is not None:
+        background.append(config_task)
+    await _stop_background(background)
     with suppress(Exception):
         from services.execution.presence import get_presence_tracker
         await get_presence_tracker().stop()
@@ -977,6 +991,13 @@ async def execute_esphome_pair(req: EsphomePairRequest):
 @app.post("/execute/media/play", response_model=ExecutionResult)
 async def execute_media_play(req: MediaPlayRequest):
     is_local = (req.entity_id or "").lower() in LOCAL_PLAYER_ALIASES
+    # "Hit play on the office TV": a play whose query is empty or only names the device is a resume there,
+    # not a library search for a song named after the device.
+    resume_on = None if is_local else await media.play_means_resume(_with_hub_login(req))
+    if resume_on is not None:
+        log.info(f"[media/play] query {req.query!r} names the device: resume on {req.entity_id or resume_on!r}")
+        return await execute_media_transport(MediaTransportRequest(
+            user_context=req.user_context, entity_id=req.entity_id, device_name=resume_on or None, command="resume"))
     if not is_local:
         # The login first: a voice request's exposure check reads the hub with it.
         own_login = _has_own_hub_login(req.user_context)
@@ -992,6 +1013,17 @@ async def execute_media_play(req: MediaPlayRequest):
     return await MediaPlaybackService.play(req)
 
 
+@app.post("/execute/media/find", response_model=ExecutionResult)
+async def execute_media_find(req: MediaPlayRequest):
+    """What "Play <query>" would play from the libraries, without playing it (media_finder.find_only).
+
+    The gateway asks before treating a misheard request ("Late <title>") as a play.
+    """
+    from services.execution import media_finder
+
+    return await media_finder.find_only(_with_hub_login(req))
+
+
 @app.post("/execute/media/resolve_stream", response_model=ExecutionResult)
 async def execute_media_resolve_stream(req: ResolveStreamRequest):
     from services.execution.handlers import video as video_handler
@@ -999,10 +1031,18 @@ async def execute_media_resolve_stream(req: ResolveStreamRequest):
     query = req.query
     log.info(f"[media/resolve_stream] Resolving audio stream URL for query='{query}'")
 
-    # Step 1: Find a YouTube page URL for the query
-    video_url = await video_handler.search_youtube(query)
+    from services.execution import video_safety
+
+    # Step 1: Find a YouTube page URL for the query (safe search), screened before it plays anywhere
+    level = await video_safety.safe_search_level(req.user_context)
+    video_url = await video_handler.search_youtube(query, level)
     if not video_url:
         return ExecutionResult(status="FAILURE", message="Could not find stream on YouTube", service="resolve_stream")
+    verdict = await video_safety.screen_url(video_url, req.user_context)
+    if not verdict.ok:
+        log.info(f"[media/resolve_stream] refused a result ({verdict.why}) at safe_search={level}")
+        return ExecutionResult(status="FAILURE", message=video_safety.refusal_message(verdict.why),
+                               service="resolve_stream", detail={"reason": verdict.why})
 
     # Step 2: Extract a direct, in-memory audio stream URL; no download needed
     stream_url, title = await video_handler.extract_audio_stream_url(video_url)
@@ -1028,9 +1068,15 @@ async def execute_media_resolve_stream(req: ResolveStreamRequest):
 @app.post("/execute/media/transport", response_model=ExecutionResult)
 async def execute_media_transport(req: MediaTransportRequest):
     is_local = (req.entity_id or "").lower() in LOCAL_PLAYER_ALIASES
-    if req.entity_id and not is_local:
+    if not is_local and (req.entity_id or getattr(req, "device_name", None)):
+        # The hub login first: resolving a device name reads the hub's players with it. Without it,
+        # "volume down on the Office TV" read an empty player list and answered "I couldn't find a
+        # speaker in Office TV" (2026-11-24) while the same command by entity id worked.
         req = _with_hub_login(req)
-        if not await verify_entity_access(req.user_context, req.entity_id):
+        if not req.entity_id:
+            req.entity_id = await media.resolve_room_player(req.user_context, req.device_name, None)
+        # A player found by name is checked like one named by id.
+        if req.entity_id and not await verify_entity_access(req.user_context, req.entity_id):
             raise HTTPException(status_code=403, detail="Access denied to this device")
     return await MediaPlaybackService.transport(req)
 
@@ -1082,6 +1128,20 @@ async def execute_activity(req: ActivityRequest):
 @app.post("/execute/timer", response_model=ExecutionResult)
 async def execute_timer(req: TimerRequest):
     return await timer.handle_timer(req)
+
+@app.post("/execute/drop_in", response_model=ExecutionResult)
+async def execute_drop_in(req: dict, x_internal_secret: str = Header(None)):
+    """Start, end, or report native Echo-to-Echo Drop In calls."""
+    await _check_internal_secret(x_internal_secret)
+    from services.execution.schemas import UserContext
+    from services.execution.schemas_drop_in import DropInRequest
+
+    context = req.get("user_context")
+    if not isinstance(context, dict) or not context:
+        return ExecutionResult.fail("Drop In needs the caller's user context.", service="drop_in")
+    user_context = UserContext(**context)
+    parsed = DropInRequest(**req)
+    return await drop_in.handle_drop_in(parsed, user_context)
 
 @app.post("/execute/todo", response_model=ExecutionResult)
 async def execute_todo(req: TodoListRequest):
@@ -1198,7 +1258,8 @@ async def voice_signature(file: UploadFile = File(...), x_internal_secret: str =
 
     audio = await file.read(voiceprint.MAX_AUDIO_BYTES + 1)
     try:
-        return await asyncio.to_thread(voiceprint.embed, audio)
+        # Enrollment and the household's voice check: refuse noisy or clipped takes (voiceprint.check_quality).
+        return await asyncio.to_thread(functools.partial(voiceprint.embed, audio, enrollment=True))
     except voiceprint.VoiceprintError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
 
@@ -1241,6 +1302,14 @@ async def execute_ai_capabilities():
                 }
             ]
         }
+
+@app.get("/execute/voice/vocabulary")
+async def voice_vocabulary():
+    """The household's names for speech to text (stt_vocabulary.py): rooms, names in order, players."""
+    from services.execution import stt_vocabulary
+
+    return stt_vocabulary.served()
+
 
 @app.get("/execute/timers")
 async def list_timers(user_id: str | None = None):
@@ -1932,6 +2001,20 @@ async def execute_workspace_lint(request: Request):
     return await workspace.handle_workspace_lint(req)
 
 
+@app.post("/execute/workspace_list", response_model=ExecutionResult)
+async def execute_workspace_list(request: Request):
+    """List files under a path in the workspace, honouring .gitignore."""
+    body = await request.json()
+    body = _normalize_llm_body(body)
+    if "user_context" not in body:
+        body["user_context"] = {"user": "", "is_admin": True}
+    req = WorkspaceListRequest(**body)
+    res = await workspace.handle_workspace_list(req)
+    if res.status == "FAILURE":
+        raise HTTPException(status_code=400, detail=res.message)
+    return res
+
+
 @app.post("/execute/discovery_sync", response_model=ExecutionResult)
 async def execute_discovery_sync(req: DiscoverySyncRequest):
     """
@@ -2291,6 +2374,142 @@ def _ma_wrapped_roku(idx, entity_id: str, attrs: dict) -> str | None:
 
 @app.post("/execute/announce", response_model=ExecutionResult)
 async def execute_announce(req: AnnouncementRequest):
+    """Announce on what the request means, never failing for want of a device name.
+
+    One named device or room goes straight to ``_announce_one``. ``entity_ids``,
+    ``rooms``, ``person`` and ``everywhere`` (or nothing named at all) fan out over
+    the reachable speakers ``announce_targets`` chooses, and the reply says where
+    it played and which were offline.
+    """
+    from services.execution import announce_targets as at
+
+    single = (req.entity_id or req.device_name) and not (
+        req.entity_ids or req.rooms or req.person or req.everywhere or at.is_everywhere(req.device_name))
+    if single and req.device_name and not req.entity_id and not at.names_a_device_kind(req.device_name):
+        # "announce to <a family member>" often arrives as a device name; identity says whether it is a person.
+        person = await _announce_person_lookup(req.device_name)
+        if person is not None:
+            return await _announce_fan_out(req, person=person)
+    if single:
+        return await _announce_one(req)
+    return await _announce_fan_out(req)
+
+
+async def _announce_person_lookup(name: str | None) -> dict | None:
+    """Identity's answer for a family member by a spoken name: their devices, or None."""
+    if not name or not name.strip():
+        return None
+    try:
+        async with get_client() as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC_URL}/api/internal/person-devices", params={"person": name.strip()},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=5.0))
+            if resp.status != 200:
+                return None
+            body = await resp.json(content_type=None)
+    except Exception as e:  # identity down: the name is treated as a device name, as before
+        log.warning(f"[announce] Could not ask identity who {name!r} is: {e}")
+        return None
+    return body if isinstance(body, dict) and body.get("username") else None
+
+
+async def _announce_push(ctx: UserContext, person: dict, message: str) -> bool:
+    """The announcement on the person's phone too, from whoever asked."""
+    from services.common import notify
+
+    sender = (ctx.user or "").strip()
+    title = f"Announcement from {sender.title()}" if sender and sender != "default" else "Announcement"
+    return await notify.send(notify.notice(
+        person["username"], "home", title, message, link=notify.link("family", tab="announce"),
+        tag="announcement"))
+
+
+async def _announce_fan_out(req: AnnouncementRequest, person: dict | None = None) -> ExecutionResult:
+    """Announce on every target the request means, skipping the unavailable ones and saying so."""
+    from services.execution import announce_targets as at
+    from services.execution.capability_index import CapabilityIndexError, routing_index
+
+    ctx = req.user_context
+    if person is None and req.person:
+        person = await _announce_person_lookup(req.person)
+        if person is None:
+            return _fail(f"I don't know who {req.person!r} is in this household.", "announce")
+    ha_url, ha_token = hardware_router.hub_pair(ctx)
+    if not ha_url or not ha_token or ha_health.is_down(ha_url):
+        if person is None:
+            return _fail(hardware_router.NO_HUB_MESSAGE, "announce")
+        pushed = await _announce_push(ctx, person, req.message)
+        if pushed:
+            return _ok(f"The home hub is not answering, so I sent it to {person['name']}'s phone.", "announce")
+        return _fail(hardware_router.NO_HUB_MESSAGE, "announce")
+
+    idx = None
+    try:
+        idx = await routing_index(ha_url, ha_token, "announcement targets")
+    except CapabilityIndexError as e:
+        log.warning(f"[announce] No capability index, choosing targets from states: {e}")
+    states = await ha_client.get_states(ha_url, ha_token) or []
+    by_state = {s.get("entity_id"): s for s in states if isinstance(s, dict) and s.get("entity_id")}
+
+    targets: list[str] = []
+    skipped: list[str] = []
+    if req.entity_ids:
+        for eid in req.entity_ids:
+            if at.reachable(by_state.get(eid)):
+                targets.append(eid)
+            else:
+                skipped.append(at.label(eid, by_state))
+    elif req.rooms:
+        for room in req.rooms:
+            area = (idx.area_id_for(room) or idx.area_in_text(room)) if idx is not None else None
+            pick = idx.pick_player(area, room, "announcement", states) if area else None
+            if pick and at.reachable(by_state.get(pick)):
+                targets.append(pick)
+            else:
+                skipped.append(at.label(pick, by_state) if pick else room)
+    elif person is not None:
+        targets, skipped = at.person_players(idx, person.get("devices") or [], by_state)
+    else:
+        own = None if (req.everywhere or at.is_everywhere(req.device_name)) else at.satellite_player(
+            idx, ctx.voice_satellite, by_state)
+        if own:
+            targets = [own]
+        else:
+            targets, skipped = at.everywhere(idx, by_state)
+
+    targets = list(dict.fromkeys(targets))
+    log.info(f"[announce] fan-out user={ctx.user} person={(person or {}).get('username')} "
+             f"targets={targets} skipped={skipped}")
+    pushed = None
+    if person is not None and await _announce_push(ctx, person, req.message):
+        pushed = person["name"]
+
+    async def one(eid: str, first: bool) -> ExecutionResult:
+        sub = req.model_copy(update={"entity_id": eid, "device_name": None, "entity_ids": None, "rooms": None,
+                                     "group_id": None, "person": None, "everywhere": False,
+                                     "save_path": req.save_path if first else None})
+        try:
+            return await _announce_one(sub)
+        except HTTPException as e:
+            return _fail(str(e.detail), "announce")
+        except Exception as e:
+            log.error(f"[announce] {eid} failed: {e}")
+            return _fail(str(e), "announce")
+
+    results = await asyncio.gather(*(one(eid, i == 0) for i, eid in enumerate(targets)))
+    done = [at.label(eid, by_state) for eid, r in zip(targets, results, strict=True) if r.status == "SUCCESS"]
+    failed = [(at.label(eid, by_state), (r.message or "failed").removeprefix("Announcement failed: "))
+              for eid, r in zip(targets, results, strict=True) if r.status != "SUCCESS"]
+    message = at.summary(done, failed, skipped, pushed)
+    detail = {"announced": done, "failed": [n for n, _ in failed], "skipped": skipped, "pushed_to": pushed,
+              "targets": targets}
+    if done or pushed:
+        return ExecutionResult(status="SUCCESS", message=message, service="announce", detail=detail)
+    return ExecutionResult(status="FAILURE", message=message, service="announce", detail=detail)
+
+
+async def _announce_one(req: AnnouncementRequest) -> ExecutionResult:
+    """One announcement on one device (``entity_id``, else resolved from ``device_name``)."""
     ctx = req.user_context
     target_player = req.entity_id
 
@@ -2359,6 +2578,19 @@ async def execute_announce(req: AnnouncementRequest):
         if s.get("entity_id") == target_player:
             initial_state = s
             break
+
+    if initial_state and initial_state.get("state") == "unavailable":
+        # The hub cannot reach it. Another player on the same device or in the same room stands in;
+        # with none, say it is offline instead of waiting out a wake-up that cannot happen.
+        from services.execution import announce_targets as at
+
+        by_state = {s.get("entity_id"): s for s in all_states if isinstance(s, dict)}
+        stand_in = at.alternative_for(announce_idx, target_player, by_state)
+        if stand_in is None:
+            return _fail(f"{at.label(target_player, by_state)} is offline (the hub reports it unavailable), "
+                         "so I could not announce there.", "announce")
+        log.info(f"[announce] {target_player} is unavailable; announcing on {stand_in} instead")
+        target_player, initial_state = stand_in, by_state.get(stand_in)
 
     # Detect if this is an MA-wrapped Roku and store both entities (works even when state=='off' and app_id is None)
     ma_player_entity = None
@@ -2673,10 +2905,63 @@ async def execute_announce(req: AnnouncementRequest):
         return _ok(f"Announcement sent successfully to {target_player}.", "announce")
     return _fail(f"Announcement failed: {result.get('error')}", "announce", result)
 
+#: At most this many entities go back to a model (the UI's lists use ``/execute/entity/search``).
+MODEL_ENTITY_SEARCH_CAP = 25
+#: The domains a search for a kind of device ("office speaker", "the den TV") means.
+SOUND_DEVICE_DOMAINS = ("media_player", "assist_satellite")
+
+
 @app.post("/execute/entity_search", response_model=ExecutionResult)
+async def execute_entity_search_for_model(req: EntitySearchRequest):
+    """The tool a model calls: what ``execute_entity_search`` finds, shaped so the answer is readable.
+
+    Reachable entities first, one entity per physical device and domain (a stale
+    "_2" copy or a second player of the same speaker is folded into the one that
+    works), a device kind ("speaker", "TV") searched among players and satellites
+    only, never their diagnostic sensors, and at most ``MODEL_ENTITY_SEARCH_CAP``
+    results. A model shown 122 matches with the dead ones on top told the family
+    no speaker was available.
+    """
+    return await _entity_search(req, for_model=True)
+
+
 @app.post("/execute/entity/search", response_model=ExecutionResult)
 async def execute_entity_search(req: EntitySearchRequest):
     """Search for HA entities by name, domain, area, or state."""
+    return await _entity_search(req, for_model=False)
+
+
+def _model_entity_results(results: list[dict], search_idx: Any) -> tuple[list[dict], int]:
+    """Available before unavailable (order otherwise kept), duplicates of one device folded; how many were folded."""
+    from services.execution import announce_targets as at
+
+    ordered = sorted(results, key=lambda r: 1 if r.get("state") in at.UNREACHABLE_STATES else 0)
+    seen: set[tuple[str, str]] = set()
+    kept: list[dict] = []
+    for r in ordered:
+        eid = r["entity_id"]
+        device = search_idx.device_of(eid) if search_idx is not None and eid in search_idx else None
+        # The same name with a number on the end ("Den TV 2", media_player.den_tv_2) is the same device added again.
+        name = re.sub(r"[\s_]*\d+$", "", norm_name(r.get("friendly_name") or eid.split(".", 1)[-1]))
+        keys = {(r["domain"], f"name:{name}")} | ({(r["domain"], f"device:{device}")} if device else set())
+        # Folded: an unavailable copy of something already listed, or a second player of one speaker.
+        # Two working lights called "Lamp 1" and "Lamp 2" are both kept.
+        if keys & seen and (r.get("state") in at.UNREACHABLE_STATES
+                            or (r["domain"] == "media_player" and (r["domain"], f"device:{device}") in seen)):
+            continue
+        seen |= keys
+        kept.append(r)
+    return kept, len(results) - len(kept)
+
+
+def norm_name(text: str) -> str:
+    """A device name compared without case, punctuation or spacing differences."""
+    from services.execution.capability_index import norm
+
+    return norm(text)
+
+
+async def _entity_search(req: EntitySearchRequest, *, for_model: bool) -> ExecutionResult:
     ctx = req.user_context
     # The caller's own hub login, else the hub's: results are filtered by can_view below.
     ha_url, ha_token = hardware_router.hub_pair(ctx)
@@ -2720,6 +3005,10 @@ async def execute_entity_search(req: EntitySearchRequest):
     results = []
 
     search_terms = req.query.lower().split()
+    from services.execution.announce_targets import names_a_device_kind
+
+    # "office speaker" means the speaker, not its IP-address sensor (a model's search only).
+    kind_search = for_model and names_a_device_kind(req.query)
 
     for state in all_states:
         eid = state.get("entity_id", "")
@@ -2749,6 +3038,8 @@ async def execute_entity_search(req: EntitySearchRequest):
             entity_domain = eid.split('.')[0] if '.' in eid else ''
             if allowed_domains and entity_domain not in allowed_domains:
                 continue
+        elif kind_search and eid.split(".", 1)[0] not in SOUND_DEVICE_DOMAINS:
+            continue
         if want_area_id is not None:
             if search_idx.area_of(eid) != want_area_id:
                 continue
@@ -2813,9 +3104,20 @@ async def execute_entity_search(req: EntitySearchRequest):
         # lists aren't cut arbitrarily by HA state order.
         results.sort(key=lambda r: (r.get("friendly_name") or r["entity_id"]).lower())
 
-    limit = max(1, min(int(req.limit or 200), 1000))
+    folded = 0
+    if for_model:
+        results, folded = _model_entity_results(results, search_idx)
+    limit = max(1, min(int(req.limit or 200), MODEL_ENTITY_SEARCH_CAP if for_model else 1000))
     detail: dict[str, Any] = {"entities": results[:limit], "total": len(results), "limit": limit}
     message = f"Found {len(results)} matching entities."
+    if for_model:
+        offline = sum(1 for r in results if r.get("state") == "unavailable")
+        detail.update(duplicates_folded=folded, unavailable=offline)
+        if len(results) > limit:
+            message += f" Showing the first {limit}; add an area or domain to narrow it."
+        if offline:
+            message += (f" {offline} of them are unavailable (offline or stale copies); the rest are reachable, "
+                        "and a TV that is off can still be turned on and announced on.")
     if stale_at is not None:
         from services.execution import ha_snapshot
 
@@ -2868,10 +3170,27 @@ async def execute_ha_service(req: HAServiceRequest):
         except Exception as e:
             log.warning(f"[ha_service] Pre-flight state check failed for {req.entity_id}: {e}")
 
+    # A YouTube (or other video site) page sent to a player as-is would be opened by the TV's own
+    # app, if it can open it at all. Jarvis streams video itself: yt-dlp fetches it and the player
+    # gets execution's stream (handlers/media.py play_video), on every kind of TV.
+    if req.domain == "media_player" and req.service == "play_media":
+        content = str((req.service_data or {}).get("media_content_id") or "")
+        from services.execution.handlers import video as video_handler
+
+        if video_handler.extract_video_url(content):
+            log.info(f"[ha_service] {req.entity_id}: a video page; streaming it through yt-dlp, not the TV's app")
+            return await media.handle_media_play(MediaPlayRequest(
+                user_context=_with_hub_login_ctx(ctx), entity_id=req.entity_id, query=content, media_type="video"))
+
     # Unified hardware routing: HA first, direct ESPHome fallback when HA is unreachable.
     return await hardware_router.execute_device_command(
         ctx, req.domain, req.service, req.entity_id, req.service_data, service_name="ha_service"
     )
+
+
+def _with_hub_login_ctx(ctx):
+    """``ctx`` with the hub login a media command is sent with (``_with_hub_login``)."""
+    return _with_hub_login(MediaPlayRequest(user_context=ctx)).user_context
 
 def _detect_media_platform(entity_id: str, attrs: dict) -> str:
     """Detect the TV/media platform type from entity attributes via unified detect_tv_type."""
@@ -3110,16 +3429,26 @@ async def health():
     if not redis_ok["healthy"]:
         overall_status = "degraded"
 
-    # Check Identity Service with retry
-    identity_ok = await _check_dependency(
-        "identity",
-        lambda: _check_service_health(IDENTITY_SVC_URL, "identity"),
-        max_retries=2,
-        retry_delay=0.5
-    )
+    # Identity: its own short connection, no retry, and reported rather than
+    # counted (like Home Assistant). On 2026-11-22 identity was away for three
+    # minutes during an update; this probe went through the shared pool with
+    # retries, /health itself stopped answering in time, and execution was
+    # treated as down although it was serving. Identity being away degrades
+    # execution; it does not make it unreachable.
+    from services import config as _runtime_config
+    from services.config import IDENTITY_SVC_URL as _identity_url
+
+    async def _identity_health_check():
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=1.5)) as client:
+            r = await client.get(f"{_identity_url.rstrip('/')}/health")
+            return {"healthy": r.status == 200, "status": "ok" if r.status == 200 else f"status {r.status}"}
+
+    identity_ok = await _check_dependency("identity", _identity_health_check, max_retries=0, retry_delay=0)
     checks["identity"] = identity_ok["status"]
-    if not identity_ok["healthy"]:
-        overall_status = "unhealthy"
+    soft_degraded = not identity_ok["healthy"]
+    if not _runtime_config.RUNTIME_CONFIG_LOADED and not _runtime_config._is_testing():
+        checks["runtime_config"] = "pending (retrying identity)"
+        soft_degraded = True
 
     # Check RAG Service with a bounded SHORT timeout and NO retry. RAG is the service
     # the Raven worker hammers hardest, so under worker load its /health can lag.
@@ -3174,6 +3503,8 @@ async def health():
         checks["home_assistant_hosts"] = ha_hosts
 
     status_code = 200 if overall_status == "healthy" else 503
+    if soft_degraded and overall_status == "healthy":
+        overall_status = "degraded"  # still serving: 200, the reason is in checks
     return JSONResponse(
         status_code=status_code,
         content={
@@ -3582,8 +3913,21 @@ async def search_ma(user_id: str = "", query: str = "", media_type: str = "", li
 
 
 @app.get("/execute/audiobookshelf")
-async def handle_audiobookshelf_get(action: str = "last_played", user_id: str = "", library_id: str = "", query: str = "", limit: int = 25):
-    """Handle Audiobookshelf GET requests (per-user credentials)."""
+async def handle_audiobookshelf_get(
+    action: str = "last_played",
+    user_id: str = "",
+    library_id: str = "",
+    query: str = "",
+    limit: int = 25,
+    page: int = 0,
+):
+    """Handle Audiobookshelf GET requests (per-user credentials).
+
+    ``page`` is part of the contract: the gateway turns the flat ``offset`` the
+    Media page sends into an ABS page number, and dropping it here made every
+    page ask for the first one, so a 199-book library showed the same 49 books
+    forever and nothing past them could be opened.
+    """
     try:
         from services.execution.handlers.audiobookshelf import handle_audiobookshelf
         from services.execution.schemas import AudiobookshelfRequest, UserContext
@@ -3603,11 +3947,12 @@ async def handle_audiobookshelf_get(action: str = "last_played", user_id: str = 
                 )
 
         req = AudiobookshelfRequest(
-            action=action if action in ("search", "play", "resume", "progress", "libraries", "list", "get_book", "last_played") else "list",
+            action=action if action in ("search", "play", "resume", "progress", "libraries", "list", "get_book", "last_played", "podcasts", "users") else "list",
             user_context=user_ctx,
             library_id=library_id or None,
             query=query or None,
             limit=limit,
+            page=page,
             book_id=None,
             entity_id=None,
         )

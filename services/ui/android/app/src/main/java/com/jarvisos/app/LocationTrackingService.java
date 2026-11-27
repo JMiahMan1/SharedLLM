@@ -207,6 +207,11 @@ public class LocationTrackingService extends Service {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_STEPS, enabled).apply();
     }
 
+    /** Whether this service is running now (it hosts the Nearby & offline engine then). */
+    static boolean running() {
+        return instance != null;
+    }
+
     /** Remembered so tracking can resume after a reboot or an app update. */
     static void setEnabled(Context context, boolean enabled) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, enabled).apply();
@@ -327,6 +332,11 @@ public class LocationTrackingService extends Service {
         CrashAlert.resume(this);
         // The room-detection beacon lives as long as this process; a sticky restart brings it back.
         BleBeacon.ensure(this);
+        // Which linked car's Bluetooth is connected: start from what Android says now.
+        VehicleBluetooth.seed(this);
+        // Settings > Nearby & offline (Bluetooth LE): ride on this service while it
+        // runs, so the engine's own service (NearbyService) and its notice stop.
+        NearbyParts.ensure(this);
         if (hasPlayServices(this)) {
             fused = LocationServices.getFusedLocationProviderClient(this);
             activityClient = ActivityRecognition.getClient(this);
@@ -566,6 +576,7 @@ public class LocationTrackingService extends Service {
             postDrivingEvents(drivingMonitor.finish());
         }
         crashDetector.setDriving(now == MotionModeSelector.Mode.DRIVING);
+        Proximity.setDriving(now == MotionModeSelector.Mode.DRIVING);
         syncCrashListening();
     }
 
@@ -876,6 +887,14 @@ public class LocationTrackingService extends Service {
             Log.e(TAG, "could not build the upload", e);
             return;
         }
+        // My devices: the person's other devices learn this one's last fix and battery over Bluetooth.
+        try {
+            OwnSync.noteFix(this, location.getLatitude(), location.getLongitude(),
+                    location.hasAccuracy() ? location.getAccuracy() : Double.NaN, location.getTime(),
+                    body.optInt("battery", -1), body.has("charging") ? body.optBoolean("charging") : null);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "own fix not kept: " + e.getMessage());
+        }
         // Fixes kept from a stretch without signal go first, oldest first: the
         // server takes the last fix it gets as the current position, and Geo
         // skips a fix older than its newest when it builds trips.
@@ -925,6 +944,12 @@ public class LocationTrackingService extends Service {
         // uploads from both, and only one may say where they are.
         body.put("device_id", PushGateway.deviceId(this));
         body.put("device_name", deviceName());
+        // The linked vehicle devices connected now (hardware addresses only), so
+        // Wander knows which car this fix was taken in.
+        // Only while car detection is on (Settings > Nearby & offline).
+        java.util.List<String> bt = NearbyParts.car(this)
+                ? VehicleBluetooth.linkedConnectedNow(this) : java.util.Collections.emptyList();
+        if (!bt.isEmpty()) body.put("bt_devices", new org.json.JSONArray(bt));
         body.put("user_id", userId != null ? userId : username);
         if (userId != null) {
             body.put("username", username);
@@ -1143,6 +1168,9 @@ public class LocationTrackingService extends Service {
         stopCrashListening();
         unregisterStatusReceiver();
         if (instance == this) instance = null;
+        // Nearby & offline keeps running without location sharing when a part
+        // is on (NearbyService takes it over); otherwise the radio stops.
+        NearbyParts.ensure(this);
         super.onDestroy();
     }
 

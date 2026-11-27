@@ -45,6 +45,8 @@ _INLINE_SCHEMA_TOOLS = {
     "WorkspaceSettingsUpdateRequest",
     "STTRequest",
     "AiCapabilitiesRequest",
+    "MissionObjectivesRequest",
+    "MissionCompleteRequest",
 }
 
 

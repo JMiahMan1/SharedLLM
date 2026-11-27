@@ -240,15 +240,8 @@ def _item_matches_query(item: dict, query: str) -> bool:
     return query.lower() in haystack
 
 
-async def search_library(
-    abs_url: str, abs_api_key: str, query: str, limit: int = 10
-) -> dict:
-    """Search the book library for items matching the query.
-
-    NOTE: Some ABS servers ignore the `query` param on the library-items
-    endpoint and simply return the entire library. To guarantee correct
-    results we fetch the full library once and filter client-side.
-    """
+async def get_book_library_items(abs_url: str, abs_api_key: str) -> list | dict:
+    """Every item in the book library (the first non-podcast library), or a dict with "error"."""
     # Resolve (and cache) the book/audiobook library ID. ABS (and MA's ABS
     # integration) label these libraries in varying ways ("book", "audiobook",
     # ...), so we skip podcast libraries and use the first non-podcast library
@@ -269,7 +262,19 @@ async def search_library(
             return {"error": "No book library found"}
         _cache_set(abs_url, "book_lib_id", book_lib_id)
 
-    items = await get_all_library_items(abs_url, abs_api_key, book_lib_id)
+    return await get_all_library_items(abs_url, abs_api_key, book_lib_id)
+
+
+async def search_library(
+    abs_url: str, abs_api_key: str, query: str, limit: int = 10
+) -> dict:
+    """Search the book library for items matching the query.
+
+    NOTE: Some ABS servers ignore the `query` param on the library-items
+    endpoint and simply return the entire library. To guarantee correct
+    results we fetch the full library once and filter client-side.
+    """
+    items = await get_book_library_items(abs_url, abs_api_key)
     if isinstance(items, dict) and "error" in items:
         return items
 
@@ -452,6 +457,67 @@ def get_session_track_url(session_id: str, user: str, track_index: int = 0) -> s
 async def get_libraries(abs_url: str, abs_api_key: str) -> dict:
     """List all ABS libraries."""
     return await abs_get(abs_url, abs_api_key, "/api/libraries")
+
+
+async def create_user(abs_url: str, abs_api_key: str, username: str, password: str) -> dict:
+    """Create an Audiobookshelf account, which answers with that account's token.
+
+    An administrator makes the account (``POST /api/users``) and ABS hands back the
+    user object *with its token*, so one call both registers the person and yields
+    the credential Jarvis files on their behalf. There is no separate endpoint to
+    mint a token on 2.33 (``POST /api/users/{id}/token`` is a 404).
+
+    A new account arrives **inactive**: its token exists but answers 401 until the
+    account is activated, which the admin web UI does as a second step. So the
+    activation is done here, and the token from creation is carried through.
+    """
+    created = await abs_post(abs_url, abs_api_key, "/api/users", {
+        "username": username,
+        "password": password,
+        "type": "user",
+        "permissions": {
+            "download": True,
+            "update": True,
+            "delete": False,
+            "upload": True,
+            "createEreader": True,
+            "accessAllLibraries": True,
+            "accessAllTags": True,
+            "accessExplicitContent": False,
+        },
+    })
+    user = dict((created or {}).get("user") or {})
+    if user and user.get("isActive") is not True:
+        token = user.get("token")
+        user_id = user.get("id")
+        if not user_id:
+            user["activation_error"] = "Audiobookshelf did not return an account id to activate"
+            user["isActive"] = False
+        else:
+            patched = await abs_patch(abs_url, abs_api_key, f"/api/users/{user_id}", {"isActive": True})
+            if (patched or {}).get("error"):
+                user["activation_error"] = patched["error"]
+                user["isActive"] = False
+            else:
+                user.update((patched or {}).get("user") or {})
+                user["isActive"] = True
+        # Activation answers with the account, not with its token: keep the one
+        # creation handed back, or the account would be made and left unusable.
+        if token:
+            user["token"] = token
+    if not user:
+        return created
+    return {"user": user}
+
+
+async def get_users(abs_url: str, abs_api_key: str) -> dict:
+    """List the server's users, and the API token each one carries.
+
+    ``/api/users`` answers with a token per user and is root/admin only, which is
+    what lets one administrator credential hand every household member their own
+    (``GET /api/users`` -> ``{"users": [...]}``, or ``{"error": ...}``).
+    """
+    return await abs_get(abs_url, abs_api_key, "/api/users")
 
 
 async def authorize_token(abs_url: str, abs_api_key: str) -> dict:

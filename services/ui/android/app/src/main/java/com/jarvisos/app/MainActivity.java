@@ -52,12 +52,20 @@ registerPlugin(CommsPlugin.class);
         registerPlugin(HealthConnectPlugin.class);
         registerPlugin(DeviceInfoPlugin.class);
         registerPlugin(DropInPlugin.class);
+        registerPlugin(JarvisAssistPlugin.class);
         registerPlugin(BleBeaconPlugin.class);
+        registerPlugin(VehicleBluetoothPlugin.class);
+        registerPlugin(ProximityPlugin.class);
+        registerPlugin(NearbyPlugin.class);
+        registerPlugin(FamilyMeshPlugin.class);
+        registerPlugin(OfflineModePlugin.class);
+        registerPlugin(OwnSyncPlugin.class);
         registerPlugin(SaveFilePlugin.class);
         registerPlugin(SecureWindowPlugin.class);
         registerPlugin(DeviceUnlockPlugin.class);
         registerPlugin(PrivatePreviewPlugin.class);
         registerPlugin(ChatShortcutPlugin.class);
+        registerPlugin(KeyboardMediaPlugin.class);
         super.onCreate(savedInstanceState);
         // The chat's inline video players keep their own iframe navigations
         // (PlayerFrameRules); everything else is Capacitor's as before.
@@ -91,14 +99,12 @@ registerPlugin(CommsPlugin.class);
         maybeOpenPath(getIntent());
         // Signed in already: keep notifications flowing.
         PushService.start(this);
-        // Screen time keeps reporting while the app is closed (a no-op until
-        // usage access is on and someone is signed in).
-        UsageSyncWorker.schedule(this);
-        // Calls and texts the same way (a no-op without their permissions).
-        CommsSyncWorker.schedule(this);
-        // New photos and videos on a protected child's phone (a no-op until
-        // the media permission is on and a parent keeps scanning enabled).
-        PhotoScanWorker.schedule(this);
+        // Screen time, calls and texts, and new photos keep collecting while
+        // the app is closed (only when someone is signed in; BackgroundWork).
+        if (BackgroundWork.ensureScheduled(this)) {
+            // How collection is going on this phone, for the parents.
+            DeviceHealth.reportAsync(this);
+        }
         // New APKs install themselves while the app is closed (NativeUpdater).
         AppUpdateWorker.schedule(this);
     }
@@ -227,6 +233,7 @@ registerPlugin(CommsPlugin.class);
         // The web app may have missed a change while in the background.
         GuardPlugin.notifyLockedMode(this);
         offerTimeTile();
+        offerAssistTile();
         // Coming back to Jarvis is a good moment to look for a new version.
         NativeUpdater.checkSoon(this, 60_000L);
     }
@@ -254,6 +261,29 @@ registerPlugin(CommsPlugin.class);
      * prompt for the Screen time Quick Settings tile, so time left is one
      * swipe down from any app (Android 13+; older phones add it by hand).
      */
+    /**
+     * Offer the assistant tile the first time this phone runs the app. Android 13+
+     * can ask once; a tile that is not offered (or is declined) can always be
+     * added by hand from the shade.
+     */
+    private void offerAssistTile() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
+        try {
+            android.content.SharedPreferences p = GuardApi.prefs(this);
+            if (p.getBoolean("assist_tile_offered", false)) return;
+            p.edit().putBoolean("assist_tile_offered", true).apply();
+            // Fully qualified: MainActivity does not import these, and this file
+            // must not grow imports for one shortcut offer.
+            android.app.StatusBarManager bar = getSystemService(android.app.StatusBarManager.class);
+            if (bar == null) return;
+            bar.requestAddTileService(new android.content.ComponentName(this, AssistTileService.class), "Jarvis",
+                    android.graphics.drawable.Icon.createWithResource(this, getApplicationInfo().icon),
+                    getMainExecutor(), result -> { });
+        } catch (Exception ignored) {
+            // No shortcut offered; the tile is still in the shade's edit list.
+        }
+    }
+
     private void offerTimeTile() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
         try {

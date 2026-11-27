@@ -91,3 +91,48 @@ async def test_after_a_failed_bulb_the_model_cannot_say_the_rest_are_off(monkeyp
         creds=orchestrator.ResolvedCredentials(user="u"))
     assert answer.startswith("I couldn't turn that off, so nothing was switched.")
     assert "should be off" not in answer
+
+
+REFUSED = ("Voice can't control the Study TV. An admin can turn on 'Voice can control' for it in Devices.")
+
+
+@pytest.mark.parametrize("answer, refused", [
+    (REFUSED, True),
+    ("I couldn't find a speaker in Study TV.", True),
+    (UNAVAILABLE, True),
+    ("I wasn't able to turn on the porch light.", True),
+    ("Ten past ten.", False),
+    ("The Study TV is playing the news.", False),
+])
+def test_what_counts_as_an_earlier_refusal(answer, refused):
+    history = [{"role": "user", "content": "hit play on the study tv"}, {"role": "assistant", "content": answer}]
+    assert device_claims.refused_before(history) is refused
+    # A person saying "can't find" is not the assistant refusing.
+    assert not device_claims.refused_before([{"role": "user", "content": answer}])
+
+
+async def test_an_old_refusal_in_the_history_asks_for_a_fresh_tool_call(monkeypatch):
+    """Voice control was turned on after the refusal: the question says permissions may have changed."""
+    seen: list[list[dict]] = []
+
+    async def fake_call(payload, **kwargs):
+        seen.append(payload["messages"])
+        return {"message": {"content": "Resumed."}}
+
+    monkeypatch.setattr(orchestrator, "call_ollama", fake_call)
+    monkeypatch.setattr(orchestrator, "load_prompt_sync", lambda _n: "Tools: MediaTransportRequest")
+    history = [{"role": "user", "content": "hit play on the study tv"}, {"role": "assistant", "content": REFUSED}]
+    await orchestrator._single_turn_inference(
+        query="Try again, play the study TV.", model="m", system_prompt="S", rag_context="", history=history,
+        creds=orchestrator.ResolvedCredentials(user="u"))
+    question = seen[0][-1]["content"]
+    assert device_claims.RETRY_NOTE in question
+    # The system message stays the same for every question (the warm cached prefix).
+    assert device_claims.RETRY_NOTE not in seen[0][0]["content"]
+
+    seen.clear()
+    await orchestrator._single_turn_inference(
+        query="What time is it?", model="m", system_prompt="S", rag_context="",
+        history=[{"role": "user", "content": "hi"}, {"role": "assistant", "content": "Hello."}],
+        creds=orchestrator.ResolvedCredentials(user="u"))
+    assert device_claims.RETRY_NOTE not in seen[0][-1]["content"]

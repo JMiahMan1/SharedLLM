@@ -10,6 +10,7 @@ import {
   Footprints,
   Gauge,
   Loader2,
+  MessageCircle,
   RefreshCw,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -76,8 +77,10 @@ function StatsGrid({ stats }: { stats: WatchStats }) {
 }
 
 const WatchPanel: React.FC = () => {
-  const { supported, connected, stats, connect, disconnect, refresh, sendNotification } = useWatchBle();
-  const [busy, setBusy] = useState<'connect' | 'time' | 'notify' | null>(null);
+  const { supported, connected, stats, connect, disconnect, refresh, sendNotification, ask } = useWatchBle();
+  const [busy, setBusy] = useState<'connect' | 'time' | 'notify' | 'ask' | null>(null);
+  const [question, setQuestion] = useState('');
+  const [answer, setAnswer] = useState<string | null>(null);
 
   const onConnect = async () => {
     setBusy('connect');
@@ -117,6 +120,28 @@ const WatchPanel: React.FC = () => {
     try {
       await sendNotification('Jarvis', 'Test notification from Jarvis.');
       toast.success('Notification sent');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onAsk = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!question.trim()) return;
+    setBusy('ask');
+    try {
+      const result = await ask(question);
+      if ('answered' in result) {
+        setAnswer(result.answered);
+        setQuestion('');
+      } else if ('queued' in result) {
+        // The watch could not reach Jarvis: offline mode carries it, and the answer comes back to the watch.
+        setAnswer(null);
+        setQuestion('');
+        toast.success('The watch is offline: queued, the answer will show on the watch');
+      } else {
+        toast.error(result.failed);
+      }
     } finally {
       setBusy(null);
     }
@@ -180,6 +205,27 @@ const WatchPanel: React.FC = () => {
                 {busy === 'notify' ? <Loader2 size={16} className="animate-spin" /> : <Bell size={16} />} Send test notification
               </button>
             </div>
+          )}
+
+          {connected && (
+            <form onSubmit={(e) => void onAsk(e)} className="space-y-2" data-testid="watch-ask">
+              <label htmlFor="watch-ask-input" className="block text-[10px] uppercase tracking-widest text-slate-500">
+                Ask Jarvis through the watch
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="watch-ask-input"
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  placeholder="What's on my calendar today?"
+                  className={`min-w-0 flex-1 rounded-xl bg-white/5 px-3 text-sm text-white placeholder:text-slate-500 ${touch}`}
+                />
+                <button type="submit" disabled={busy !== null || !question.trim()} className={`glass-button shrink-0 px-4 text-sm ${touch}`}>
+                  {busy === 'ask' ? <Loader2 size={16} className="animate-spin" /> : <MessageCircle size={16} />} Ask
+                </button>
+              </div>
+              {answer && <p className="break-words text-sm text-slate-300" data-testid="watch-answer">{answer}</p>}
+            </form>
           )}
         </div>
       )}

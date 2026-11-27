@@ -6,8 +6,9 @@ from collections.abc import Callable
 from typing import cast
 
 from services.common import ma_identity
+from services.common.media_titles import clean_title
 from services.config import MASS_CONFIG_ENTRY_ID
-from services.execution import activity, ha_client, ha_health
+from services.execution import abs_session_state, activity, ha_client, ha_health, media_vocabulary
 from services.execution.media_links import media_file_url
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult, MediaPlayRequest
 from services.shared.ma_player import is_music_assistant_player
@@ -67,6 +68,145 @@ async def _routing_index(ha_url: str, ha_token: str, purpose: str):
     from services.execution import capability_index
 
     return await capability_index.routing_index(ha_url, ha_token, purpose)
+
+
+async def resolve_room_player(ctx, name, purpose) -> str | None:
+    """Resolve an area/device ``name`` to a player entity id, or None.
+
+    Uses the hub's capability index (area registry + per-area player choice).
+    Never invents an entity id; returns None when the room or a player cannot
+    be resolved.
+    """
+    if not name:
+        return None
+    ha_url = getattr(ctx, "ha_url", None)
+    ha_token = getattr(ctx, "ha_token", None)
+    try:
+        idx = await _routing_index(ha_url, ha_token, purpose or "room player")
+        states = await ha_client.get_states(ha_url, ha_token) or [] if ha_url else []
+        # A name that is exactly one player's ("Office TV Cast") means that player, before the room's
+        # capability pick (which sent "Office TV Cast" to media_player.office_tv_chrome, 2026-11-25).
+        spoken = " ".join(_name_words(name))
+        exact = [s for s in states if str(s.get("entity_id") or "").startswith("media_player.")
+                 and spoken and " ".join(_name_words(str((s.get("attributes") or {}).get("friendly_name") or ""))) == spoken]
+        if len(exact) == 1:
+            return exact[0]["entity_id"]
+        if idx is not None:
+            area_id = idx.area_in_text(name)
+            if area_id is not None:
+                picked = idx.pick_player(area_id, name, purpose, states)
+                if picked:
+                    return picked
+        # Not a room: a player's own name ("Office TV" -> media_player.office_tv_cast).
+        return await player_by_name(ctx, name, states)
+    except Exception as exc:
+        log.warning(f"[media/resolve_room_player] could not resolve {name!r}: {exc}")
+    return None
+
+
+#: Words a spoken device name carries that no player name needs to.
+_NAME_FILLER = frozenset({"the", "my", "our", "a", "an", "on", "in"})
+
+
+def _name_words(text: str) -> list[str]:
+    return [w for w in _plain_name(text).split() if w not in _NAME_FILLER]
+
+
+def players_named(name: str, states: list[dict]) -> list[dict]:
+    """The media_player states whose friendly name or entity id holds every word of ``name`` (case-insensitive)."""
+    wanted = _name_words(name)
+    if not wanted:
+        return []
+    out = []
+    for s in states or []:
+        eid = str(s.get("entity_id") or "")
+        if not eid.startswith("media_player."):
+            continue
+        friendly = str((s.get("attributes") or {}).get("friendly_name") or "")
+        words = set(_name_words(friendly)) | set(_name_words(eid.split(".", 1)[1]))
+        if all(w in words for w in wanted):
+            out.append(s)
+    return out
+
+
+async def play_means_resume(req: MediaPlayRequest) -> str | None:
+    """The device a "play" request really asks to resume, or None when it is a real search.
+
+    "Hit play on the office TV" reached us as ``MediaPlayRequest(query="office tv", device_name="Office TV")``:
+    a library search for a song named after the device. A play request whose query is empty or only names
+    the target (the ``device_name``, or a media player's own name) is a transport ``resume`` on that device.
+    Returns the device name to resume on ("" when ``entity_id`` already pins it).
+    """
+    if req.pick or req.media_content_id:
+        return None
+    query = " ".join(_name_words(req.query or ""))
+    target = (req.device_name or "").strip()
+    if not query:
+        if req.entity_id:
+            return target
+        return target or None
+    if target and query == " ".join(_name_words(target)):
+        return target
+    if len(query.split()) > 6:
+        return None
+    ctx = req.user_context
+    ha_url, ha_token = getattr(ctx, "ha_url", None), getattr(ctx, "ha_token", None)
+    if not ha_url or not ha_token or ha_health.is_down(ha_url):
+        return None
+    try:
+        states = await ha_client.get_states(ha_url, ha_token) or []
+    except Exception as exc:
+        log.warning(f"[media/play] could not read players to check {req.query!r}: {exc}")
+        return None
+    for s in states:
+        eid = str(s.get("entity_id") or "")
+        if not eid.startswith("media_player."):
+            continue
+        friendly = str((s.get("attributes") or {}).get("friendly_name") or "")
+        names = {" ".join(_name_words(friendly)), " ".join(_name_words(eid.split(".", 1)[1]))}
+        if query in names and (not req.entity_id or req.entity_id == eid):
+            # The query names this player; resume on the device the caller named, else on this one.
+            return target or ("" if req.entity_id else (req.query or "").strip())
+    return None
+
+
+async def player_by_name(ctx, name: str, states: list[dict]) -> str | None:
+    """Pick the player a spoken device ``name`` means, from the hub's states; None when nothing matches.
+
+    Order: players voice may control first (when the request comes from the assistant), then one that is
+    playing or paused (so "resume" and "pause" land on the player holding the media), then the closest name
+    (fewest extra words), then the entity id. Never invents an entity id.
+    """
+    from services.execution import voice_exposure
+    from services.execution.capability_index import state_rank
+
+    matches = players_named(name, states)
+    if not matches:
+        return None
+    wanted = set(_name_words(name))
+    exposed: dict[str, int] = {}
+    if voice_exposure.gated(ctx):
+        from services.execution import hardware_router
+
+        ha_url, ha_token = hardware_router.hub_pair(ctx)
+        for s in matches:
+            eid = s["entity_id"]
+            try:
+                ok = bool(ha_url and ha_token) and await voice_exposure.fetch_exposed(ha_url, ha_token, eid)
+                exposed[eid] = 0 if ok else 2
+            except voice_exposure.EntityNotExposed:
+                exposed[eid] = 1  # the hub could not say: after the exposed ones, before the refused ones
+
+    def extra_words(s: dict) -> int:
+        friendly = str((s.get("attributes") or {}).get("friendly_name") or "")
+        return min(len(set(_name_words(friendly)) - wanted) if friendly else 99,
+                   len(set(_name_words(s["entity_id"].split(".", 1)[1])) - wanted))
+
+    ranked = sorted(matches, key=lambda s: (exposed.get(s["entity_id"], 0), state_rank(s.get("state")),
+                                             extra_words(s), s["entity_id"]))
+    picked = ranked[0]["entity_id"]
+    log.info(f"[media/resolve_room_player] {name!r} names player {picked} (of {len(matches)})")
+    return picked
 
 
 async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, media_type: str | None = None,
@@ -158,9 +298,21 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
         ma_players = [e for e in idx.media_targets() if idx.integration(e) == "music_assistant"]
         driving = [e for e in ma_players if queues.get(e) == original_entity]
         near = idx.nearby(original_entity, any_of=("play_media",), integration="music_assistant")
-        for eid in driving + near:
+        same_device = [e for e in near if idx.device_of(e) and idx.device_of(e) == idx.device_of(original_entity)]
+        # Another device's Music Assistant player in the same room is that device, not this one: a
+        # satellite's own speaker asked for music must not be swapped for the room's TV. A neighbour
+        # counts only when it carries this player's name (MA's twin of an HA player has the same name).
+        names = {s.get("entity_id"): str((s.get("attributes") or {}).get("friendly_name") or "") for s in all_states}
+        own_name = _plain_name(names.get(original_entity, ""))
+        same_name = [e for e in near if e not in same_device and own_name
+                     and _names_match(own_name, _plain_name(names.get(e, "")))]
+        for eid in driving + same_device + same_name:
             log.info(f"[media/play] Resolved MASS entity: {original_entity} -> {eid} (capability index)")
             return eid
+        skipped = [e for e in near if e not in same_device]
+        if skipped:
+            log.info(f"[media/play] {original_entity}: no Music Assistant player of its own; not borrowing "
+                     f"{', '.join(skipped)} from the same room")
         return original_entity
 
     # Check if original entity is already an MA player with active_queue
@@ -207,10 +359,75 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
     # No MA variant found, return original (may still work for non-MA players)
     return original_entity
 
+async def _not_on_music_assistant(ctx, entity_id: str) -> ExecutionResult | None:
+    """A plain answer when ``entity_id`` has no Music Assistant player, instead of the hub's 400.
+
+    Only with the hub's capability index, which says which integration a player belongs to: a voice
+    satellite's own speaker (an ESPHome media_player) plays music only through the Music Assistant
+    player on its device, which exists once the satellite has connected to Music Assistant.
+    """
+    idx = await _routing_index(ctx.ha_url, ctx.ha_token, "Music Assistant player check")
+    if idx is None or entity_id not in idx or idx.integration(entity_id) == "music_assistant":
+        return None
+    states = await ha_client.get_states(ctx.ha_url, ctx.ha_token) or []
+    name = next((str((s.get("attributes") or {}).get("friendly_name") or "") for s in states
+                 if s.get("entity_id") == entity_id), "") or entity_id
+    log.info(f"[media/play] {entity_id} has no Music Assistant player; not asking for music there")
+    return ExecutionResult(
+        status="FAILURE", service="media_play",
+        message=f"{name} is not connected to Music Assistant, so I can't play music on it. "
+                "Once it shows up as a player in Music Assistant, ask again, or name another speaker.",
+        detail={"route": "none", "reason": "no_music_assistant_player", "entity_id": entity_id},
+    )
+
+
+def _plain_name(name: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).split())
+
+
+def _names_match(a: str, b: str) -> bool:
+    return bool(a and b) and (a == b or a in b or b in a)
+
+
 async def _is_ma_entity(ctx, entity_id: str) -> bool:
     """True when `entity_id` is a Music Assistant player (it has an MA queue)."""
     state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, entity_id)
     return bool(state) and is_music_assistant_player(state.get("attributes"), entity_id)
+
+
+#: Search-result order for a genre or mood request: a playlist or a station before a track
+#: whose title happens to contain the word ("Call to Worship").
+GENRE_CATEGORIES = ["playlists", "radio", "albums", "artists", "tracks"]
+_GENRE_KINDS = ("playlist", "radio", "album", "artist", "track")
+
+
+def _direct_hit(mass_client, results: list[dict], genre: bool) -> tuple[str, str] | None:
+    """The direct route's hit: the HA order, or playlists and radio first for a genre."""
+    if not genre:
+        return mass_client.best_uri(results)
+    for kind in _GENRE_KINDS:
+        for item in results:
+            if item.get("type") == kind and item.get("uri"):
+                return item["uri"], kind
+    return None
+
+
+#: How a Music Assistant search category is said in a reply.
+_SPOKEN_CATEGORY = {"tracks": "song", "albums": "album", "artists": "artist", "playlists": "playlist",
+                    "radio": "radio station"}
+
+
+async def spoken_player_name(ctx, entity_id: str) -> str:
+    """The player's friendly name for a reply ("Office Echo"), never its entity id."""
+    from services.common.spoken_names import humanize
+
+    try:
+        state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, entity_id) if ctx.ha_url else None
+        name = str(((state or {}).get("attributes") or {}).get("friendly_name") or "").strip()
+    except Exception as exc:  # a name for a sentence is never worth failing a play for
+        log.info(f"[media/play] could not read {entity_id}'s name: {exc}")
+        name = ""
+    return name or humanize(entity_id)
 
 
 async def play_music_direct(req: MediaPlayRequest, entity_id: str, ctx, why: str) -> ExecutionResult:
@@ -242,10 +459,33 @@ async def play_music_direct(req: MediaPlayRequest, entity_id: str, ctx, why: str
             )
         if "://" in query:
             uri, kind = query, "item"
+        elif not query:
+            # "Play music": a library playlist (the HA route also honours the default-music setting).
+            import random
+
+            playlists = [p for p in await mass_client.get_playlists(ctx.mass_url, ctx.mass_token) if p.get("uri")]
+            if not playlists:
+                return ExecutionResult(status="FAILURE", service="media_play",
+                                       message="There's no playlist in the library to play. Ask for an artist "
+                                               "or a song.")
+            media_vocabulary.remember("playlist", (p.get("name") for p in playlists))
+            pick = random.choice(playlists)
+            uri, kind, query = pick["uri"], "playlist", pick.get("name") or "a playlist"
         else:
-            hit = mass_client.best_uri(
-                await mass_client.search(ctx.mass_url, ctx.mass_token, query, limit=10, library_only=False)
-            ) if query else None
+            genre = (req.media_content_type or "").lower() == "genre"
+            hit = _direct_hit(mass_client, await mass_client.search(
+                ctx.mass_url, ctx.mass_token, query, limit=10, library_only=False), genre)
+            relaxed = (req.fallback_query or "").strip()
+            if not hit and relaxed and relaxed.lower() != query.lower():
+                hit = _direct_hit(mass_client, await mass_client.search(
+                    ctx.mass_url, ctx.mass_token, relaxed, limit=10, library_only=False), genre)
+                query = relaxed if hit else query
+            better = None if hit else media_vocabulary.correct(query, "artist", "playlist")
+            if better and media_vocabulary.squash(better) != media_vocabulary.squash(query):
+                hit = mass_client.best_uri(
+                    await mass_client.search(ctx.mass_url, ctx.mass_token, better, limit=10, library_only=False)
+                )
+                query = better if hit else query
             if not hit:
                 return ExecutionResult(status="FAILURE", message=f"No match for '{query}'.", service="media_play")
             uri, kind = hit
@@ -279,7 +519,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     return result
 
 
-async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
+async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx, corrected: bool = False) -> ExecutionResult:
     """Play music via Music Assistant through Home Assistant's integration."""
     from . import roku as roku_handler
 
@@ -302,6 +542,10 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx) -> Exec
 
     mass_entity = await resolve_mass_entity(ctx, entity_id)
     log.info(f"[media/play] play_music configuration: entity_id={entity_id}, mass_entity={mass_entity}, mass_entry={mass_entry}, is_samsung={is_samsung}")
+    if mass_entity == entity_id and not is_samsung:
+        not_on_ma = await _not_on_music_assistant(ctx, entity_id)
+        if not_on_ma:
+            return not_on_ma
 
     if req.query:
         # Check if the query is already a direct Music Assistant URI
@@ -323,18 +567,22 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx) -> Exec
             )
             log.info(f"[media/play] play_media service call response for direct URI: {result}")
             if result.get("ok"):
-                return ExecutionResult(status="SUCCESS", message=f"Playing media on {entity_id}.", service="media_play")
+                return ExecutionResult(status="SUCCESS", message=f"Playing on {await spoken_player_name(ctx, entity_id)}.",
+                                       service="media_play")
             else:
                 log.error(f"[media/play] play_media direct call failed: {result.get('error')}")
                 return ExecutionResult(status="FAILURE", message=f"Failed to play direct URI: {result.get('error')}", service="media_play")
 
-        log.info(f"[media/play] Searching MASS for '{req.query}' on {entity_id}")
+        # A genre or mood ("worship music") is a playlist or a station, not a track title.
+        genre = (req.media_content_type or "").lower() == "genre"
+        log.info(f"[media/play] Searching MASS for '{req.query}' on {entity_id}" + (" as a genre" if genre else ""))
         search_result = await ha_client.call_service(
             ctx.ha_url, ctx.ha_token, "music_assistant", "search", entity_id="",
             service_data={
                 "config_entry_id": mass_entry,
                 "name": req.query,
-                "media_type": ["track", "artist", "album", "playlist", "radio"],
+                "media_type": ["playlist", "radio", "album", "artist", "track"] if genre
+                else ["track", "artist", "album", "playlist", "radio"],
                 "limit": 5,
                 **ma_identity.act_as(ctx),
             },
@@ -348,12 +596,15 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx) -> Exec
             raw = search_result["service_response"]
             resp = raw.get("service_response", raw)
             uri = None
+            items_title = None
             media_type_label = ""
-            for category in ["tracks", "albums", "artists", "playlists", "radio"]:
+            order = GENRE_CATEGORIES if genre else ["tracks", "albums", "artists", "playlists", "radio"]
+            for category in order:
                 items = resp.get(category, [])
                 log.info(f"[media/play] Category '{category}' items count: {len(items)}")
                 if items:
                     uri = items[0].get("uri")
+                    items_title = items[0].get("name")
                     media_type_label = category
                     log.info(f"[media/play] Best match in category '{category}': name='{items[0].get('name')}', uri='{uri}'")
                     break
@@ -378,21 +629,146 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx) -> Exec
                 )
                 log.info(f"[media/play] play_media service call response: {result}")
                 if result.get("ok"):
-                    return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' ({media_type_label}) on {entity_id}.", service="media_play")
+                    title = clean_title(str(items_title or req.query))
+                    kind = _SPOKEN_CATEGORY.get(media_type_label, "")
+                    player = await spoken_player_name(ctx, entity_id)
+                    said = f"{title}, the {kind}," if kind else f"{title}"
+                    return ExecutionResult(status="SUCCESS", message=f"Playing {said} on {player}.", service="media_play")
                 else:
                     log.error(f"[media/play] play_media service call failed: {result.get('error')}")
                     return ExecutionResult(status="FAILURE", message=f"Failed to play '{req.query}': {result.get('error')}", service="media_play")
 
-        # No usable match: do NOT play a random/last-resort track; the user
-        # asked for a specific thing and nothing matched it (BUG-25).
+        # The relaxed words ("worship" after "worship music") get one search before anything else.
+        relaxed = (req.fallback_query or "").strip()
+        if relaxed and relaxed.lower() != (req.query or "").strip().lower():
+            log.info(f"[media/play] no match for '{req.query}'; trying the relaxed search '{relaxed}'")
+            return await _play_music_via_ha(req.model_copy(update={"query": relaxed, "fallback_query": None}),
+                                            entity_id, ctx, corrected=corrected)
+        # A misheard name ("brand in Lake") gets one more search, for the library name it most
+        # likely was; never a random track (BUG-25: they asked for something specific).
+        if not corrected:
+            better = await _corrected_music_query(ctx, req.query, mass_entry)
+            if better:
+                return await _play_music_via_ha(req.model_copy(update={"query": better}), entity_id, ctx,
+                                                 corrected=True)
         log.warning(f"[media/play] MASS search returned no usable match for query='{req.query}' (config_entry={mass_entry}); returning FAILURE")
         return ExecutionResult(status="FAILURE", message=f"No match for '{req.query}'.", service="media_play")
 
-    return ExecutionResult(status="FAILURE", message=f"Could not play '{req.query}' on {entity_id}.", service="media_play")
+    # "Play music": nothing named, so something sensible from the library.
+    return await _play_something(req, entity_id, mass_entity, mass_entry, ctx)
+
+
+#: Identity setting: what "play music" plays when nothing is named (a Music Assistant URI, or a
+#: playlist or artist name to search). Empty shuffles a library playlist, else library tracks.
+DEFAULT_MUSIC_SETTING = "voice_default_music"
+#: How many library tracks a shuffle of the whole library queues.
+SHUFFLE_TRACKS = 25
+
+
+async def _global_setting(key: str) -> str:
+    """One Identity setting's value ("" when unset or Identity cannot be asked, logged)."""
+    import aiohttp
+
+    from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.get(
+            f"{IDENTITY_SVC_URL}/api/settings", headers={"X-Internal-Secret": INTERNAL_SECRET},
+        ) as resp:
+            if resp.status != 200:
+                log.warning(f"[media/play] Identity answered {resp.status} reading {key}")
+                return ""
+            entries = await resp.json()
+    except Exception as e:
+        log.warning(f"[media/play] could not read {key} from Identity: {e}")
+        return ""
+    for entry in entries or []:
+        if isinstance(entry, dict) and entry.get("key") == key:
+            return str(entry.get("value") or "").strip()
+    return ""
+
+
+async def _library_names(ctx, mass_entry: str, kind: str, limit: int) -> list[dict]:
+    from . import mass_ha_client
+
+    items = await mass_ha_client.get_library(ctx.ha_url, ctx.ha_token, kind, limit=limit, mass_entry_id=mass_entry)
+    vocab_kind = {"artist": "artist", "playlist": "playlist"}.get(kind)
+    if vocab_kind and items:
+        media_vocabulary.remember(vocab_kind, (i.get("name") for i in items))
+    return items
+
+
+async def _corrected_music_query(ctx, query: str | None, mass_entry: str) -> str | None:
+    """The library artist or playlist a misheard ``query`` most likely named, or None."""
+    if not query or "://" in query:
+        return None
+    try:
+        if media_vocabulary.stale("artist"):
+            await _library_names(ctx, mass_entry, "artist", 500)
+        if media_vocabulary.stale("playlist"):
+            await _library_names(ctx, mass_entry, "playlist", 200)
+    except Exception as e:  # a correction is a second chance, never a new failure
+        log.warning(f"[media/play] could not list the library to check a misheard name: {e}")
+    better = media_vocabulary.correct(query, "artist", "playlist")
+    if better and media_vocabulary.squash(better) != media_vocabulary.squash(query):
+        log.info(f"[media/play] no match for '{query}'; trying the library name '{better}'")
+        return better
+    return None
+
+
+async def _play_something(req: MediaPlayRequest, entity_id: str, mass_entity: str, mass_entry: str,
+                          ctx) -> ExecutionResult:
+    """Music when none was named: the household's default, else a shuffled library playlist, else library tracks."""
+    import random
+
+    default = await _global_setting(DEFAULT_MUSIC_SETTING)
+    if default:
+        log.info(f"[media/play] nothing named; playing the default music setting '{default}'")
+        return await _play_music_via_ha(req.model_copy(update={"query": default}), entity_id, ctx, corrected=True)
+
+    async def play(media_id, label: str) -> ExecutionResult:
+        result = await ha_client.call_service(
+            ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
+            {"media_id": media_id, "enqueue": req.enqueue or "replace", **ma_identity.act_as(ctx)},
+        )
+        if not result.get("ok"):
+            log.error(f"[media/play] playing {label} failed: {result.get('error')}")
+            return ExecutionResult(status="FAILURE", message=f"Failed to play {label}: {result.get('error')}",
+                                   service="media_play")
+        shuffle = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "shuffle_set",
+                                               mass_entity, {"shuffle": True})
+        if not shuffle.get("ok"):
+            log.info(f"[media/play] {mass_entity} did not take shuffle: {shuffle.get('error')}")
+        return ExecutionResult(status="SUCCESS", message=f"Playing {label} on shuffle.", service="media_play",
+                               detail={"route": "library_shuffle", "media_id": media_id})
+
+    try:
+        playlists = [p for p in await _library_names(ctx, mass_entry, "playlist", 200) if p.get("uri")]
+        if playlists:
+            pick = random.choice(playlists)
+            log.info(f"[media/play] nothing named; shuffling library playlist '{pick.get('name')}'")
+            return await play(pick["uri"], f"your playlist {pick.get('name') or 'from the library'}")
+        tracks = [t["uri"] for t in await _library_names(ctx, mass_entry, "track", 200) if t.get("uri")]
+        if tracks:
+            log.info(f"[media/play] nothing named and no playlists; shuffling {min(len(tracks), SHUFFLE_TRACKS)} "
+                     "library tracks")
+            return await play(random.sample(tracks, min(len(tracks), SHUFFLE_TRACKS)), "music from your library")
+    except Exception as e:
+        log.error(f"[media/play] could not read the music library: {e}")
+        return ExecutionResult(status="FAILURE", message=f"I couldn't read the music library: {e}",
+                               service="media_play")
+    return ExecutionResult(
+        status="FAILURE",
+        message="There's no music in the library to play yet. Ask for an artist, a song or a playlist, "
+                f"or set a default ({DEFAULT_MUSIC_SETTING}) in Admin settings.",
+        service="media_play",
+    )
 
 
 async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play video via yt-dlp stream. Routes through Roku ECP for Roku devices."""
+    from services.execution import media_finder, video_safety
+
     from . import roku as roku_handler
     from . import video as video_handler
 
@@ -401,9 +777,14 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     # Check if already a URL
     video_url = video_handler.extract_video_url(query)
     if not video_url:
-        video_url = await video_handler.search_youtube(query)
-        if not video_url:
-            return ExecutionResult(status="FAILURE", message=f"Could not find video for '{query}'.", service="media_play")
+        # Words, not a link: safe search, then play only a suitable strong match (ask about a weaker one).
+        return await media_finder.find_video_and_play(req, query, entity_id, ctx)
+    # Every video is screened before it reaches a screen: its age rating and the household blocklist.
+    verdict = await video_safety.screen_url(video_url, ctx)
+    if not verdict.ok:
+        log.info(f"[media.video] refused a video ({verdict.why}, age_limit={verdict.age_limit})")
+        return ExecutionResult(status="FAILURE", message=video_safety.refusal_message(verdict.why),
+                               service="media_play", detail={"playback": "not_started", "reason": verdict.why})
 
     # Roku: download optimized format with progressive playback, then launch via ECP
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
@@ -496,6 +877,48 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
         return ExecutionResult(status="SUCCESS", message=f"Playing video '{title or query}' on {entity_id}.", service="media_play")
 
     return ExecutionResult(status="FAILURE", message=f"Failed to play video on {entity_id}.", service="media_play")
+
+async def play_web_audio(video_url: str, entity_id: str, ctx) -> ExecutionResult:
+    """The sound of a YouTube video on a speaker (a speaker shows no picture).
+
+    Screened like a video for a screen (age rating, blocklist). The audio stream
+    (``extract_audio_stream_url``, AAC/m4a first) goes to the speaker's Music Assistant
+    player when it has one, which converts it for any speaker, else straight to the player.
+    """
+    from services.execution import video_safety
+
+    from . import video as video_handler
+
+    verdict = await video_safety.screen_url(video_url, ctx)
+    if not verdict.ok:
+        log.info(f"[media.audio] refused a YouTube video's audio ({verdict.why}, age_limit={verdict.age_limit})")
+        return ExecutionResult(status="FAILURE", message=video_safety.refusal_message(verdict.why),
+                               service="media_play", detail={"playback": "not_started", "reason": verdict.why})
+    stream_url, title = await video_handler.extract_audio_stream_url(video_url)
+    if not stream_url:
+        return ExecutionResult(status="FAILURE", service="media_play",
+                               message="I couldn't get the audio of that video from YouTube.",
+                               detail={"reason": "no_audio_stream"})
+    try:
+        target = await resolve_mass_entity(ctx, entity_id)
+        via_ma = target != entity_id or await _is_ma_entity(ctx, target)
+    except Exception as exc:
+        log.warning(f"[media.audio] could not check {entity_id} for a Music Assistant player: {exc}")
+        target, via_ma = entity_id, False
+    log.info(f"[media.audio] YouTube audio of {title!r} on {target} ({'Music Assistant' if via_ma else 'the player'})")
+    if via_ma:
+        result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", target,
+                                              {"media_id": stream_url, "enqueue": "replace"})
+    else:
+        result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "play_media", target,
+                                              {"media_content_id": stream_url, "media_content_type": "music"})
+    if result.get("ok"):
+        return ExecutionResult(status="SUCCESS", service="media_play", message=f"Playing the audio of '{title}'.",
+                               detail={"route": "web_audio", "entity_id": target})
+    return ExecutionResult(status="FAILURE", service="media_play",
+                           message=f"Failed to play audio: {result.get('error') or 'the player refused it'}",
+                           detail={"reason": result.get("error"), "entity_id": target})
+
 
 async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play podcast via Music Assistant or URL."""
@@ -727,6 +1150,46 @@ async def play_url(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResul
 
     return ExecutionResult(status="FAILURE", message=f"Failed to play URL on {entity_id}.", service="media_play")
 
+async def _confirm_started(result: ExecutionResult, entity_id: str, ctx) -> ExecutionResult:
+    """``result``, or a plain failure when the player (or its Music Assistant twin) did not really start.
+
+    Skipped when the handler already confirmed it (``detail.playback``). A player that does not
+    report playback at all keeps the success, with that logged.
+    """
+    from services.execution import playback_check
+
+    detail = dict(result.detail or {})
+    if detail.get("playback"):
+        return result
+    try:
+        twin = await resolve_mass_entity(ctx, entity_id)
+    except Exception:
+        twin = entity_id
+    held, why = await playback_check.confirm_playing(
+        lambda eid: ha_client.get_state(ctx.ha_url, ctx.ha_token, eid), [twin, entity_id])
+    if held is None:
+        log.info(f"[media/play] could not confirm playback on {entity_id}: {why}")
+        return result.model_copy(update={"detail": {**detail, "playback": "unconfirmed", "reason": why}})
+    if held:
+        return result.model_copy(update={"detail": {**detail, "playback": "confirmed"}})
+    state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, entity_id) or {}
+    player = (state.get("attributes") or {}).get("friendly_name") or entity_id
+    found = (detail.get("found") or {}).get("title")
+    what = f" {_spoken_title(found)}" if found else ""
+    log.warning(f"[media/play] said to play on {entity_id} but it did not: {why}")
+    return ExecutionResult(
+        status="FAILURE", service=result.service,
+        message=f"I started{what or ' it'}, but {player} isn't playing it. I'm looking into it.",
+        detail={**detail, "playback": "not_started", "reason": why},
+    )
+
+
+def _spoken_title(title: str) -> str:
+    from services.common.media_titles import clean_title
+
+    return clean_title(title)
+
+
 async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
     """Unified media play handler supporting all content types and devices."""
     ctx = req.user_context
@@ -771,7 +1234,21 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
 
         # Route to appropriate handler
         log.info(f"[media/play] Routing playback to handler for media_type='{media_type}'")
-        if media_type == "video":
+        if req.pick or (req.search_everywhere and req.query and "://" not in req.query):
+            # "Play X": every source that is set up, not only the one the words suggest (media_finder.py).
+            from services.execution import media_finder
+
+            result = await media_finder.find_and_play(req, entity_id, ctx)
+            if (result.status != "SUCCESS" and media_type == "podcast" and not req.pick
+                    and (result.detail or {}).get("route") == "none"):
+                # The podcast route's own last resorts (the Nextcloud Podcasts folder, a track search).
+                fallback = await play_podcast(req.model_copy(update={"search_everywhere": False}), entity_id, ctx)
+                result = fallback if fallback.status == "SUCCESS" else result
+            found = (result.detail or {}).get("found") or {}
+            media_type = {"video": "video", "podcast": "podcast", "episode": "podcast",
+                          "audiobook": "audiobook", "series": "audiobook", "author": "audiobook"}.get(
+                str(found.get("kind") or ""), media_type)
+        elif media_type == "video":
             result = await play_video(req, entity_id, ctx)
         elif media_type == "podcast":
             result = await play_podcast(req, entity_id, ctx)
@@ -785,7 +1262,9 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
         # Log the play on the person's activity feed (music, video, podcast,
         # audiobook). Best effort: recording is never allowed to change the
         # playback result and never raises.
-        if result.status == "SUCCESS":
+        if result.status == "SUCCESS" and (result.detail or {}).get("route") not in ("ask", "offer_read"):
+            result = await _confirm_started(result, entity_id, ctx)
+        if result.status == "SUCCESS" and (result.detail or {}).get("route") not in ("ask", "offer_read"):
             feature = {
                 "video": "video",
                 "podcast": "podcast",
@@ -822,9 +1301,179 @@ def transport_said(command: str, attrs: dict | None, entity_id: str) -> str:
     return f"{done} on {name}." if done else f"Sent {command} to {name}."
 
 
+# Audiobook controls that need the ABS session (position, chapters) rather than
+# a plain media_player button. Handled before brand fallbacks so a TV entity
+# cannot swallow them.
+_ABS_ENHANCED_COMMANDS = frozenset({
+    "seek_relative", "chapter_next", "chapter_previous", "chapter_goto", "speed", "sleep",
+})
+
+
+def _player_position(attrs: dict | None) -> float:
+    """The player's position inside the current track, in seconds."""
+    try:
+        return max(0.0, float((attrs or {}).get("media_position") or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _chapter_index(chapters: list[dict], absolute_time: float) -> int:
+    for i, chapter in enumerate(chapters):
+        start = float(chapter.get("start") or 0)
+        end = chapter.get("end")
+        end = float(end) if end is not None else None
+        if absolute_time >= start and (end is None or absolute_time < end):
+            return i
+    return -1
+
+
+async def _abs_on_pause_or_stop(entity_id: str, attrs: dict | None, *, stop: bool) -> None:
+    """Write ABS progress back when the person pauses or stops a player we started a book on."""
+    position = _player_position(attrs)
+    if stop:
+        abs_session_state.cancel_sleep(entity_id)
+        await abs_session_state.close(entity_id, position)
+    else:
+        await abs_session_state.sync_position(entity_id, position)
+
+
+async def _audiobook_transport(
+    req, command: str, entity_id: str, attrs: dict | None, state: dict | None
+) -> ExecutionResult:
+    """Handle seek_relative / chapter_* / speed / sleep for a player."""
+    ctx = req.user_context
+    info = abs_session_state.active(entity_id)
+    chapters = (info or {}).get("chapters") or []
+    track_start = float((info or {}).get("track_start") or 0)
+
+    if command == "seek_relative":
+        seconds = getattr(req, "seconds", None)
+        delta = 30.0 if seconds is None else float(seconds)
+        target = max(0.0, _player_position(attrs) + delta)
+        result = await ha_client.call_service(
+            ctx.ha_url, ctx.ha_token, "media_player", "media_seek", entity_id,
+            {"seek_position": target},
+        )
+        if result.get("ok"):
+            return ExecutionResult(
+                status="SUCCESS",
+                message=f"Moved {'forward' if delta >= 0 else 'back'} {abs(delta):.0f} seconds.",
+                service="media_transport",
+            )
+        return ExecutionResult(status="FAILURE", message=f"Seek failed: {result.get('error')}", service="media_transport")
+
+    if command in ("chapter_next", "chapter_previous", "chapter_goto"):
+        if not chapters:
+            return ExecutionResult(
+                status="FAILURE",
+                message="Chapter information is not available for this playback.",
+                service="media_transport",
+            )
+        index = _chapter_index(chapters, track_start + _player_position(attrs))
+        if command == "chapter_goto":
+            wanted = getattr(req, "chapter", None)
+            if not wanted or not 1 <= wanted <= len(chapters):
+                return ExecutionResult(
+                    status="FAILURE",
+                    message=f"Chapter {wanted} is out of range (1 to {len(chapters)}).",
+                    service="media_transport",
+                )
+            index = wanted - 1
+        elif command == "chapter_next":
+            index = min(len(chapters) - 1, max(0, index + 1))
+        else:
+            index = max(0, index - 1)
+        chapter = chapters[index]
+        target = max(0.0, float(chapter.get("start") or 0) - track_start)
+        result = await ha_client.call_service(
+            ctx.ha_url, ctx.ha_token, "media_player", "media_seek", entity_id,
+            {"seek_position": target},
+        )
+        if result.get("ok"):
+            label = chapter.get("title") or f"chapter {index + 1}"
+            return ExecutionResult(status="SUCCESS", message=f"Went to {label}.", service="media_transport")
+        return ExecutionResult(status="FAILURE", message=f"Chapter change failed: {result.get('error')}", service="media_transport")
+
+    if command == "speed":
+        rate = getattr(req, "rate", None)
+        if rate is None:
+            return ExecutionResult(
+                status="FAILURE", message="Speed requires a rate between 0.5 and 3.0.", service="media_transport"
+            )
+        rate = float(rate)
+        if is_music_assistant_player(attrs or {}, entity_id) and ctx.mass_url and ctx.mass_token:
+            from . import mass_client
+
+            queue_id = (
+                (attrs or {}).get("active_queue")
+                or (attrs or {}).get("queue_id")
+                or entity_id.split(".", 1)[-1]
+            )
+            try:
+                await mass_client.ma_command(
+                    ctx.mass_url, ctx.mass_token, "player_queues/set_speed",
+                    {"queue_id": queue_id, "speed": rate},
+                )
+                return ExecutionResult(
+                    status="SUCCESS", message=f"Playback speed set to {rate:g}x.", service="media_transport"
+                )
+            except Exception as e:
+                log.warning(f"[media/transport] Could not set MA queue speed: {e}")
+        return ExecutionResult(
+            status="FAILURE",
+            message="Speed is not supported on this speaker.",
+            service="media_transport",
+        )
+
+    # command == "sleep"
+    end_of_chapter = bool(getattr(req, "end_of_chapter", False))
+    minutes = getattr(req, "minutes", None)
+    if end_of_chapter:
+        absolute = track_start + _player_position(attrs)
+        index = _chapter_index(chapters, absolute)
+        end = chapters[index].get("end") if 0 <= index < len(chapters) else None
+        delay = max(1.0, float(end) - absolute) if end is not None else 30 * 60
+        when = "at the end of the chapter"
+    elif minutes:
+        delay = max(0.0, float(minutes) * 60)
+        when = f"in {float(minutes):g} minutes"
+    else:
+        return ExecutionResult(
+            status="FAILURE",
+            message="Sleep requires minutes or end_of_chapter.",
+            service="media_transport",
+        )
+
+    async def _pause_player() -> None:
+        await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "media_pause", entity_id)
+
+    abs_session_state.schedule_sleep(entity_id, delay, _pause_player)
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Sleep timer set: playback will pause {when}.",
+        service="media_transport",
+    )
+
+
 async def handle_media_transport(req) -> ExecutionResult:
     """Transport/remote commands: through HA, or straight to the device when HA is down."""
     ctx = req.user_context
+    # Resolve an area/device name to a player when the caller did not pin one
+    # (e.g. a voice satellite speaking for its room). Never invent an entity id.
+    if not req.entity_id and getattr(req, "device_name", None):
+        try:
+            req.entity_id = await resolve_room_player(ctx, req.device_name, None)
+        except Exception as exc:
+            log.warning(f"[media/transport] could not resolve device_name {req.device_name!r}: {exc}")
+            req.entity_id = None
+    if not req.entity_id and getattr(req, "device_name", None):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"I couldn't find a speaker in {req.device_name}.",
+            service="media_transport",
+        )
+    if not req.entity_id:
+        req.entity_id = ""
     if not ctx.ha_url or ha_health.is_down(ctx.ha_url):
         return await _transport_direct(req, "down" if ctx.ha_url else "not configured")
     result = await _transport_via_ha(req)
@@ -854,12 +1503,12 @@ async def _transport_direct(req, why: str) -> ExecutionResult:
 
 #: Transport command -> the capability-index ability that means the entity serves it itself.
 _COMMAND_ABILITY = {
-    "pause": "pause", "seek": "seek", "volume_set": "volume", "volume_mute": "mute", "mute": "mute",
+    "pause": "pause", "seek": "seek", "volume_set": "volume", "volume_mute": "mute", "mute": "mute", "volume_unmute": "mute",
     "previous": "next_track", "next": "next_track", "stop": "stop", "volume_up": "volume_step",
     "volume_down": "volume_step", "play": "play", "resume": "play", "power_on": "power", "power_off": "power",
 }
 _FEATURE_BITS = {
-    "pause": 1, "seek": 2, "volume_set": 4, "volume_mute": 8, "mute": 8,
+    "pause": 1, "seek": 2, "volume_set": 4, "volume_mute": 8, "mute": 8, "volume_unmute": 8,
     "previous": 16, "next": 32, "stop": 4096, "volume_up": 1024,
     "volume_down": 1024, "play": 16384, "resume": 16384,
     "power_on": 128, "power_off": 256,
@@ -901,6 +1550,15 @@ async def _transport_via_ha(req) -> ExecutionResult:
     # entity cannot serve the command (and for remote-only actions like home/back/power).
     supported_features = int(attrs.get("supported_features", 0) or 0)
     standard_supported = _standard_supported(idx, full_entity_id, command, supported_features)
+
+    # Pause / stop close the loop on an ABS session this handler started: write
+    # the player's current position back to Audiobookshelf (and close it on
+    # stop). Enhanced audiobook controls need the session's chapters, so handle
+    # them here, before the TV brand fallbacks can swallow them.
+    if command in ("pause", "stop"):
+        await _abs_on_pause_or_stop(full_entity_id, attrs, stop=(command == "stop"))
+    if command in _ABS_ENHANCED_COMMANDS:
+        return await _audiobook_transport(req, command, full_entity_id, attrs, state)
 
     # A TV or cast speaker playing Music Assistant's stream has its queue on
     # MA's own entity for the same device ("Den TV": the Cast entity
@@ -994,13 +1652,13 @@ async def _transport_via_ha(req) -> ExecutionResult:
         service_cmd = "volume_set"
         data = {"volume_level": req.volume_level}
 
-    if command in ("volume_mute", "mute"):
+    if command in ("volume_mute", "mute", "volume_unmute"):
         # HA's volume_mute service requires an explicit target state. Fall back
         # to "mute" when the caller did not say, which matches the old button
         # behaviour of muting on press.
         muted = getattr(req, "muted", None)
         if muted is None:
-            muted = req.volume_level in (None, 0)
+            muted = False if command == "volume_unmute" else req.volume_level in (None, 0)
         service_cmd = "volume_mute"
         data = {"is_volume_muted": bool(muted)}
 
@@ -1015,13 +1673,121 @@ async def _transport_via_ha(req) -> ExecutionResult:
         service_cmd = "media_seek"
         data = {"seek_position": float(position)}
 
+    before = dict(attrs)
     result = await ha_client.call_service(
         ha_url, ha_token, domain, service_cmd, target_entity, data or None,
     )
 
+    if result.get("ok") and command in _VOLUME_COMMANDS:
+        return await _confirm_volume(ctx, full_entity_id, command, before, data or {})
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=transport_said(command, attrs, full_entity_id), service="media_transport")
     return ExecutionResult(status="FAILURE", message=f"Media command failed: {result.get('error')}", service="media_transport", detail=result)
+
+
+_VOLUME_COMMANDS = frozenset({"volume_set", "volume_up", "volume_down", "volume_mute", "mute", "volume_unmute"})
+
+#: How long a volume change is given to show up in the player's state before the reply says what
+#: the player reports. ESPHome and Music Assistant players report within a few hundred ms.
+VOLUME_READBACK_S = 1.5
+_VOLUME_READBACK_STEP_S = 0.25
+
+
+def _level(attrs: dict | None) -> float | None:
+    value = (attrs or {}).get("volume_level")
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+#: How far a player's reported volume may be from the level asked for and still count as set.
+VOLUME_CONFIRM_TOLERANCE = 0.035
+
+
+def _volume_settled(command: str, data: dict, before: dict, now: dict) -> bool:
+    """Whether the player's state shows the change asked for."""
+    if command in ("volume_mute", "mute", "volume_unmute"):
+        return now.get("is_volume_muted") is not None and bool(now.get("is_volume_muted")) == bool(
+            data.get("is_volume_muted"))
+    level = _level(now)
+    if level is None:
+        return False
+    if "volume_level" in data:
+        # TVs and Chromecasts snap to their own steps: a 30% request read back as 32% on the Office TV.
+        return abs(level - float(data["volume_level"])) < VOLUME_CONFIRM_TOLERANCE
+    old = _level(before)
+    return old is None or abs(level - old) >= 0.005 or level in (0.0, 1.0)
+
+
+
+async def _confirm_volume(ctx, entity_id: str, command: str, before: dict, data: dict) -> ExecutionResult:
+    """Read the player back after a volume change and say what it reports, never what was asked.
+
+    An Echo has two players: its own (ESPHome, which sets the speaker's output, so voice replies
+    and every stream follow it) and Music Assistant's twin for its queue. The change goes to the
+    one named; its Music Assistant twin is then set to the same level so the music player's
+    slider and the speaker agree.
+    """
+    name = (before or {}).get("friendly_name") or entity_id.split(".", 1)[-1].replace("_", " ")
+    now: dict = {}
+    waited = 0.0
+    while True:
+        state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, entity_id) or {}
+        now = state.get("attributes") or {}
+        if _volume_settled(command, data, before, now) or waited >= VOLUME_READBACK_S:
+            break
+        await asyncio.sleep(_VOLUME_READBACK_STEP_S)
+        waited += _VOLUME_READBACK_STEP_S
+    level = _level(now)
+    muted = now.get("is_volume_muted")
+    detail: dict = {"entity_id": entity_id, "volume_level": level, "is_volume_muted": muted}
+    if not _volume_settled(command, data, before, now):
+        if level is None and muted is None:
+            # Accepted, and nothing says otherwise: a player that reports no volume cannot be read back.
+            detail["confirmed"] = False
+            return ExecutionResult(
+                status="SUCCESS", service="media_transport", detail=detail,
+                message=f"I sent the volume change to {name}, but it does not report its volume, so I can't confirm it.")
+        if "volume_level" in data:
+            message = (f"I asked {name} for {round(float(data['volume_level']) * 100)}%, "
+                       f"but it still reports {round((level or 0) * 100)}%.")
+        elif command in ("volume_mute", "mute", "volume_unmute"):
+            message = f"I asked {name} to {'mute' if data.get('is_volume_muted') else 'unmute'}, but its state did not change."
+        else:
+            message = f"I asked {name} to turn {'up' if command == 'volume_up' else 'down'}, but it still reports {round((level or 0) * 100)}%."
+        log.warning(f"[media/transport] {command} on {entity_id} not confirmed: {detail}")
+        return ExecutionResult(status="FAILURE", message=message, service="media_transport", detail=detail)
+    if level is not None and command not in ("volume_mute", "mute", "volume_unmute") \
+            and not is_music_assistant_player(before or {}, entity_id):
+        detail["mirrored_to"] = await _mirror_volume_to_twin(ctx, entity_id, level)
+    detail["confirmed"] = True
+    if command in ("volume_mute", "mute"):
+        message = f"Muted {name}."
+    elif command == "volume_unmute":
+        message = f"Unmuted {name}" + (f", volume is at {round(level * 100)}%." if level is not None else ".")
+    else:
+        message = f"Volume is at {round((level or 0) * 100)}% on {name}."
+    return ExecutionResult(status="SUCCESS", message=message, service="media_transport", detail=detail)
+
+
+async def _mirror_volume_to_twin(ctx, entity_id: str, level: float) -> str | None:
+    """Set the Music Assistant twin of ``entity_id`` to ``level`` when it reports something else."""
+    try:
+        twin = await resolve_mass_entity(ctx, entity_id)
+        if not twin or twin == entity_id:
+            return None
+        twin_state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, twin) or {}
+        twin_level = _level(twin_state.get("attributes"))
+        if twin_level is not None and abs(twin_level - level) < 0.015:
+            return None
+        res = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", twin,
+                                           {"volume_level": level})
+        if not res.get("ok"):
+            log.warning(f"[media/transport] could not mirror volume to {twin}: {res.get('error')}")
+            return None
+        log.info(f"[media/transport] volume {level:.2f} on {entity_id} mirrored to its Music Assistant player {twin}")
+        return twin
+    except Exception as exc:  # the speaker itself is already set; the twin is a courtesy
+        log.warning(f"[media/transport] volume mirror for {entity_id} failed: {exc}")
+        return None
 
 async def handle_tv_cast(req) -> ExecutionResult:
     """Handle TV cast requests (legacy compatibility)."""

@@ -161,6 +161,12 @@ async function mockApi(page: Page, viewer: Viewer) {
       return json({ checks: [{ id: 4, username: 'sam', day: day(), chore_id: '51', title: 'Take out the trash', status: 'pending', created_at: new Date().toISOString() }] });
     }
     if (p === '/api/guardian/my-parents') return json({ parents: ['dad', 'mom'] });
+    // A child's Settings > Nearby & offline, set by their parents (the Safety area's card).
+    const nearbyChild = p.match(/^\/api\/users\/([^/]+)\/nearby-settings$/)?.[1];
+    if (nearbyChild) {
+      return json({ username: nearbyChild, settings: { nearby: false, chat: false, offline: false, car: true },
+        managed_by_parent: true, can_change: true, always_on: ['parent_link'] });
+    }
     if (/^\/api\/family\/member\/[^/]+\/devices$/.test(p)) {
       // The server's rule: the father and admins only.
       return viewer === 'dad' ? json(DEVICES) : json({ detail: 'Only the father or an admin can see device details' }, 403);

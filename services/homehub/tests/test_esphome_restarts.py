@@ -119,7 +119,7 @@ def env(monkeypatch):
         hub, entry = make_hub("esphome", dict(DATA), ENTITIES, options=options or {})
         hub.store = Store()
         drv = ESPHomeDriver(hub, entry)
-        drv._make_client = lambda host: LogClient(node)  # type: ignore[method-assign]
+        drv._make_client = lambda host, port=None: LogClient(node)  # type: ignore[method-assign]
         drv.restarts.notifier = notifier
         hub.drivers[entry.entry_id] = drv
         return hub, drv
@@ -335,7 +335,7 @@ async def test_a_node_without_log_support_still_connects(env):
 
     node = Node()
     _hub, drv = env.build(node)
-    drv._make_client = lambda host: NoLogs(node)  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: NoLogs(node)  # type: ignore[method-assign]
     await drv.async_setup()
     assert drv.connected and not drv.restarts.subscribed and drv.restarts.subscribe_error
     await drv.async_unload()

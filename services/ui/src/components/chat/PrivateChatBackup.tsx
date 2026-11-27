@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { ArrowLeft, Download, FileLock2, FolderOpen, Heart, Images, Loader2, Lock, MessageSquare, Play, RotateCcw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, privateChatRestoreClient } from '../../services/api';
@@ -288,10 +289,10 @@ export function OpenPrivateBackup({
             <Lock size={15} className="shrink-0 text-rose-200" aria-hidden />
             <span className="min-w-0 truncate" data-testid="private-backup-filename">{file?.name}</span>
           </p>
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-slate-300">Chat password</span>
-            <input
-              type="password"
+          <div>
+            <label htmlFor="private-backup-password-input" className="mb-1 block text-xs font-semibold text-slate-300">Chat password</label>
+            <PasswordField
+              id="private-backup-password-input"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
@@ -301,7 +302,7 @@ export function OpenPrivateBackup({
               data-testid="private-backup-password"
               className="glass-input min-h-11 w-full text-base sm:text-sm"
             />
-          </label>
+          </div>
           <p className="text-xs text-slate-400">Any password the chat had when the backup was made works.</p>
           {busy && (
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>

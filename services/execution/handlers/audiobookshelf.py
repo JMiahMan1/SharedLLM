@@ -7,7 +7,8 @@ import asyncio
 import logging
 from datetime import datetime
 
-from services.execution import abs_client, ha_client
+from services.common import ma_identity
+from services.execution import abs_client, abs_podcasts, abs_session_state, ha_client, media_vocabulary
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult
 from services.shared import ma_library
 from services.shared.ma_player import is_music_assistant_player
@@ -24,10 +25,13 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
             message="Audiobookshelf URL not configured.",
             service="audiobookshelf",
         )
-    if username and password:
-        # Prefer a fresh token; the stored API key may be stale/expired. If the
-        # login does not come back we still have the stored key, but say so:
-        # silently continuing hides a broken login route behind a working cache.
+    had_filed_key = bool(abs_key)
+    if username and password and not abs_key:
+        # A filed token is the credential an administrator minted for this household,
+        # so a login is only the way in when there is no token at all. A stored
+        # password can go stale without anyone noticing (the account's password was
+        # changed elsewhere), and trying it first turned every request into a 401 in
+        # the log before the working key was used.
         fresh = await abs_client.abs_login(abs_url, username, password)
         if fresh:
             abs_key = fresh
@@ -37,10 +41,31 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
                 "If requests start failing with 401, check the ABS username/password.",
                 username,
             )
+    if username and password and not had_filed_key and abs_key:
+        # Sessions started for this request can log in again if their token expires mid-listen.
+        abs_session_state.current_relogin.set(
+            lambda: abs_client.abs_login(abs_url, username, password, force=True)
+        )
     if not abs_key:
         return ExecutionResult(
             status="FAILURE",
             message="Audiobookshelf API key or username/password not configured.",
+            service="audiobookshelf",
+        )
+
+    # Resolve a room/device name to a player when no entity was pinned (voice satellite room).
+    # Never invent an entity id.
+    if not req.entity_id and getattr(req, "device_name", None):
+        try:
+            from . import media as _media
+            req.entity_id = await _media.resolve_room_player(ctx, req.device_name, "music")
+        except Exception as exc:
+            log.warning(f"[abs] could not resolve device_name {req.device_name!r}: {exc}")
+            req.entity_id = None
+    if not req.entity_id and getattr(req, "device_name", None):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"I couldn't find a speaker in {req.device_name}.",
             service="audiobookshelf",
         )
 
@@ -53,6 +78,9 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
 
         elif action == "play":
             return await _handle_play(abs_url, abs_key, req)
+
+        elif action == "play_by":
+            return await _handle_play_by(abs_url, abs_key, req)
 
         elif action == "play_podcast_episode":
             return await _handle_play_podcast_episode(abs_url, abs_key, req)
@@ -77,6 +105,18 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
 
         elif action == "update_progress":
             return await _handle_update_progress(abs_url, abs_key, req)
+
+        elif action == "podcasts":
+            return await _handle_podcasts(abs_url, abs_key)
+
+        elif action == "podcast_auto_download":
+            return await _handle_podcast_auto_download(abs_url, abs_key, req)
+
+        elif action == "users":
+            return await _handle_users(abs_url, abs_key)
+
+        elif action == "user_create":
+            return await _handle_user_create(abs_url, abs_key, req)
 
         return ExecutionResult(
             status="FAILURE",
@@ -125,6 +165,24 @@ async def _handle_update_progress(abs_url: str, abs_key: str, req) -> ExecutionR
             "duration": req.duration,
             "is_finished": bool(req.is_finished),
         },
+    )
+
+
+def _is_unplayable_abs_book(item: dict) -> bool:
+    """True when an ABS book item cannot be played as audio (missing, invalid, or ebook-only)."""
+    if not isinstance(item, dict):
+        return True
+    if item.get("isMissing") is True or item.get("isInvalid") is True:
+        return True
+    media = item.get("media") if isinstance(item.get("media"), dict) else {}
+    duration = media.get("duration") or 0
+    if "numAudioFiles" in media and media.get("numAudioFiles") == 0 and not duration:
+        return True
+    return (
+        "audioFiles" in media
+        and isinstance(media.get("audioFiles"), list)
+        and len(media["audioFiles"]) == 0
+        and not duration
     )
 
 
@@ -177,6 +235,8 @@ async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
         }
 
     def _add_book(item: dict) -> None:
+        if _is_unplayable_abs_book(item):
+            return
         info = _summary(item)
         if not info["id"] or info["id"] in seen_ids:
             return
@@ -289,6 +349,14 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
         book_id = req.book_id
     elif req.query:
         search = await abs_client.search_library(abs_url, abs_key, req.query, limit=1)
+        if "error" not in search and not search.get("results"):
+            # A misheard title or author ("Ginny B. Jones"): the library name it most likely was.
+            corrected = await _corrected_book_query(abs_url, abs_key, req.query)
+            if corrected:
+                kind, name = corrected
+                if kind == "author":
+                    return await _handle_play_by(abs_url, abs_key, _with(req, author=name, series=None))
+                search = await abs_client.search_library(abs_url, abs_key, name, limit=1)
         if "error" in search or not search.get("results"):
             return ExecutionResult(status="FAILURE", message=f"No audiobook found for '{req.query}'.", service="audiobookshelf")
         book = search["results"][0]
@@ -299,6 +367,71 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message="book_id or query is required.", service="audiobookshelf")
 
     return await _play_book_session(abs_url, abs_key, req, book_id)
+
+
+def _session_chapters(media: dict) -> list[dict]:
+    """Chapters in the shape the enhanced transport commands need (ABS seconds)."""
+    out: list[dict] = []
+    for i, chapter in enumerate(media.get("chapters") or []):
+        if not isinstance(chapter, dict):
+            continue
+        start = chapter.get("start")
+        if start is None:
+            start = chapter.get("startTime", 0)
+        end = chapter.get("end")
+        try:
+            start = float(start or 0)
+        except (TypeError, ValueError):
+            start = 0.0
+        try:
+            end = float(end) if end is not None else None
+        except (TypeError, ValueError):
+            end = None
+        out.append({
+            "number": i + 1,
+            "title": chapter.get("title", ""),
+            "start": start,
+            "end": end,
+        })
+    return out
+
+
+def _resume_track(
+    current_time: float, audio_tracks: list, fallback_tracks: list, default_index: int
+) -> tuple[int, float, float]:
+    """Pick the track containing ``current_time`` and the seek inside it.
+
+    ABS playback sessions carry ``currentTime`` (book time) and ``audioTracks``
+    with ``startOffset``; the track that contains the position is the one the
+    player must be handed, and the seek is relative to that track's start.
+    Returns ``(track_index, track_start, seek_position)``.
+    """
+    if current_time <= 0:
+        return default_index, 0.0, 0.0
+    candidates = audio_tracks or fallback_tracks or []
+    for i, track in enumerate(candidates):
+        if not isinstance(track, dict):
+            continue
+        raw_start = track.get("startOffset")
+        if raw_start is None:
+            raw_start = track.get("startTime", track.get("start", 0))
+        try:
+            start = float(raw_start or 0)
+        except (TypeError, ValueError):
+            start = 0.0
+        raw_duration = track.get("duration")
+        try:
+            end = start + float(raw_duration) if raw_duration is not None else None
+        except (TypeError, ValueError):
+            end = None
+        if start <= current_time and (end is None or current_time < end):
+            index = track.get("index")
+            if not isinstance(index, int) or index < 1:
+                index = i + 1
+            return index, start, max(0.0, current_time - start)
+    # No offset data: seek within the default track rather than losing the
+    # resume point entirely.
+    return default_index, 0.0, current_time
 
 
 async def _play_book_session(abs_url: str, abs_key: str, req, book_id: str) -> ExecutionResult:
@@ -349,10 +482,34 @@ async def _play_book_session(abs_url: str, abs_key: str, req, book_id: str) -> E
             service="audiobookshelf",
         )
 
+    raw_current = session.get("currentTime")
+    try:
+        current_time = float(raw_current or 0)
+    except (TypeError, ValueError):
+        current_time = 0.0
+    track_index, track_start, seek_position = _resume_track(
+        current_time, session.get("audioTracks") or [], tracks, track_index
+    )
+
     stream_url = abs_client.get_session_track_url(session["id"], ctx_user(req), track_index=track_index)
-    log.info(f"[abs] Book session started: item={book_id} track={track_index} session={session['id']}")
+    log.info(
+        f"[abs] Book session started: item={book_id} track={track_index} "
+        f"session={session['id']} resume={current_time:.1f}s seek={seek_position:.1f}s"
+    )
+    session_info = {
+        "session_id": session["id"],
+        "abs_url": abs_url,
+        "abs_key": abs_key,
+        "item_id": book_id,
+        "current_time": current_time,
+        "track_start": track_start,
+        "duration": float(media.get("duration") or item.get("duration") or 0),
+        "chapters": _session_chapters(media),
+        "seek_position": seek_position,
+    }
     return await _dispatch_stream(
-        stream_url, "application/x-mpegurl", req, title, abs_item_id=book_id
+        stream_url, "application/x-mpegurl", req, title,
+        abs_item_id=book_id, abs_session=session_info,
     )
 
 
@@ -424,11 +581,14 @@ async def _dispatch_stream(
     abs_item_id: str | None = None,
     search_title: str | None = None,
     ma_media_kind: str = "audiobook",
+    abs_session: dict | None = None,
 ) -> ExecutionResult:
     """Send media to a player (power-on, Roku, MA, or direct) and confirm it plays."""
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
     ha_url = ctx_ha_url(req)
     ha_token = ctx_ha_token(req)
+    # A new play replaces whatever this player was doing before.
+    abs_session_state.forget(full_entity_id)
 
     state = await ha_client.get_state(ha_url, ha_token, full_entity_id)
     if state and state.get("state") == "off":
@@ -462,7 +622,14 @@ async def _dispatch_stream(
             ha_url, ha_token,
             "music_assistant", "play_media",
             full_entity_id,
-            {"media_id": media_id, "enqueue": "play"},
+            {
+                "media_id": media_id,
+                "enqueue": "play",
+                # Impersonate this person on the household MA server so the
+                # book is filed under (and resumes from) their own provider,
+                # not the household account's.
+                **ma_identity.act_as(req.user_context),
+            },
         )
     else:
         result = await ha_client.call_service(
@@ -480,14 +647,44 @@ async def _dispatch_stream(
     # A 200 from HA only means the service call was accepted. Verify the player
     # actually engaged, so a no-op is reported as a failure with a real reason.
     ok, detail = await _verify_playback(ha_url, ha_token, full_entity_id)
+    if ok:
+        # Seen playing once is not enough: a refused stream plays for a moment, then stops.
+        from services.execution import playback_check
+
+        held, why = await playback_check.confirm_playing(
+            lambda eid: ha_client.get_state(ha_url, ha_token, eid), [full_entity_id])
+        if held is False:
+            ok, detail = False, why
     if not ok:
         log.warning(f"[abs] Playback did not start on '{full_entity_id}': {detail}")
+        from services.common.media_titles import clean_title
+
+        player = ((state or {}).get("attributes") or {}).get("friendly_name") or full_entity_id
         return ExecutionResult(
             status="FAILURE",
-            message=f"'{title}' was accepted by {full_entity_id} but did not start: {detail}",
+            message=f"I started {clean_title(title)}, but {player} isn't playing it. I'm looking into it.",
             service="audiobookshelf",
+            detail={"playback": "not_started", "reason": detail, "entity_id": full_entity_id},
         )
-    return ExecutionResult(status="SUCCESS", message=f"Now playing: {title}", service="audiobookshelf")
+
+    # A plain URL player does not resume by itself: after playback is confirmed,
+    # move it to the track and position recorded in the ABS session, and keep
+    # the session id so pause / stop can write progress back. MA players resume
+    # through their own provider (with the person's identity), so skip both.
+    if abs_session and not is_ma:
+        session_fields = {k: v for k, v in abs_session.items() if k != "seek_position"}
+        abs_session_state.remember(full_entity_id, **session_fields)
+        seek_position = float(abs_session.get("seek_position") or 0)
+        if seek_position > 0:
+            seek_result = await ha_client.call_service(
+                ha_url, ha_token, "media_player", "media_seek", full_entity_id,
+                {"seek_position": seek_position},
+            )
+            if not seek_result.get("ok"):
+                log.warning(f"[abs] Resume seek failed on '{full_entity_id}': {seek_result.get('error')}")
+
+    return ExecutionResult(status="SUCCESS", message=f"Now playing: {title}", service="audiobookshelf",
+                           detail={"playback": "confirmed"})
 
 
 async def _ma_media_id(
@@ -609,6 +806,108 @@ async def _handle_play_podcast_episode(abs_url: str, abs_key: str, req) -> Execu
         search_title=podcast_title,
         ma_media_kind="podcast",
     )
+
+
+def _with(req, **changes):
+    """A shallow copy of a request-like object with ``changes`` (the media handler passes plain objects)."""
+    import copy
+
+    clone = copy.copy(req)
+    for key, value in changes.items():
+        setattr(clone, key, value)
+    return clone
+
+
+def _authors_of(item: dict) -> list[str]:
+    meta = (item.get("media") or {}).get("metadata") or {}
+    names = [a.get("name", "") if isinstance(a, dict) else str(a) for a in meta.get("authors") or []]
+    if not names and meta.get("authorName"):
+        names = [n.strip() for n in str(meta["authorName"]).split(",")]
+    return [n for n in names if n]
+
+
+def _series_of(item: dict) -> list[str]:
+    meta = (item.get("media") or {}).get("metadata") or {}
+    names = [s.get("name", "") if isinstance(s, dict) else str(s) for s in meta.get("series") or []]
+    if not names and meta.get("seriesName"):
+        # "Series Name #3, Other Series #1"
+        names = [n.split(" #")[0].strip() for n in str(meta["seriesName"]).split(",")]
+    return [n for n in names if n]
+
+
+def _learn_names(items: list) -> None:
+    """Keep the library's authors, series and titles for speech-to-text hints and misheard names."""
+    playable = [i for i in items if isinstance(i, dict)]
+    media_vocabulary.remember("author", (a for i in playable for a in _authors_of(i)))
+    media_vocabulary.remember("series", (s for i in playable for s in _series_of(i)))
+    media_vocabulary.remember("title", (((i.get("media") or {}).get("metadata") or {}).get("title") for i in playable))
+
+
+async def _corrected_book_query(abs_url: str, abs_key: str, query: str) -> tuple[str, str] | None:
+    """("author" | "title" | "series", library name) a misheard ``query`` most likely meant, or None."""
+    items = await abs_client.get_book_library_items(abs_url, abs_key)
+    if isinstance(items, dict):
+        return None
+    _learn_names(items)
+    for kind, pool in (("author", {a for i in items for a in _authors_of(i)}),
+                       ("title", {((i.get("media") or {}).get("metadata") or {}).get("title") or "" for i in items}),
+                       ("series", {s for i in items for s in _series_of(i)})):
+        hit = media_vocabulary.best_match(query, pool)
+        if hit:
+            log.info(f"[abs] no audiobook for '{query}'; the library has the {kind} '{hit}'")
+            return kind, hit
+    return None
+
+
+def _published(item: dict) -> tuple:
+    meta = (item.get("media") or {}).get("metadata") or {}
+    date = str(meta.get("publishedDate") or "")
+    try:
+        year = int(str(meta.get("publishedYear") or date[:4] or 0))
+    except ValueError:
+        year = 0
+    return (year, date, item.get("addedAt") or 0)
+
+
+async def _handle_play_by(abs_url: str, abs_key: str, req) -> ExecutionResult:
+    """A book by an author or in a series: the one in progress, else (or with ``latest``) the newest.
+
+    The spoken name is matched to the library's own names, so a misheard author
+    ("Ginny B. Jones") still finds their books; the correction is logged.
+    """
+    if not req.entity_id:
+        return ExecutionResult(status="FAILURE", message="entity_id is required to play.", service="audiobookshelf")
+    author = (getattr(req, "author", None) or "").strip()
+    series = (getattr(req, "series", None) or "").strip()
+    if not author and not series:
+        return ExecutionResult(status="FAILURE", message="author or series is required.", service="audiobookshelf")
+    items = await abs_client.get_book_library_items(abs_url, abs_key)
+    if isinstance(items, dict):
+        return ExecutionResult(status="FAILURE", message=items.get("error") or "Audiobookshelf error.",
+                               service="audiobookshelf")
+    items = [i for i in items if isinstance(i, dict) and not _is_unplayable_abs_book(i)]
+    _learn_names(items)
+    kind, wanted, names_of = ("series", series, _series_of) if series else ("author", author, _authors_of)
+    pool = {n for i in items for n in names_of(i)}
+    name = media_vocabulary.best_match(wanted, pool)
+    if not name:
+        return ExecutionResult(status="FAILURE", service="audiobookshelf",
+                               message=f"I couldn't find an audiobook {'in the series' if series else 'by'} '{wanted}'.")
+    if media_vocabulary.squash(name) != media_vocabulary.squash(wanted):
+        log.info(f"[abs] heard {kind} '{wanted}', playing from '{name}'")
+    books = [i for i in items if any(media_vocabulary.squash(n) == media_vocabulary.squash(name) for n in names_of(i))]
+    pick = None
+    if not getattr(req, "latest", False):
+        progress = await _all_progress_by_item(abs_url, abs_key)
+        started = [(progress[i["id"]].get("lastUpdate") or 0, i) for i in books
+                   if i.get("id") in progress and not progress[i["id"]].get("isFinished")]
+        if started:
+            pick = max(started, key=lambda pair: pair[0])[1]
+    if pick is None:
+        pick = max(books, key=_published)
+    title = ((pick.get("media") or {}).get("metadata") or {}).get("title") or "the book"
+    log.info(f"[abs] {kind} '{name}': playing '{title}' ({pick.get('id')})")
+    return await _play_book_session(abs_url, abs_key, req, pick["id"])
 
 
 async def _handle_resume(abs_url: str, abs_key: str, req) -> ExecutionResult:
@@ -734,6 +1033,8 @@ async def _handle_list(abs_url: str, abs_key: str, req) -> ExecutionResult:
     items = result.get("results", [])
     summaries = []
     for item in items[:req.limit]:
+        if _is_unplayable_abs_book(item):
+            continue
         media = item.get("media", {})
         meta = media.get("metadata", {})
         # ABS returns the cover as `media.coverPath`; older builds nest it under
@@ -834,14 +1135,25 @@ async def _handle_last_played(abs_url: str, abs_key: str) -> ExecutionResult:
             is_complete = bool(record.get("isFinished", False))
             pct = _progress_pct(record)
 
-            # Build chapters info
+            # Build chapters info (ABS uses start/end in seconds; keep startTime alias for compatibility)
             chapters = media.get("chapters", [])
             chapters_list = []
             if chapters and isinstance(chapters, list):
-                chapters_list = [
-                    {"title": c.get("title", ""), "startTime": c.get("startTime", 0)}
-                    for c in chapters if c
-                ]
+                for c in chapters:
+                    if not isinstance(c, dict):
+                        continue
+                    c_start = c.get("start") if c.get("start") is not None else c.get("startTime", 0)
+                    c_end = c.get("end")
+                    c_dur = c.get("duration")
+                    if c_dur is None and isinstance(c_start, (int, float)) and isinstance(c_end, (int, float)):
+                        c_dur = max(0.0, float(c_end) - float(c_start))
+                    chapters_list.append({
+                        "title": c.get("title", ""),
+                        "start": c_start,
+                        "end": c_end,
+                        "duration": c_dur,
+                        "startTime": c_start,
+                    })
 
             # Build full metadata
             books.append({
@@ -952,3 +1264,107 @@ def ctx_mass_token(req) -> str:
 
 def ctx_user(req) -> str:
     return getattr(req.user_context, "user", "") or ""
+
+
+async def _handle_podcasts(abs_url: str, abs_key: str) -> ExecutionResult:
+    """Every podcast show, its newest episode and the reason it may look quiet.
+
+    Read-only. The Media page shows this instead of guessing why a show has not
+    moved: no feed address, a feed nobody polls, or new episodes nothing
+    downloads are three different problems.
+    """
+    report = await abs_podcasts.podcast_report(abs_url, abs_key)
+    if "error" in report:
+        return ExecutionResult(status="FAILURE", message=report["error"], service="audiobookshelf")
+
+    shows = report.get("shows", [])
+    attention = sum(1 for show in shows if show.get("behind") or show.get("needs_feed") or show.get("stale_check"))
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Found {len(shows)} podcast(s); {attention} need a look.",
+        service="audiobookshelf",
+        detail=report,
+    )
+
+
+async def _handle_users(abs_url: str, abs_key: str) -> ExecutionResult:
+    """Who the server knows, and whether each of them already has a token.
+
+    Audiobookshelf mints one token per account and shows it to an administrator;
+    there is no API to mint another (``POST /api/users/{id}/token`` is a 404 on
+    2.33). So the account's own token travels to the gateway, which files it in
+    that member's identity row, and the browser-facing route drops it again.
+    """
+    payload = await abs_client.get_users(abs_url, abs_key)
+    if payload.get("error"):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Audiobookshelf did not list its users: {payload['error']}",
+            service="audiobookshelf",
+        )
+    users = []
+    for entry in payload.get("users") or []:
+        users.append({
+            "id": entry.get("id"),
+            "username": entry.get("username"),
+            "type": entry.get("type"),
+            "is_active": bool(entry.get("isActive", True)),
+            "has_token": bool(entry.get("token")),
+            "token": entry.get("token") or "",
+        })
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Found {len(users)} Audiobookshelf user(s).",
+        service="audiobookshelf",
+        detail={"users": users},
+    )
+
+
+async def _handle_user_create(abs_url: str, abs_key: str, req: AudiobookshelfRequest) -> ExecutionResult:
+    """Make an Audiobookshelf account, and hand back the token it comes with.
+
+    Only an administrator credential can do this, which is why the household keeps
+    one on the default account rather than on a person's own login.
+    """
+    username = (req.username or "").strip()
+    password = req.password or ""
+    if not username:
+        return ExecutionResult(status="FAILURE", message="A username is required to create an Audiobookshelf account.", service="audiobookshelf")
+    if not password:
+        return ExecutionResult(status="FAILURE", message="A password is required to create an Audiobookshelf account.", service="audiobookshelf")
+    reply = await abs_client.create_user(abs_url, abs_key, username, password)
+    user = (reply or {}).get("user") or {}
+    if not user or (reply or {}).get("error"):
+        reason = (reply or {}).get("error") or "Audiobookshelf did not return the new account"
+        return ExecutionResult(status="FAILURE", message=f"Could not create the Audiobookshelf account: {reason}", service="audiobookshelf")
+    if user.get("activation_error") or user.get("isActive") is False:
+        reason = user.get("activation_error") or "account remained inactive"
+        return ExecutionResult(status="FAILURE", message=f"Created the Audiobookshelf account but could not activate it: {reason}", service="audiobookshelf")
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Created the Audiobookshelf account {user.get('username')}.",
+        service="audiobookshelf",
+        detail={
+            "user": {
+                "id": user.get("id"),
+                "username": user.get("username"),
+                "type": user.get("type"),
+                "has_token": bool(user.get("token")),
+                "token": user.get("token"),
+            }
+        },
+    )
+
+
+async def _handle_podcast_auto_download(abs_url: str, abs_key: str, req) -> ExecutionResult:
+    """Turn a show's automatic downloading on or off."""
+    reply = await abs_podcasts.set_auto_download(abs_url, abs_key, req.item_id or "", bool(req.auto_download))
+    if "error" in reply:
+        return ExecutionResult(status="FAILURE", message=reply["error"], service="audiobookshelf")
+    state = "on" if reply["auto_download"] else "off"
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Downloading new episodes is {state} for that show.",
+        service="audiobookshelf",
+        detail=reply,
+    )

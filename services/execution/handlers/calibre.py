@@ -1,6 +1,7 @@
 """The family's Calibre library, for Jarvis as its librarian.
 
-Reads -- ``list``, ``search``, ``get_book``, ``fetch_text``, ``tags``,
+Reads -- ``list``, ``search``, ``get_book``, ``chapters``, ``fetch_text``
+(a whole book, or one chapter of it in parts), ``tags``,
 ``by_tag``, ``audit`` -- and one reversible write, ``tag``, for admins. This
 codebase has no approval gate anywhere in the tool path (the seeded protocol
 even instructs the agent never to seek one), and a Calibre deletion cannot be
@@ -19,6 +20,7 @@ from __future__ import annotations
 import logging
 
 from services.execution.calibre_client import (
+    CalibreAmbiguous,
     CalibreClient,
     CalibreLibraryError,
     CalibreUnavailable,
@@ -48,6 +50,8 @@ async def handle_calibre(req: CalibreRequest) -> ExecutionResult:
             return await _search(client, req)
         if req.action == "get_book":
             return await _get_book(client, req)
+        if req.action == "chapters":
+            return await _chapters(client, req)
         if req.action == "fetch_text":
             return await _fetch_text(client, req)
         if req.action == "tags":
@@ -60,8 +64,12 @@ async def handle_calibre(req: CalibreRequest) -> ExecutionResult:
             return await _tag(client, req)
         return ExecutionResult.fail(
             f"Action {req.action!r} is not supported: list, search, get_book, "
-            "fetch_text, tags, by_tag, audit, tag.",
+            "chapters, fetch_text, tags, by_tag, audit, tag.",
             service=SERVICE,
+        )
+    except CalibreAmbiguous as exc:
+        return ExecutionResult.fail(
+            str(exc), service=SERVICE, detail={"needs_choice": True, "candidates": exc.candidates}
         )
     except (CalibreLibraryError, CalibreUnavailable) as exc:
         return ExecutionResult.fail(str(exc), service=SERVICE)
@@ -134,16 +142,130 @@ async def _get_book(client: CalibreClient, req: CalibreRequest) -> ExecutionResu
     return ExecutionResult.ok(message, service=SERVICE, detail={"book": book})
 
 
+def _chapter_max_chars() -> int:
+    from services.config import CALIBRE_CHAPTER_MAX_CHARS
+
+    return int(CALIBRE_CHAPTER_MAX_CHARS)
+
+
+def _author_of(book: dict) -> str:
+    authors = book.get("authors")
+    author = " & ".join(authors) if isinstance(authors, list) else str(authors or "")
+    return str(book.get("author") or author or "")
+
+
+def _book_name(book: dict) -> str:
+    return f"{book.get('title') or 'Book'} by {_author_of(book) or 'unknown author'}"
+
+
+def _read_as(book: dict) -> str:
+    """The book's name, and, when the closest book stood in for what was asked, both.
+
+    "Read Wild at Heart by John Eldredge (asked for 'Wild and Park by John Elbridge')"
+    lets the answer tell the person which book was actually read.
+    """
+    asked = str(book.get("asked_for") or "").strip()
+    if not asked:
+        return _book_name(book)
+    return f"Read {_book_name(book)} (asked for '{asked}')"
+
+
+def _chapter_name(chapter: dict) -> str:
+    title = str(chapter.get("title") or chapter.get("label") or "").strip()
+    if chapter.get("number") is None:
+        return title or "untitled section"
+    return f"chapter {chapter['number']}" + (f": {title}" if title and title.lower() != f"chapter {chapter['number']}" else "")
+
+
+async def _chapters(client: CalibreClient, req: CalibreRequest) -> ExecutionResult:
+    body = await client.chapters(book_id=req.book_id, path=req.path, query=req.query)
+    row = body.get("row") or {}
+    rows = list(body.get("chapters") or [])
+    numbered = [c for c in rows if c.get("number") is not None]
+    before = [c for c in rows[: rows.index(numbered[0])] if c.get("number") is None] if numbered else []
+    after = [c for c in rows if c.get("number") is None and c not in before]
+    source = {
+        "epub-nav": "the book's table of contents",
+        "epub-ncx": "the book's table of contents",
+        "pdf-outline": "the PDF's bookmarks",
+    }.get(str(body.get("source")), "headings in the text")
+    parts = [f"{_read_as(row)} (id {row.get('book_id')}) has {len(numbered)} chapters, from {source}."]
+    if before:
+        parts.append("Before chapter 1 (not numbered): " + ", ".join(str(c.get("title")) for c in before) + ".")
+    if numbered:
+        parts.append(
+            "Chapters: "
+            + "; ".join(
+                f"{c['number']}. {c.get('title')}" + (f" (~{int(c['chars']):,} chars)" if c.get("chars") is not None else "")
+                for c in numbered
+            )
+            + "."
+        )
+    if after:
+        parts.append("Also (not numbered): " + ", ".join(str(c.get("title")) for c in after) + ".")
+    parts.append("Read one with action=fetch_text and chapter=<number or title>.")
+    return ExecutionResult.ok(
+        " ".join(parts),
+        service=SERVICE,
+        detail={"book_id": row.get("book_id"), "title": row.get("title"), "source": body.get("source"), "chapters": rows,
+                **({"asked_for": row["asked_for"]} if row.get("asked_for") else {})},
+    )
+
+
+async def _fetch_chapter(client: CalibreClient, req: CalibreRequest) -> ExecutionResult:
+    # A caller that sets max_chars (a voice reading a chapter aloud in parts) gets parts that
+    # size, never larger than the configured bound; otherwise the configured part size.
+    size = _chapter_max_chars()
+    if "max_chars" in req.model_fields_set:
+        size = min(size, req.max_chars)
+    body = await client.chapters(
+        book_id=req.book_id, path=req.path, query=req.query,
+        chapter=str(req.chapter), part=req.part, max_chars=size,
+    )
+    row = body.get("row") or {}
+    chapter = body.get("chapter") or {}
+    part, total = int(chapter.get("part") or 1), int(chapter.get("parts") or 1)
+    if total > 1:
+        more = (
+            f"; for the next part call fetch_text again with the same chapter and part={part + 1}"
+            if part < total else "; this is the last part"
+        )
+        where = f" (part {part} of {total}{more})"
+    else:
+        where = ""
+    header = f"{_read_as(row)}, {_chapter_name(chapter)}{where}:\n\n"
+    return ExecutionResult.ok(
+        header + str(chapter.get("text") or ""),
+        service=SERVICE,
+        detail={
+            "book_id": row.get("book_id"),
+            "title": row.get("title"),
+            "author": _author_of(row),
+            "chapter": {k: chapter.get(k) for k in ("index", "number", "title", "front_matter", "chars", "part", "parts")},
+            **({"asked_for": row["asked_for"]} if row.get("asked_for") else {}),
+        },
+    )
+
+
 async def _fetch_text(client: CalibreClient, req: CalibreRequest) -> ExecutionResult:
+    if req.chapter is not None and str(req.chapter).strip():
+        return await _fetch_chapter(client, req)
+    book_id = req.book_id
+    asked = ""
+    if book_id is None and not req.path and req.query:
+        found = await client.resolve_book(query=req.query)
+        book_id, asked = found.get("book_id"), str(found.get("asked_for") or "")
     text, book = await client.fetch_text(
-        book_id=req.book_id, path=req.path, max_chars=req.max_chars
+        book_id=book_id, path=req.path, max_chars=req.max_chars
     )
     total = int(book.get("total_chars") or 0)
     truncation = ", truncated" if book.get("truncated") else ""
     header = (
-        f"{book.get('title') or 'Book'} by "
+        ("Read " if asked else "")
+        + f"{book.get('title') or 'Book'} by "
         f"{book.get('author') or book.get('authors') or 'unknown author'} "
-        f"({total:,} characters{truncation}):\n\n"
+        + (f"(asked for '{asked}') " if asked else "")
+        + f"({total:,} characters{truncation}):\n\n"
     )
     return ExecutionResult.ok(
         header + text,
@@ -153,6 +275,7 @@ async def _fetch_text(client: CalibreClient, req: CalibreRequest) -> ExecutionRe
             "title": book.get("title"),
             "total_chars": total,
             "truncated": bool(book.get("truncated")),
+            **({"asked_for": asked} if asked else {}),
         },
     )
 
@@ -194,7 +317,7 @@ async def _audit(client: CalibreClient) -> ExecutionResult:
                 f"keep {_row_line(g['keep'])}, could remove {', '.join(_row_line(o) for o in g['others'])}" for g in groups[:5]
             )
             parts.append(f"{report.get('counts', {}).get(key, len(groups))} {label}: {sample}.")
-    for key, label in (("no_file", "records with no book file"), ("unreadable", "books only in a format Jarvis cannot read (convert to EPUB)"),
+    for key, label in (("no_file", "records with no book file"), ("unreadable", "books only in a format Jarvis cannot read (convert to EPUB or PDF)"),
                        ("untagged", "books with no tags")):
         section = report.get(key) or {}
         if section.get("count"):

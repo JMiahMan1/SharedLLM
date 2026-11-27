@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useId, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { ChevronRight, ExternalLink, EyeOff, KeyRound, Loader2, Pencil, Power, Tag, Trash2, WifiOff } from 'lucide-react';
@@ -6,11 +6,14 @@ import DeviceSheet from './DeviceSheet';
 import LabelChips from './LabelChips';
 import RestartsSection from './RestartsSection';
 import DeviceLogsSection from './DeviceLogsSection';
+import TasmotaTemplateSection from './TasmotaTemplateSection';
+import WakeWordSection from './WakeWordSection';
 import DeviceControl from './controls/registry';
 import DeviceGlyph from './DeviceGlyph';
 import { accentFor, isActiveState } from '../../lib/deviceIcons';
 import { EntityControl } from '../dashboards/EntityControls';
 import { confirmDialog } from '../ui/confirmDialog';
+import PasswordField from '../ui/PasswordField';
 import type { HubEntity } from '../../lib/dashboards';
 import {
   connectionFields, entryNeedsText, failureStatus, failureText, reconfigureEntry, removeHubDevice, updateHubDevice,
@@ -24,6 +27,7 @@ import {
   entitySection, isOffline, plainName, primaryEntity, readingText, stateLine, tileKind, type EntitySection,
 } from '../../lib/deviceTiles';
 import { LABELS_KEY, getLabels, type Label } from '../../lib/homeSetup';
+import { wakeWordEntityIds } from '../../lib/wakeWord';
 
 const BTN = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-sm text-slate-200 hover:bg-white/10 disabled:opacity-50';
 const INPUT = 'min-h-11 w-full min-w-0 rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-white placeholder:text-slate-500';
@@ -121,29 +125,100 @@ function EntityAdminRow({ entity, labels, deviceName, onChanged }: {
   );
 }
 
-/** "May voice and chat control it", one switch per entity (Home Assistant's Assist exposure). */
-function VoiceRow({ entity, deviceName, onChanged }: { entity: HardwareEntity; deviceName: string; onChanged: () => void }) {
-  const [shown, setShown] = useState<boolean | null>(null);
-  const exposed = shown ?? Boolean(entity.voice?.exposed);
-  const save = useMutation({
-    mutationFn: (voice: boolean) => updateEntity(entity.entity_id, { voice }),
-    onMutate: (voice) => setShown(voice),
-    onSuccess: () => onChanged(),
-    onError: (err) => { setShown(null); toast.error(failureText(err)); },
-  });
+/** The switch's track and knob; `mixed` sits the knob in the middle. */
+function SwitchTrack({ on, mixed = false }: { on: boolean; mixed?: boolean }) {
+  const bg = mixed ? 'bg-sky-700' : on ? 'bg-sky-500' : 'bg-slate-600';
+  const knob = mixed ? 'translate-x-[0.875rem]' : on ? 'translate-x-6' : 'translate-x-1';
   return (
-    <button type="button" role="switch" aria-checked={exposed} aria-label={`Voice can control ${entity.name}`}
-      data-testid="voice-exposure" disabled={save.isPending} onClick={() => save.mutate(!exposed)}
+    <span className={`relative h-7 w-12 shrink-0 rounded-full motion-safe:transition-colors ${bg}`} aria-hidden>
+      <span className={`absolute top-1 h-5 w-5 rounded-full bg-white motion-safe:transition-transform ${knob}`} />
+    </span>
+  );
+}
+
+/** "May the Voice Assistant control it", one switch per entity (Home Assistant's Assist exposure). */
+function VoiceRow({ entity, deviceName, exposed, busy, onToggle }: {
+  entity: HardwareEntity; deviceName: string; exposed: boolean; busy: boolean; onToggle: (voice: boolean) => void;
+}) {
+  const name = plainName(entity.name, deviceName);
+  return (
+    <button type="button" role="switch" aria-checked={exposed} aria-label={`Voice Assistant can control the ${entity.name} entity`}
+      data-testid="voice-exposure" disabled={busy} onClick={() => onToggle(!exposed)}
       className="flex min-h-12 w-full items-center justify-between gap-3 py-1 text-left disabled:opacity-60">
       <span className="min-w-0">
-        <span className="block truncate text-sm text-slate-200">{plainName(entity.name, deviceName)}</span>
-        <span className="block text-xs text-slate-500">{exposed ? 'Voice and chat can control this' : 'Voice and chat cannot control this'}
+        <span className="block truncate text-sm text-slate-200">{name}</span>
+        <span className="block text-xs text-slate-500">{exposed ? 'Voice Assistant can control this' : 'Voice Assistant cannot control this'}
           {entity.voice && !entity.voice.chosen ? ' (default)' : ''}</span>
       </span>
-      <span className={`relative h-7 w-12 shrink-0 rounded-full motion-safe:transition-colors ${exposed ? 'bg-sky-500' : 'bg-slate-600'}`} aria-hidden>
-        <span className={`absolute top-1 h-5 w-5 rounded-full bg-white motion-safe:transition-transform ${exposed ? 'translate-x-6' : 'translate-x-1'}`} />
-      </span>
+      <SwitchTrack on={exposed} />
     </button>
+  );
+}
+
+/**
+ * One obvious device-level switch, "Voice Assistant can control this": on when every voiceable entity is exposed,
+ * off when none is, mixed otherwise. The per-entity switches sit behind Details. Both draw the change at once and
+ * roll back (with the hub's words) what the hub refused.
+ */
+function VoiceAssistantSection({ device, voiceable, onChanged }: {
+  device: HardwareDetail; voiceable: HardwareEntity[]; onChanged: () => void;
+}) {
+  const [shown, setShown] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState(false);
+  const [details, setDetails] = useState(false);
+  const detailsId = useId();
+  const exposedOf = (e: HardwareEntity) => shown[e.entity_id] ?? Boolean(e.voice?.exposed);
+  const on = voiceable.filter(exposedOf).length;
+  const all = on === voiceable.length;
+  const mixed = on > 0 && !all;
+
+  const apply = async (ids: string[], voice: boolean) => {
+    setBusy(true);
+    setShown((prev) => ({ ...prev, ...Object.fromEntries(ids.map((id) => [id, voice])) }));
+    const results = await Promise.allSettled(ids.map((id) => updateEntity(id, { voice })));
+    const failed = ids.filter((_, i) => results[i].status === 'rejected');
+    if (failed.length) {
+      setShown((prev) => {
+        const next = { ...prev };
+        for (const id of failed) delete next[id];
+        return next;
+      });
+      const first = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+      toast.error(failureText(first?.reason));
+    }
+    setBusy(false);
+    if (failed.length < ids.length) onChanged();
+  };
+
+  return (
+    <section aria-label="Voice Assistant" data-testid="voice-assistant" className={`${CARD} p-3`}>
+      <button type="button" role="switch" aria-checked={mixed ? 'mixed' : all}
+        aria-label={`Voice Assistant can control ${device.name}`} data-testid="voice-assistant-switch" disabled={busy}
+        onClick={() => void apply(voiceable.map((e) => e.entity_id), !all)}
+        className="flex min-h-12 w-full items-center justify-between gap-3 text-left disabled:opacity-60">
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-slate-100">Voice Assistant can control this</span>
+          <span className="block text-xs text-slate-400" data-testid="voice-assistant-state">
+            {mixed ? `Some parts: ${on} of ${voiceable.length}` : all ? 'On' : 'Off'}
+          </span>
+        </span>
+        <SwitchTrack on={all} mixed={mixed} />
+      </button>
+      <button type="button" aria-expanded={details} aria-controls={detailsId} onClick={() => setDetails((v) => !v)}
+        className="mt-1 inline-flex min-h-11 items-center gap-1 text-xs font-medium text-slate-400 hover:text-slate-200">
+        <ChevronRight size={14} aria-hidden className={`motion-safe:transition-transform ${details ? 'rotate-90' : ''}`} />
+        Details
+      </button>
+      <div id={detailsId} hidden={!details} data-testid="voice-access">
+        <p className="text-xs font-medium text-slate-400">Voice Assistant, part by part</p>
+        <div className="divide-y divide-white/5">
+          {voiceable.map((e) => (
+            <VoiceRow key={e.entity_id} entity={e} deviceName={device.name} exposed={exposedOf(e)} busy={busy}
+              onToggle={(voice) => void apply([e.entity_id], voice)} />
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -157,6 +232,7 @@ function ConnectionSettings({ entry, onChanged }: { entry: HubEntry; onChanged: 
   const secret = fields.find((f) => f.key === 'password');
   const [address, setAddress] = useState(host?.value ?? '');
   const [password, setPassword] = useState('');
+  const passwordId = useId();
   const save = useMutation({
     mutationFn: () => reconfigureEntry(entry.entry_id, { data: {
       ...(host && address.trim() !== (host.value ?? '') ? { host: address.trim() } : {}),
@@ -179,9 +255,10 @@ function ConnectionSettings({ entry, onChanged }: { entry: HubEntry; onChanged: 
         </label>
       )}
       {secret && (
-        <label className="block text-xs text-slate-400">
-          {secret.label}
-          <input className={`mt-1 ${INPUT}`} type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+        // A div, not a wrapping label: the eye is a button, which must not join the label.
+        <div className="block text-xs text-slate-400">
+          <label htmlFor={passwordId}>{secret.label}</label>
+          <PasswordField id={passwordId} wrapperClassName="mt-1" className={INPUT} value={password} onChange={(e) => setPassword(e.target.value)}
             placeholder={secret.set ? 'Unchanged' : 'Not set'} autoComplete="new-password"
             aria-describedby={entry.needs === 'password' ? `needs-${entry.entry_id}` : undefined} />
           {entry.needs === 'password' && (
@@ -190,7 +267,7 @@ function ConnectionSettings({ entry, onChanged }: { entry: HubEntry; onChanged: 
             </span>
           )}
           {secret.help && <span className="mt-1 block text-[11px] text-slate-500">{secret.help}</span>}
-        </label>
+        </div>
       )}
       {save.error && <p className="text-sm text-amber-300" role="alert">{failureText(save.error)}</p>}
       <button type="submit" className={BTN} disabled={save.isPending || !changed}>
@@ -258,7 +335,10 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
   const offline = isOffline(device, primary);
   const allStates = device.entity_list.filter((e) => !e.disabled_by && e.state).map((e) => e.state as HubEntity);
   // What the main control already shows (a plug's power, a TV's remote, a vacuum's map) is not listed again.
-  const used = new Set(primary ? [primary.entity_id, ...usedSiblings(primary, allStates)] : []);
+  // An Echo's wake word sensitivity and wake-ups have their own section, with its warning.
+  const wakeIds = wakeWordEntityIds(device.entity_list);
+  const used = new Set([...(primary ? [primary.entity_id, ...usedSiblings(primary, allStates)] : []), ...wakeIds]);
+  const diagnostics = bySection.diagnostic.filter((e) => !wakeIds.has(e.entity_id));
   const controls = bySection.controls.filter((e) => !used.has(e.entity_id));
   const sensors = bySection.sensors.filter((e) => !used.has(e.entity_id));
   const configs = bySection.config.filter((e) => !used.has(e.entity_id));
@@ -294,6 +374,8 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
         </div>
       )}
 
+      {voiceable.length > 0 && <VoiceAssistantSection device={device} voiceable={voiceable} onChanged={onChanged} />}
+
       {controls.length > 0 && (
         <Section title="Controls" testId="section-controls">
           <div className={`${CARD} divide-y divide-white/5 px-3 ${dim}`}>
@@ -314,6 +396,9 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
             {configs.map((e) => <EntityLine key={e.entity_id} entity={e} deviceName={device.name} />)}
           </div>
         </Section>
+      )}
+      {wakeIds.size > 0 && (
+        <div className={dim}><WakeWordSection entities={device.entity_list} onChanged={onChanged} /></div>
       )}
 
       <Section title="Settings" testId="section-settings">
@@ -343,14 +428,6 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
                 onChange={(next) => label.mutate(next)} />
             )}
           </div>
-          {voiceable.length > 0 && (
-            <div data-testid="voice-access">
-              <p className="text-xs font-medium text-slate-400">Voice and chat</p>
-              <div className="divide-y divide-white/5">
-                {voiceable.map((e) => <VoiceRow key={e.entity_id} entity={e} deviceName={device.name} onChanged={onChanged} />)}
-              </div>
-            </div>
-          )}
           {device.entry && <ConnectionSettings key={device.entry.entry_id} entry={device.entry} onChanged={onChanged} />}
           <div className="flex flex-wrap gap-2 border-t border-white/5 pt-3">
             <button type="button" className={BTN} disabled={disable.isPending} onClick={() => disable.mutate()}>
@@ -368,6 +445,9 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
 
       {device.domain === 'esphome' && <RestartsSection deviceId={device.id} />}
       {device.domain === 'esphome' && <DeviceLogsSection deviceId={device.id} deviceName={device.name} />}
+      {device.domain === 'tasmota' && device.entry_id && (
+        <TasmotaTemplateSection entryId={device.entry_id} deviceName={device.name} />
+      )}
 
       <details className={`${CARD} group`} data-testid="device-info">
         <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 px-3 text-sm font-semibold text-slate-300 [&::-webkit-details-marker]:hidden">
@@ -391,11 +471,11 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
             <Info label="Last heard from" value={device.last_seen ? ago(device.last_seen) : null} />
             {device.children.length > 0 && <Info label="Connects" value={device.children.map((c) => c.name).join(', ')} />}
           </dl>
-          {bySection.diagnostic.length > 0 && (
+          {diagnostics.length > 0 && (
             <div className="border-t border-white/5" data-testid="section-diagnostic">
               <p className="pt-3 text-xs font-medium text-slate-400">Diagnostics</p>
               <div className="divide-y divide-white/5">
-                {bySection.diagnostic.map((e) => <EntityLine key={e.entity_id} entity={e} deviceName={device.name} />)}
+                {diagnostics.map((e) => <EntityLine key={e.entity_id} entity={e} deviceName={device.name} />)}
               </div>
             </div>
           )}

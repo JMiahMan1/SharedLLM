@@ -234,6 +234,44 @@ const BIBLE_ADMIN: Record<string, unknown> = {
 };
 
 const GET: Record<string, unknown> = {
+  // Admin > Users & Devices > voice recognition: the shape identity answers (the catch-all `{}` crashed the panel).
+  // Whisper mode (HomeHub voice settings) and HomeHub's devices with their assignments: none yet.
+  '/api/dashboard/voice/settings': {
+    whisper: { enabled: true, volume: 0.3, level_drop_db: 8 },
+    defaults: { whisper: { enabled: true, volume: 0.3, level_drop_db: 8 } },
+    level_drop_range_db: [4, 16],
+  },
+  '/api/admin/hub-devices': { devices: [] },
+  // Admin > Firmware: a device offering a newer version, one up to date, one
+  // installing, and a Tasmota board that only knows how to fetch its own image.
+  '/api/firmware': {
+    installing: 1,
+    devices: [
+      { id: 'update.office_jarvis_firmware', entity_id: 'update.office_jarvis_firmware', device_id: 'dev-office', device: 'Office Jarvis',
+        name: 'Firmware', integration: 'esphome', model: 'ESP32-S3', area_id: null, installed_version: '2026.10.2',
+        latest_version: '2026.11.18', available: true, installable: true, in_progress: false, progress: null,
+        skipped_version: null, release_url: 'https://esphome.io/changelog/', release_summary: null, source: 'entity', action: 'install' },
+      { id: 'update.front_door_update', entity_id: 'update.front_door_update', device_id: 'dev-front-door', device: 'Front door',
+        name: 'Firmware', integration: 'reolink', model: 'RL-D400', area_id: null, installed_version: '3.1.0.1', latest_version: '3.1.0.1',
+        available: false, installable: true, in_progress: false, progress: null, skipped_version: null, release_url: null,
+        release_summary: null, source: 'entity', action: 'install' },
+      { id: 'update.den_speaker_update', entity_id: 'update.den_speaker_update', device_id: 'dev-den', device: 'Den speaker',
+        name: 'Firmware', integration: 'esphome', model: 'ESP32', area_id: null, installed_version: '2026.10.2', latest_version: '2026.11.18',
+        available: true, installable: true, in_progress: true, progress: 42, skipped_version: null, release_url: null,
+        release_summary: null, source: 'entity', action: 'install' },
+      { id: 'dev-attic-sensor', entity_id: null, device_id: 'dev-attic-sensor', device: 'Attic sensor', name: 'Firmware',
+        integration: 'tasmota', model: 'ESP8266EX', area_id: null, installed_version: '15.6.0(release-tasmota)',
+        latest_version: null, available: false, upgradable: true, installable: false, in_progress: false, progress: null,
+        skipped_version: null, release_url: null, release_summary: null, source: 'device', action: 'upgrade' },
+    ],
+  },
+  '/api/admin/voice': {
+    calibration: { status: 'single', threshold: 0.76, margin: 0.05, people: 1, same_speaker: null, other_speaker: null, per_person: [] },
+    min_samples: 3,
+    people: [{ username: 'robin', name: 'Robin', family_role: 'teen', samples: 4, auto_samples: 1, satellite_samples: 2, enrolled: true, consistency: 0.82 }],
+    candidates: [],
+    new_voices: [],
+  },
   // Shell and profile
   '/api/users/me': ME,
   '/api/users': USERS,

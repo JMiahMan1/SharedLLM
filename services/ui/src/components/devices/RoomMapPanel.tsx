@@ -30,6 +30,7 @@ import {
 import { holdScreenOn, type AwakeHold } from '../../lib/keepAwake';
 import { relativeTime } from '../../lib/wanderTrips';
 import { confirmDialog } from '../ui/confirmDialog';
+import BluetoothListeners from './BluetoothListeners';
 
 const MAP_KEY = ['room-map'];
 const button = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-white/10 px-3 text-sm text-slate-200 hover:bg-white/5 disabled:opacity-50';
@@ -164,7 +165,15 @@ function Recorder({ room, tracker, thisPhone, onBack, onFinished }: {
           </label>
           <button type="button" className={`${primary} w-full sm:w-auto`} onClick={() => void start()} disabled={phase === 'starting'}
             data-testid="room-map-start">
-            {phase === 'starting' ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />} Start
+            {phase === 'starting' ? (
+              <>
+                <Loader2 size={16} className="animate-spin" /> Looking for your phone...
+              </>
+            ) : (
+              <>
+                <Play size={16} /> Start
+              </>
+            )}
           </button>
         </>
       )}
@@ -292,6 +301,7 @@ export default function RoomMapPanel() {
         />
       ) : (
         <div className="space-y-4 p-4">
+          <BluetoothListeners areas={areas.data ?? []} />
           <div>
             <h3 className="flex items-center gap-2 text-sm font-semibold text-white"><MapPinned size={16} className="text-sky-400" /> Map rooms</h3>
             <p className="mt-1 text-xs text-slate-400">

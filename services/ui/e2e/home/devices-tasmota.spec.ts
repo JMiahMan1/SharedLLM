@@ -185,6 +185,26 @@ test.describe('Devices: Tasmota with a web password', () => {
       fixed = true;
       return route.fallback();
     });
+    // The sheet's Device template section (tasmota_templates_api.py) asks the device itself: a locked device
+    // answers 409 until the hub has its password, then the template it runs.
+    await page.route(/\/api\/homehub\/tasmota\/ts1\/template$/, (route: Route) => {
+      if (!fixed) {
+        const message = 'Tasmota 192.0.2.174 needs its web password. Enter it under Connection first.';
+        return route.fulfill({ status: 409, json: { status: 'error', message, detail: message } });
+      }
+      return route.fulfill({ json: { entry_id: 'ts1', title: 'Tasmota', up_to_date: false, message: null,
+        identified: true, identify_note: null, suggestions: [], guesses: [], previous_template: null,
+        current: { device_name: 'Kettle plug', friendly_name: ['Kettle plug'], hostname: 'kettle-plug-0b02',
+          chip: 'ESP8266EX', firmware: '15.6.0(release-tasmota)', module: 0, module_name: 'Generic',
+          template_name: 'Four outlet strip', active: true, light: false, light_channels: 0, relays: 4, energy: false,
+          template_json: '{"NAME":"Four outlet strip","GPIO":[0,0,0,0,224,225,0,0,226,227,0,0,0,0],"FLAG":0,"BASE":18}',
+          catalog_matches: [], measured_matches: [] } } });
+    });
+    await page.route(/\/api\/homehub\/tasmota\/ts1\/pinfinder$/, (route: Route) =>
+      route.fulfill({ json: { active: false, status: 'idle', question: null, result: null, message: null,
+        interrupted: false, kinds: ['bulb', 'strip', 'dimmer'] } }));
+    await page.route(/\/api\/homehub\/tasmota\/templates/, (route: Route) =>
+      route.fulfill({ json: { kinds: ['bulb', 'plug', 'switch', 'dimmer', 'strip', 'relay'], templates: [], measured: [] } }));
     await page.goto('/devices');
     await page.getByTestId('device-tile').filter({ hasText: 'Kettle plug' }).getByTestId('hardware-device').click();
     const dialog = page.getByRole('dialog');

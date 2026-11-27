@@ -184,8 +184,16 @@ def test_reveal_only_returns_credential_fields(client, session):
 def test_a_user_read_says_which_secrets_are_saved_but_never_their_values(client, session):
     body = client.get("/api/users").json()
     sam = next(u for u in body if u["username"] == "sam")
-    assert sorted(sam["saved_credentials"]) == ["ha_token", "nextcloud_pass"]
+    saved = set(sam["saved_credentials"])
+    # A secret says it is saved, and so does a plain field (a URL, a username):
+    # without those names a form that shows them blank cannot tell "not set" from
+    # "saved and never sent", and changing only a password was refused.
+    assert {"ha_token", "nextcloud_pass"} <= saved
+    assert {"ha_url", "nextcloud_user"} <= saved
     assert "nc-app-password" not in json.dumps(body)
+    for name in saved:
+        assert not name.endswith("_enc")
+        assert ":" not in name and not name.startswith("http")
 
 
 def test_any_signed_in_user_can_read_the_household_service_urls_but_no_secrets(client, session, monkeypatch):

@@ -132,6 +132,27 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
 
         return music_assistant_server.household_server(runtime.hub)
 
+    @router.post("/hub/auth/users")
+    async def ensure_person_user(request: Request) -> dict[str, Any]:
+        """``{"username", "display_name"?, "password"?, "is_admin"?}``: provision a person hub login.
+
+        Internal-secret only: the response never leaks the password.
+        """
+        token = request.headers.get("x-internal-secret") or bearer(request.headers.get("authorization"))
+        p = auth.authenticate(token)
+        if p is None or p.user_id != "internal":
+            raise HTTPException(401, detail="Unauthorized")
+        body = await request.json() or {}
+        try:
+            return ha.ensure_person_user(
+                str((body or {}).get("username") or ""),
+                (body or {}).get("display_name"),
+                (body or {}).get("password"),
+                bool((body or {}).get("is_admin", False)),
+            )
+        except AuthError as exc:
+            raise HTTPException(exc.status, detail=exc.description or exc.code) from exc
+
     @router.post("/hub/music_assistant/accounts")
     async def music_assistant_account(request: Request) -> dict[str, Any]:
         """``{"username", "display_name"?, "token_name"?}``: that person's own MA account and a new token.
@@ -149,6 +170,66 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
             return await music_assistant_server.provision_account(
                 runtime.hub, str((body or {}).get("username") or ""), (body or {}).get("display_name"),
                 str((body or {}).get("token_name") or "Jarvis"))
+        except music_assistant_server.AccountError as exc:
+            raise HTTPException(exc.status, detail=str(exc)) from exc
+
+    @router.post("/hub/music_assistant/audiobookshelf")
+    async def music_assistant_audiobookshelf(request: Request) -> dict[str, Any]:
+        """Provision/sync one person's dedicated Audiobookshelf provider instance and MA provider_filter.
+
+        Internal secret only: the request body may carry the user's Audiobookshelf API token or password.
+        """
+        token = request.headers.get("x-internal-secret") or bearer(request.headers.get("authorization"))
+        p = auth.authenticate(token)
+        if p is None or p.user_id != "internal":
+            raise HTTPException(401, detail="Unauthorized")
+        from services.homehub import music_assistant_server
+
+        body = await request.json() or {}
+        try:
+            return await music_assistant_server.sync_user_audiobookshelf_provider(
+                runtime.hub,
+                username=str(body.get("username") or ""),
+                display_name=body.get("display_name"),
+                abs_url=body.get("abs_url"),
+                abs_api_key=body.get("abs_api_key"),
+                abs_username=body.get("abs_username"),
+                abs_password=body.get("abs_password"),
+                verify_ssl=bool(body.get("verify_ssl", True)),
+                existing_instance_id=body.get("existing_instance_id"),
+                remove_if_unconfigured=bool(body.get("remove_if_unconfigured", False)),
+            )
+        except music_assistant_server.AccountError as exc:
+            raise HTTPException(exc.status, detail=str(exc)) from exc
+
+    def internal(request: Request) -> None:
+        """Only the stack itself may ask for these: they name the household's accounts."""
+        token = request.headers.get("x-internal-secret") or bearer(request.headers.get("authorization"))
+        p = auth.authenticate(token)
+        if p is None or p.user_id != "internal":
+            raise HTTPException(401, detail="Unauthorized")
+
+    @router.get("/hub/music_assistant/users")
+    async def music_assistant_users(request: Request) -> dict[str, Any]:
+        from services.homehub import music_assistant_server
+
+        internal(request)
+        try:
+            return await music_assistant_server.list_accounts(runtime.hub)
+        except music_assistant_server.AccountError as exc:
+            raise HTTPException(exc.status, detail=str(exc)) from exc
+
+    @router.post("/hub/music_assistant/users/password")
+    async def music_assistant_user_password(request: Request) -> dict[str, Any]:
+        """``{"username", "password"}``: the password that person signs in to Music Assistant with."""
+        from services.homehub import music_assistant_server
+
+        internal(request)
+        body = await request.json()
+        try:
+            return await music_assistant_server.set_password(
+                runtime.hub, str((body or {}).get("username") or ""), str((body or {}).get("password") or "")
+            )
         except music_assistant_server.AccountError as exc:
             raise HTTPException(exc.status, detail=str(exc)) from exc
 

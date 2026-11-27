@@ -93,6 +93,18 @@ describe('RoomMapPanel', () => {
     expect(screen.getByTestId('room-map-start')).toBeInTheDocument();
   });
 
+  it('says it is looking for the phone while the hub waits for a quiet beacon', async () => {
+    // The hub now waits up to 20 s for a beacon Android has paused, so the tap can take
+    // that long. It must say what it is doing instead of looking dead.
+    vi.mocked(roomMap.startMapSession).mockReturnValue(new Promise(() => undefined) as never);
+    wrap();
+    fireEvent.click(await screen.findByRole('button', { name: 'Map Den' }));
+    const start = screen.getByTestId('room-map-start');
+    fireEvent.click(start);
+    await waitFor(() => expect(start).toHaveTextContent('Looking for your phone...'));
+    expect(start).toBeDisabled();
+  });
+
   it('says the phone is not heard on a 409, and notes when the screen cannot be held on', async () => {
     vi.mocked(roomMap.startMapSession).mockRejectedValueOnce(new AxiosError('x', 'ERR', undefined, undefined, {
       status: 409, statusText: '', headers: {}, config: { headers: new AxiosHeaders() }, data: { detail: 'Not heard in the last 30 s' },

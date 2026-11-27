@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import hmac
 import json
 import logging
 import re
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -29,9 +32,11 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     conversation,  # /hub/conversation/triggers: HA sentence triggers, asked by Jarvis first
     dashboard_api,
     discovery_api,
+    echo_ota,
     entries_api,  # integrations: reconfigure, remove/unpair, add by address
     esphome_logs_api,  # /hub/devices/{id}/logs: an ESPHome node's live logs
     esphome_restarts,  # ESPHome restarts and drops, for /health
+    firmware,  # /hub/firmware: every device's version, what is offered, and installing it
     ha_auth_api,
     ha_ws_compat,
     hardware_api,  # the hardware list: integrations, devices, entities, disable, sync
@@ -39,6 +44,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     light_groups_api,  # /hub/light_groups: light groups (the group helper)
     live_video,
     live_video_api,
+    ma_users,  # /hub/music-assistant/users/reconcile: a member's own MA account and ABS view
     matter_ble,  # new Wi-Fi Matter devices over Bluetooth, and their household Wi-Fi
     mobile_app_api,
     prune_api,  # dry-run and apply pruning of stale imported HA data
@@ -47,6 +53,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     restarts_api,  # /hub/devices/{id}/restarts: an ESPHome node's restarts and their causes
     service_logins_api,
     statistics_api,
+    tasmota_templates_api,  # /hub/tasmota: device templates (GPIO maps), suggested and loaded
     users_api,  # the hub's users and its login providers (local, Jarvis)
     voice_api,  # /hub/voice: the voice satellites and their runs
 )
@@ -62,6 +69,14 @@ HA_VERSION = "2026.11.0"
 MAX_RECORDING_RANGE = timedelta(days=7)
 _BOUNDARY = "frame"
 _NO_STORE = {"Cache-Control": "no-store"}
+_ECHO_TUNNEL_NODE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+#: Where the hub keeps each Echo's own tunnel token, stored as ``{node: sha256hex}`` (never the token itself).
+ECHO_TUNNEL_TOKENS_KV = "echo_tunnel_tokens"
+
+
+def _echo_tunnel_token_hash(token: str) -> str:
+    """The sha256 hex the hub stores for a device tunnel token, so the token itself never sits in the store."""
+    return hashlib.sha256(token.encode()).hexdigest()
 #: HA's history SIGNIFICANT_DOMAINS: attribute-only changes count as significant for these.
 SIGNIFICANT_DOMAINS = frozenset({"climate", "device_tracker", "humidifier", "thermostat", "water_heater"})
 #: HA's logbook leaves these domains out entirely: they change all the time and none of it reads as an event.
@@ -780,6 +795,31 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
                                                             "history", "automations", "refresh_tokens")},
         }
 
+    @app.get("/hub/music_assistant/sendspin/{device_id}")
+    async def hub_sendspin_info(device_id: str, request: Request) -> Response:
+        """One satellite's Music Assistant Sendspin address and whether its pairing token is ready."""
+        admin(request)
+        from services.homehub import music_assistant_server
+
+        include = request.query_params.get("include_token", "").lower() in ("1", "true", "yes")
+        try:
+            body = await music_assistant_server.sendspin_pairing_info(runtime.hub, device_id, include_token=include)
+        except music_assistant_server.SendspinError as exc:
+            return _error(exc.status, str(exc))
+        return JSONResponse(body)
+
+    @app.post("/hub/music_assistant/sendspin/{device_id}/pair")
+    async def hub_sendspin_pair(device_id: str, request: Request) -> Response:
+        """Ask the connected Music Assistant to pair one satellite's Sendspin provider."""
+        admin(request)
+        from services.homehub import music_assistant_server
+
+        try:
+            body = await music_assistant_server.pair_sendspin_device(runtime.hub, device_id)
+        except music_assistant_server.SendspinError as exc:
+            return _error(exc.status, str(exc))
+        return JSONResponse(body)
+
     @app.post("/hub/import")
     async def hub_import(request: Request) -> dict[str, Any]:
         admin(request)
@@ -857,6 +897,280 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(bluetooth_api.build_router(runtime, auth))  # Bluetooth scanners, devices, room map
     app.include_router(helpers_api.build_router(runtime, auth))  # HA's helpers
     app.include_router(light_groups_api.build_router(runtime, auth))  # light groups
+    app.include_router(tasmota_templates_api.build_router(runtime, auth))  # Tasmota templates
+
+    from services.homehub import echo_dropin_bridge as _echo_dropin_bridge
+
+    bridge = _echo_dropin_bridge.EchoDropInBridge()
+    app.state.echo_dropin_bridge = bridge
+
+    from services.homehub.echo_tunnel import EchoTunnelManager
+
+    runtime.hub.echo_tunnels = EchoTunnelManager()
+    app.state.echo_tunnel_manager = runtime.hub.echo_tunnels
+
+    def _ws_authenticate(websocket: WebSocket) -> Principal | None:
+        token = bearer(websocket.headers.get("authorization")) or websocket.headers.get("x-internal-secret")
+        if not token:
+            token = websocket.query_params.get("token")
+        return auth.authenticate(token)
+
+    @app.get("/hub/echo_dropin/status")
+    async def echo_dropin_status(request: Request) -> dict[str, Any]:
+        admin(request)
+        return bridge.status()
+
+    @app.post("/hub/echo_dropin/hangup/{call_id}")
+    async def echo_dropin_hangup(call_id: str, request: Request) -> dict[str, Any]:
+        admin(request)
+        try:
+            session = await bridge.end_call(call_id)
+        except KeyError:
+            raise HTTPException(404, detail="Unknown call_id") from None
+        return {
+            "call_id": session.call_id.hex(),
+            "state": session.state,
+            "reason": session.reason,
+        }
+
+    @app.websocket("/hub/echo_dropin/ws/{node}")
+    async def echo_dropin_ws(websocket: WebSocket, node: str) -> None:
+        principal = _ws_authenticate(websocket)
+        if principal is None:
+            await websocket.close(code=1008, reason="Unauthorized")
+            return
+        await websocket.accept()
+        try:
+            try:
+                bridge.require_network_key()
+            except _echo_dropin_bridge.DropInBridgeError as exc:
+                await websocket.close(code=1011, reason=str(exc)[:120])
+                return
+            try:
+                peer = bridge.get_peer(node)
+            except _echo_dropin_bridge.DropInBridgeError as exc:
+                await websocket.close(code=1008, reason=str(exc)[:120])
+                return
+            transport = _echo_dropin_bridge.WebSocketOpusTransport(websocket)
+            try:
+                session = await bridge.start_call(node, transport)
+            except _echo_dropin_bridge.DropInBridgeError as exc:
+                msg = str(exc)
+                code = 1008 if "busy" in msg or "unknown" in msg else 1011
+                await websocket.close(code=code, reason=msg[:120])
+                with contextlib.suppress(Exception):
+                    await transport.close()
+                return
+            await websocket.send_json({"type": "connected", "call_id": session.call_id.hex(), "node": peer.node})
+            try:
+                await session.wait_ended()
+            finally:
+                with contextlib.suppress(Exception):
+                    if session.state != "ended":
+                        await session.hangup("websocket_closed")
+        except WebSocketDisconnect:
+            return
+        except Exception as exc:
+            log.exception("echo drop-in websocket failed for node %s", node)
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1011, reason=f"echo drop-in failed: {type(exc).__name__}"[:120])
+
+    # ---- Echo Tunnel Routes ----
+
+    def _echo_tunnel_stored_hash(node: str) -> str | None:
+        """The stored sha256 hex for this node's device token, or None when it has none."""
+        tokens = runtime.store.get_kv(ECHO_TUNNEL_TOKENS_KV, {})
+        if isinstance(tokens, dict):
+            value = tokens.get(node)
+            return value if isinstance(value, str) else None
+        return None
+
+    @app.post("/hub/echo_tunnel/tokens/{node}")
+    async def echo_tunnel_token_create(node: str, request: Request) -> dict[str, Any]:
+        """Mint this Echo's own tunnel token, returned once and stored only as a sha256 hex.
+
+        The only time the token leaves the hub; replaces any previous token for the node.
+        """
+        admin(request)
+        if not _ECHO_TUNNEL_NODE_RE.match(node or ""):
+            raise HTTPException(404, detail="Unknown node")
+        token = secrets.token_urlsafe(32)
+        tokens = runtime.store.get_kv(ECHO_TUNNEL_TOKENS_KV, {})
+        if not isinstance(tokens, dict):
+            tokens = {}
+        tokens[node] = _echo_tunnel_token_hash(token)
+        runtime.store.set_kv(ECHO_TUNNEL_TOKENS_KV, tokens)
+        return {"node": node, "token": token}
+
+    @app.delete("/hub/echo_tunnel/tokens/{node}")
+    async def echo_tunnel_token_delete(node: str, request: Request) -> dict[str, Any]:
+        """Revoke this node's device token."""
+        admin(request)
+        tokens = runtime.store.get_kv(ECHO_TUNNEL_TOKENS_KV, {})
+        if not isinstance(tokens, dict):
+            tokens = {}
+        revoked = node in tokens
+        if revoked:
+            del tokens[node]
+            runtime.store.set_kv(ECHO_TUNNEL_TOKENS_KV, tokens)
+        return {"revoked": revoked}
+
+    @app.get("/hub/echo_tunnel/tokens")
+    async def echo_tunnel_token_list(request: Request) -> dict[str, Any]:
+        """The nodes that have a device token; never the tokens or their hashes."""
+        admin(request)
+        tokens = runtime.store.get_kv(ECHO_TUNNEL_TOKENS_KV, {})
+        nodes = sorted(tokens.keys()) if isinstance(tokens, dict) else []
+        return {"nodes": nodes}
+
+    @app.get("/hub/echo_tunnel/status")
+    async def echo_tunnel_status(request: Request) -> dict[str, Any]:
+        """Admin/internal status of active echo tunnels."""
+        admin(request)
+        return await app.state.echo_tunnel_manager.status()
+
+    @app.post("/hub/echo_tunnel/disconnect/{node}")
+    async def echo_tunnel_disconnect(node: str, request: Request) -> dict[str, Any]:
+        """Admin/internal disconnect a tunnel by node name."""
+        admin(request)
+        ok = await app.state.echo_tunnel_manager.disconnect(node)
+        return {"disconnected": ok}
+
+    @app.websocket("/hub/echo_tunnel/ws/{node}")
+    async def echo_tunnel_ws(websocket: WebSocket, node: str) -> None:
+        """WebSocket endpoint for the echo reverse WSS tunnel.
+
+        Auth: an admin/internal principal (as elsewhere), OR a per-device token whose sha256
+        matches the hash stored for this node. Device tokens come only from the Authorization
+        header, never ``?token=``; a token for another node, a revoked token, or none closes 1008.
+        Protocol: binary frames with 1-byte type header (0x01=OPEN, 0x02=DATA, 0x03=CLOSE,
+        0x04=PING, 0x05=PONG). Multiplexes TCP connections on 127.0.0.1:local_port
+        over this WS link, exposing ESPHome API (:26053) over HTTPS/WSS 443.
+        """
+        principal = _ws_authenticate(websocket)
+        if not (principal is not None and principal.is_admin):
+            header_token = bearer(websocket.headers.get("authorization"))
+            stored = _echo_tunnel_stored_hash(node)
+            if not (header_token and stored
+                    and hmac.compare_digest(_echo_tunnel_token_hash(header_token), stored)):
+                await websocket.close(code=1008, reason="Unauthorized")
+                return
+
+        # Validate node name regex
+        if not _ECHO_TUNNEL_NODE_RE.match(node or ""):
+            await websocket.close(code=1008, reason="Invalid node name")
+            return
+
+        await websocket.accept()
+
+        manager: EchoTunnelManager = app.state.echo_tunnel_manager
+
+        try:
+            # Register the tunnel (binds TCP server, sends OPEN frame)
+            local_port = await manager.register_tunnel(node, websocket)
+            log.info("Echo tunnel WS accepted for node=%s local_port=%s", node, local_port)
+
+            # Handle incoming frames in a loop
+            while True:
+                data = await websocket.receive_bytes()
+                try:
+                    manager.decode_frame(data)
+                except Exception as exc:
+                    log.warning("Failed to decode tunnel frame: %s", exc)
+                    await websocket.close(code=1008, reason="Malformed frame")
+                    return
+
+                # Handle the frame
+                status = await manager.handle_ws_frame(data, node)
+                if status == "error":
+                    await websocket.close(code=1008, reason="Frame processing error")
+                    return
+
+        except Exception as exc:
+            log.exception("Echo tunnel WS failed for node %s", node)
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1011, reason=f"tunnel failed: {type(exc).__name__}"[:120])
+        finally:
+            # Ensure cleanup on disconnect
+            await manager.disconnect(node)
+            with contextlib.suppress(Exception):
+                await websocket.close()
+
+    @app.get("/hub/echo_ota/status")
+    async def echo_ota_status(request: Request) -> dict[str, Any]:
+        admin(request)
+        data = runtime.store.get_kv(echo_ota.ECHO_OTA_KV_KEY, {}) or {}
+        if not isinstance(data, dict):
+            data = {}
+        last_results = data.get("last_results") or {}
+        if not isinstance(last_results, dict):
+            last_results = {}
+        nodes_out = []
+        for node_id in echo_ota.echo_nodes(hub):
+            upd = echo_ota._find_firmware_update_entity(hub, node_id)
+            installed_version = None
+            latest_version = None
+            update_available = False
+            if upd is not None:
+                st = hub.states.get(getattr(upd, "entity_id", ""))
+                if st is not None:
+                    installed_version = (st.attributes.get("installed_version") if st.attributes else None)
+                    latest_version = (st.attributes.get("latest_version") if st.attributes else None)
+                    update_available = str(st.state).lower() == "on"
+            nodes_out.append({
+                "node": node_id,
+                "installed_version": installed_version,
+                "latest_version": latest_version,
+                "update_available": update_available,
+                "last_result": last_results.get(node_id),
+            })
+        return {
+            "channel": echo_ota.ONLINE_UPDATES_CHANNEL,
+            "auto_update": echo_ota.HOMEHUB_ECHO_AUTO_UPDATE,
+            "update_hour": echo_ota.HOMEHUB_ECHO_UPDATE_HOUR,
+            "nodes": nodes_out,
+        }
+
+    @app.post("/hub/echo_ota/update_all")
+    async def echo_ota_update_all(request: Request) -> dict[str, Any]:
+        admin(request)
+        queued = 0
+        for node_id in echo_ota.echo_nodes(hub):
+            upd = echo_ota._find_firmware_update_entity(hub, node_id)
+            if upd is None:
+                continue
+            st = hub.states.get(getattr(upd, "entity_id", ""))
+            if st is not None and str(st.state).lower() == "on":
+                queued += 1
+        return {"queued": queued}
+
+    @app.get("/hub/firmware")
+    async def firmware_list(request: Request) -> dict[str, Any]:
+        admin(request)
+        return firmware.report(hub)
+
+    @app.post("/hub/firmware/install")
+    async def firmware_install(request: Request) -> dict[str, Any]:
+        admin(request)
+        body = await request.json()
+        return await firmware.install(hub, str(body.get("entity_id") or ""))
+
+    @app.post("/hub/firmware/{device_id}/upgrade")
+    async def firmware_upgrade(device_id: str, request: Request) -> dict[str, Any]:
+        admin(request)
+        return await firmware.upgrade_tasmota(hub, device_id)
+
+    @app.post("/hub/music-assistant/users/reconcile")
+    async def ma_users_reconcile(request: Request) -> dict[str, Any]:
+        """Give every member an MA account pointed at their own Audiobookshelf."""
+        admin(request)
+        body = await request.json()
+        return await ma_users.reconcile(
+            hub,
+            [str(name) for name in (body.get("members") or [])],
+            password=body.get("password") or None,
+            display_names=body.get("display_names") or None,
+        )
 
     @app.websocket("/api/websocket")
     async def websocket(ws: WebSocket) -> None:
@@ -965,6 +1279,10 @@ class WSConnection:
                 await self.result(mid)
             elif kind == "subscribe_entities":
                 await self._subscribe_entities(mid, msg.get("entity_ids"))
+            elif kind == "sendspin/subscribe_clients":
+                await self._subscribe_sendspin_clients(mid)
+            elif kind == "sendspin/get_pairing_token":
+                await self._sendspin_pairing_token(mid, msg.get("client_id"))
             elif kind == "unsubscribe_events":
                 unsub = self.subs.pop(msg.get("subscription"), None)
                 if unsub is None:
@@ -1075,6 +1393,54 @@ class WSConnection:
         initial = {s.entity_id: compress(s) for s in self.hub.states.all()
                    if (not wanted or s.entity_id in wanted) and self._sees(s.entity_id)}
         await self.send({"id": mid, "type": "event", "event": {"a": initial}})
+
+
+    # -- Music Assistant's Sendspin pairing (what HA's sendspin integration answers) ------------------------------
+    # Admins and Music Assistant's own service login only: these hand out a device's pairing secret.
+    def _may_pair_sendspin(self) -> bool:
+        """An admin, or the hub's own Music Assistant service login (service_logins_api.MA_USER).
+
+        HomeHub gives Music Assistant a non-admin service user on purpose; these two
+        commands are what that login exists to use, so it may, and only it besides admins.
+        """
+        p = self.principal
+        if p is None:
+            return False
+        if p.is_admin:
+            return True
+        from services.homehub.service_logins_api import MA_USER
+
+        user = self.auth.users().get(p.user_id) or {}
+        return bool(user.get("service")) and user.get("name") == MA_USER
+
+    async def _subscribe_sendspin_clients(self, mid: int) -> None:
+        if not self._may_pair_sendspin():
+            await self.error(mid, "unauthorized", "Only an administrator may follow Sendspin clients.")
+            return
+        clients = getattr(self.runtime, "sendspin_clients", None)
+        if clients is None:
+            await self.error(mid, "not_supported", "This hub hands out no Sendspin pairing tokens.")
+            return
+        await self.result(mid)
+
+        def push(ids: list[str], _mid: int = mid) -> None:
+            task = asyncio.get_running_loop().create_task(
+                self.send({"id": _mid, "type": "event", "event": {"client_ids": ids}}))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+
+        self.subs[mid] = clients.subscribe(push)
+
+    async def _sendspin_pairing_token(self, mid: int, client_id: Any) -> None:
+        if not self._may_pair_sendspin():
+            await self.error(mid, "unauthorized", "Only an administrator may fetch a pairing token.")
+            return
+        clients = getattr(self.runtime, "sendspin_clients", None)
+        token = clients.token_for(str(client_id or "")) if clients is not None else None
+        if not token:
+            await self.error(mid, "not_found", "No Sendspin pairing token for that client right now.")
+            return
+        await self.result(mid, {"token": token})
 
 
 #: The WebSocket commands api.py answers itself; each one checks a limited user's entities.

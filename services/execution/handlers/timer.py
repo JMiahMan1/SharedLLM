@@ -876,7 +876,7 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
             link = app_link(req.url)
             if link:
                 timer_obj["url"] = link
-            satellite = satellite_timers.valid_satellite(req.user_context.voice_satellite)
+            satellite = await _resolve_timer_satellite(req, primary_device)
             fired = await _take_fired_satellite(r, req.again_of, user_id) if req.again_of else None
             if fired is not None:
                 # A snooze or +1 min from a phone: the old timer stops ringing on its satellite
@@ -951,14 +951,28 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
 
         elif action == "stop":
             user_id = req.user_context.user
-            stopped_devs = await stop_ringing_devices(
-                r,
-                timer_id=req.id,
-                user_id=user_id,
-                device_name=req.target_device,
-                ha_url=req.user_context.ha_url,
-                ha_token=req.user_context.ha_token,
-            )
+            satellite = satellite_timers.valid_satellite(req.target_device)
+            fired_records = await fired_satellites_for(r, req.target_device) if satellite else []
+            ringing = bool(fired_records) or (req.target_device is not None and not satellite)
+            # For a voice satellite, only act when a timer actually fired on it.
+            if satellite and not fired_records:
+                ringing = False
+            if ringing:
+                stopped_devs = await stop_ringing_devices(
+                    r,
+                    timer_id=req.id,
+                    user_id=user_id,
+                    device_name=req.target_device,
+                    ha_url=req.user_context.ha_url,
+                    ha_token=req.user_context.ha_token,
+                )
+                # Clear the remembered fired timers for this satellite.
+                for rec in fired_records:
+                    await r.delete(_fired_key(rec.get("id")))
+                    with contextlib.suppress(Exception):
+                        await _tell_satellite(rec, "cancelled", req)
+            else:
+                stopped_devs = []
             # If a one-off timer is still in Redis, delete it; leave recurring alarms scheduled.
             told = False
             if req.id or req.title:
@@ -973,11 +987,18 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 fired = await _take_fired_satellite(r, req.id, user_id)
                 if fired is not None and not told:
                     await _tell_satellite(fired, "cancelled", req)
+            if satellite and not ringing:
+                return ExecutionResult(
+                    status="SUCCESS",
+                    message="No timer ringing.",
+                    service="timer_stop",
+                    detail={"stopped_devices": [], "ringing": False},
+                )
             return ExecutionResult(
                 status="SUCCESS",
                 message="Stopped.",
                 service="timer_stop",
-                detail={"stopped_devices": stopped_devs},
+                detail={"stopped_devices": stopped_devs, "ringing": ringing or bool(stopped_devs)},
             )
 
         elif action == "pause":
@@ -1045,6 +1066,68 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message=f"Timer error: {e!s}", service="timer")
 
 
+async def _resolve_timer_satellite(req: TimerRequest, primary_device: str | None) -> str | None:
+    """Resolve the voice satellite for a timer: a named room's satellite, else the caller's.
+
+    When a timer targets a room ("set a 10 minute pasta timer in the kitchen"), route its
+    satellite countdown/ring to that room's ``assist_satellite.*`` via ``resolve_room_satellite``.
+    An explicitly named room with no satellite returns ``None`` so the timer never rings in a
+    different room. Offline/unconfigured hubs fall back cleanly so setting a timer never fails.
+    """
+    fallback = satellite_timers.valid_satellite(req.user_context.voice_satellite)
+    target = str(primary_device or "").strip()
+    if not target or target.lower().startswith("room_of:"):
+        return fallback
+    direct = satellite_timers.valid_satellite(target)
+    if direct:
+        return direct
+
+    from services.execution import ha_client, hardware_router
+
+    hub_url, hub_token = hardware_router.hub_pair(req.user_context)
+    if not (hub_url and hub_token):
+        return fallback
+
+    idx = None
+    try:
+        from services.execution.capability_index import routing_index
+
+        idx = await routing_index(hub_url, hub_token, "resolving room timer satellite")
+    except Exception as exc:
+        log.warning("Could not load capability index for room timer %r: %s", target, exc)
+
+    all_states: list[dict] = []
+    if idx is None:
+        try:
+            states = await ha_client.get_states(hub_url, hub_token)
+            if isinstance(states, list):
+                all_states = states
+        except Exception as exc:
+            log.warning("Could not read states for room timer %r: %s", target, exc)
+            return fallback
+        if not all_states:
+            return fallback
+
+    if idx is not None:
+        if idx.area_id_for(target) is not None:
+            return satellite_timers.resolve_room_satellite(
+                all_states, target, fallback_satellite=fallback, idx=idx
+            )
+        return fallback
+
+    resolved = satellite_timers.resolve_room_satellite(
+        all_states, target, fallback_satellite=fallback, idx=None
+    )
+    if resolved:
+        return resolved
+    # Without a capability index we cannot distinguish a room without a satellite from a non-room
+    # device name (e.g. "phone" or "Living Room TV"): only suppress fallback when target explicitly
+    # looks like a room or when there is no caller satellite anyway.
+    return None if any(
+        str((s or {}).get("entity_id") or "").startswith("assist_satellite.") for s in all_states
+    ) else fallback
+
+
 async def _tell_satellite(timer: dict, event: str, req: TimerRequest) -> dict | None:
     """Send ``event`` to the voice satellite that set this timer (satellite_timers.py); None when none did."""
     # The caller's own hub login, else the hub's: the satellite that heard the timer is the household's.
@@ -1101,6 +1184,27 @@ async def _take_fired_satellite(r, timer_id: str | None, user_id: str | None) ->
 async def _forget_fired_satellite(r, timer_id: str | None) -> None:
     if timer_id:
         await r.delete(_fired_key(timer_id))
+
+
+async def fired_satellites_for(r, satellite: str) -> list[dict]:
+    """Fired timer records remembered for ``satellite`` (still ringing on it)."""
+    out = []
+    try:
+        keys = await r.keys("timer_fired_satellite:*")
+    except Exception:
+        keys = []
+    for raw_k in keys:
+        key = raw_k.decode() if isinstance(raw_k, bytes) else raw_k
+        raw = await r.get(key)
+        if not raw:
+            continue
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue
+        if rec.get("satellite") == satellite:
+            out.append(rec)
+    return out
 
 
 def _targets(timer: dict, req) -> bool:

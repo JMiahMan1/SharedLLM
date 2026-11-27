@@ -504,13 +504,27 @@ def test_a_missing_or_bad_url_is_a_422(pv, payload):
     assert pv["client"].post(ROUTE, json=payload, headers=_as("alex")).status_code == 422
 
 
-def test_previews_are_rate_limited_per_person(pv):
+def test_previews_are_rate_limited_per_person(pv, monkeypatch):
+    # The window is a minute on a wall clock. Pinned, so a run that starts at 04:59:58
+    # cannot put half the requests in the next window and never reach the cap.
+    monkeypatch.setattr(preview, "_now", lambda: 1_700_000_010.0)
     for _ in range(preview.RATE_LIMIT):
         assert _ask(pv, "https://media.example/clip.mp4").status_code == 200
     resp = _ask(pv, "https://media.example/clip.mp4")
     assert resp.status_code == 429 and resp.headers["Retry-After"] == str(preview.RATE_WINDOW_S)
     # The other parent has their own allowance.
     assert _ask(pv, "https://media.example/clip.mp4", user="sam").status_code == 200
+
+
+def test_the_next_window_starts_a_fresh_allowance(pv, monkeypatch):
+    # A fixed window means a minute boundary resets the count. Pinned on both sides of
+    # the boundary so the behaviour is stated rather than inferred from a passing run.
+    monkeypatch.setattr(preview, "_now", lambda: 1_700_000_010.0)
+    for _ in range(preview.RATE_LIMIT):
+        assert _ask(pv, "https://media.example/clip.mp4").status_code == 200
+    assert _ask(pv, "https://media.example/clip.mp4").status_code == 429
+    monkeypatch.setattr(preview, "_now", lambda: 1_700_000_110.0)
+    assert _ask(pv, "https://media.example/clip.mp4").status_code == 200
 
 
 def test_without_the_rate_limit_s_store_nothing_is_fetched(pv):

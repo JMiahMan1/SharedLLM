@@ -206,3 +206,44 @@ export function clock(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
+
+/** One of the hub's Bluetooth listeners (its host adapter, or an ESPHome Bluetooth proxy). */
+export interface BluetoothListener {
+  id: string;
+  name?: string | null;
+  /** The room it counts for: set here, else its own device's room. */
+  area_id?: string | null;
+  online?: boolean;
+  /** Advertisements heard (a running total). */
+  advertisements?: number;
+  rssi_offset?: number | null;
+  ref_power?: number | null;
+  error?: string | null;
+}
+
+export interface BluetoothListeners {
+  host_adapter: { configured?: string | null; enabled?: boolean; reason?: string | null } | null;
+  scanners: BluetoothListener[];
+}
+
+const LISTENERS = '/api/homehub/bluetooth/listeners';
+
+export async function getListeners(): Promise<BluetoothListeners> {
+  const resp = await apiClient.get(LISTENERS);
+  return { host_adapter: resp.data?.host_adapter ?? null, scanners: Array.isArray(resp.data?.scanners) ? resp.data.scanners : [] };
+}
+
+export async function updateListener(
+  id: string,
+  change: { area_id?: string | null; rssi_offset?: number | null },
+): Promise<void> {
+  await apiClient.patch(`${LISTENERS}/${encodeURIComponent(id)}`, change);
+}
+
+/** What a person calls a listener: the server's own adapter, or the ESPHome node. */
+export function listenerLabel(l: BluetoothListener): string {
+  if (l.name) return l.name;
+  if (l.id.startsWith('bluez_')) return "The server's Bluetooth";
+  if (l.id.startsWith('esphome_')) return 'ESPHome Bluetooth proxy';
+  return l.id;
+}

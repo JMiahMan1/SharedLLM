@@ -12,6 +12,18 @@ What people are told lives here too, one sentence per feature, with no host
 names, addresses or exception text. The detail is in the log under the error
 id the response carries.
 
+The local AI counts as up only when it can serve a model, not when the proxy
+merely answers: after a reboot with no GPU the proxy answered every request
+while the llama-server behind it could not start, the breaker said "up", and a
+chat waited 54 seconds for an offline message. So its probe asks the proxy's
+``GET /admin/props`` (``LOCAL_AI_READY_PATH``), which the proxy answers itself
+from llama-server's ``/props``: 200 (or llama-server's own error, such as 503
+while a model loads) means the server behind it is there; the proxy's own 502
+("Failed to fetch props") means it is not. That route never loads a model
+(llama-server's model-scoped routes would), and the proxy answers it in
+milliseconds either way. A proxy too old to have it (404) is judged on any
+answer, as before.
+
 There is no fallback to an online model here on purpose: anything sensitive may
 only ever run on the local model, so while it is offline the answer is "not now",
 never "somewhere else". The one exception is cloud_fallback.py: an allowlist of
@@ -20,7 +32,9 @@ minimal typed payload, and only while this breaker is open.
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
 from typing import Any
 
@@ -29,7 +43,9 @@ from fastapi.responses import JSONResponse
 from services.common.backend_health import (
     BackendHealth,
     BackendUnavailable,
+    ProbeResult,
     Settings,
+    http_probe,
     is_unreachable,
 )
 
@@ -66,9 +82,55 @@ ANSWER_FAILED = "Something went wrong while Jarvis was answering. Please try aga
 BACK_TITLE = "Jarvis's thinking brain is back"
 BACK_BODY = "The local AI is working again, so you can ask your question now."
 
+#: The proxy route that says whether the model server behind it is there. Empty
+#: means "any answer from the proxy counts" (the old, weaker check).
+READY_PATH = os.getenv("LOCAL_AI_READY_PATH", "/admin/props").strip()
+#: The proxy guards its /admin routes with this key when it has one set.
+_PROXY_KEY = (os.getenv("ALPACA_API_KEY") or "").strip()
+_warned_unjudged: set[int] = set()
+
+
+def _detail(body: bytes) -> str:
+    try:
+        data = json.loads(body.decode("utf-8", "replace"))
+    except ValueError:
+        return ""
+    detail = data.get("detail") if isinstance(data, dict) else ""
+    return str(detail or "")[:200]
+
+
+def proxy_ready(status: int, body: bytes) -> ProbeResult:
+    """Judge the proxy's ``/admin/props`` answer: can it serve a model right now?
+
+    * 200: llama-server answered the proxy. Ready.
+    * 502/500/504: the proxy could not get an answer from llama-server (it
+      raises 502 "Failed to fetch props" for a refused connection or a timeout).
+      Not ready, whatever the proxy itself is doing.
+    * 503 and other 4xx: llama-server's own answer passed through (503 while a
+      model loads). The server is there; a load in progress is not an outage.
+    * 404/405: a proxy without the route; 401/403: the key is missing or wrong.
+      Neither can say, so any answer counts as before, and the log says why once.
+    """
+    if status == 200:
+        return ProbeResult(True, reason="found the model server ready")
+    if status in (500, 502, 504):
+        detail = _detail(body)
+        return ProbeResult(False, reason=f"found the proxy up but its model server unreachable (HTTP {status}"
+                                         f"{': ' + detail if detail else ''})")
+    if status in (401, 403, 404, 405):
+        if status not in _warned_unjudged:
+            _warned_unjudged.add(status)
+            why = "has no readiness route" if status in (404, 405) else "refused the readiness check (ALPACA_API_KEY?)"
+            log.warning("local_ai: the proxy %s (HTTP %d); judging it on any answer, so a dead model server "
+                        "behind a live proxy will not be noticed", why, status)
+        return ProbeResult(True, reason=f"answered (HTTP {status}, readiness unknown)")
+    return ProbeResult(True, reason=f"found the model server answering (HTTP {status})")
+
+
 LLM = BackendHealth(
-    "local_ai", "Jarvis's thinking brain", probe_path="/", message=CHAT_OFFLINE,
+    "local_ai", "Jarvis's thinking brain", probe_path=READY_PATH or "/", message=CHAT_OFFLINE,
     settings=SETTINGS, logger=log,
+    probe=http_probe(proxy_ready, headers={"X-API-Key": _PROXY_KEY} if _PROXY_KEY else None) if READY_PATH else None,
 )
 ARCADE = BackendHealth(
     "arcade", "The arcade", probe_path="/", message=ARCADE_OFFLINE, settings=SETTINGS, logger=log,
@@ -77,10 +139,14 @@ AUDIO = BackendHealth(
     "audio", "Music and voice making", probe_path="/health", message=AUDIO_OFFLINE, settings=SETTINGS, logger=log,
 )
 # Pictures are drawn behind the same proxy as the local AI (``sd_proxy_base_url`` is
-# ``llm_local_url``), so they share its breaker and only the sentence differs.
-IMAGES = LLM
+# ``llm_local_url``) but by a different server (sd-server), so they have their own
+# breaker on the same address, judged on any answer: a dead llama-server must not
+# turn picture making away.
+IMAGES = BackendHealth(
+    "images", "Picture making", probe_path="/", message=IMAGES_OFFLINE, settings=SETTINGS, logger=log,
+)
 
-BACKENDS: dict[str, BackendHealth] = {b.name: b for b in (LLM, ARCADE, AUDIO)}
+BACKENDS: dict[str, BackendHealth] = {b.name: b for b in (LLM, ARCADE, AUDIO, IMAGES)}
 
 #: What each feature still does while the local AI is offline (for the status endpoint).
 STILL_WORKING = ["home control", "time and date", "weather", "timers", "music playback", "chat with family"]
@@ -88,7 +154,7 @@ STILL_WORKING = ["home control", "time and date", "weather", "timers", "music pl
 
 def configure(*, llm_url: str = "", arcade_url: str = "", audio_url: str = "") -> None:
     """Point each backend at its configured address (from settings and .env, never a literal)."""
-    for health, url in ((LLM, llm_url), (ARCADE, arcade_url), (AUDIO, audio_url)):
+    for health, url in ((LLM, llm_url), (IMAGES, llm_url), (ARCADE, arcade_url), (AUDIO, audio_url)):
         if url:
             health.set_url(url)
 
@@ -131,6 +197,9 @@ def start_watching() -> None:
     for health in BACKENDS.values():
         if health.url:
             health.start()
+            # Check at once rather than a whole watch interval later: a gateway that
+            # restarts while the model server is dead would otherwise say "up".
+            health.verify_soon()
 
 
 def uses_local_llm(settings: dict[str, Any]) -> bool:

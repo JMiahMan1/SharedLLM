@@ -9,10 +9,12 @@ import { LocationProvider } from './context/LocationContext';
 import { MediaPlayerProvider } from './context/MediaPlayerContext';
 import MediaOverlays from './features/media/components/MediaOverlays';
 import NativeBridge from './components/NativeBridge';
+import NearbySync from './components/NearbySync';
 import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
 import MobileShell from './components/layout/MobileShell';
 import DeployBanner from './components/layout/DeployBanner';
+import OfflineModeBanner from './components/layout/OfflineModeBanner';
 import LocalAIBanner from './components/layout/LocalAIBanner';
 import ActivityBeacon from './components/layout/ActivityBeacon';
 import PhoneUsageSync from './components/layout/PhoneUsageSync';
@@ -33,6 +35,7 @@ const Admin = lazy(() => import('./pages/Admin'));
 const Identity = lazy(() => import('./pages/Identity'));
 const Notes = lazy(() => import('./pages/Notes'));
 const Recipes = lazy(() => import('./pages/Recipes'));
+const Profile = lazy(() => import('./pages/Profile'));
 const Family = lazy(() => import('./pages/Family'));
 const Calendar = lazy(() => import('./pages/Calendar'));
 const JarvisLab = lazy(() => import('./pages/JarvisLab'));
@@ -61,11 +64,13 @@ const Garden = lazy(() => import('./pages/Garden'));
 const PlantDetail = lazy(() => import('./pages/Garden').then((m) => ({ default: m.PlantDetail })));
 const Guardian = lazy(() => import('./pages/Guardian'));
 const Devices = lazy(() => import('./pages/Devices'));
+const DisplayKiosk = lazy(() => import('./pages/DisplayKiosk'));
 const FamilyMember = lazy(() => import('./pages/FamilyMember'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Bible = lazy(() => import('./pages/Bible'));
 
 import { initAppUpdater } from './lib/appUpdater';
+import { startKeyboardMedia } from './plugins/keyboardMedia';
 import { useSiteTheme } from './themes/siteTheme';
 
 import { Toaster } from 'react-hot-toast';
@@ -114,6 +119,7 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
       <Sidebar />
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
         <Header />
+        <OfflineModeBanner />
         <DeployBanner />
         <LocalAIBanner />
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 scroll-smooth">
@@ -143,6 +149,8 @@ function App() {
     };
     window.addEventListener('resize', handleResize);
     void initAppUpdater();
+    // GIFs and stickers from the phone's keyboard go into the focused chat box.
+    void startKeyboardMedia();
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
@@ -175,6 +183,7 @@ function App() {
         <MediaPlayerProvider>
         <Router>
           <NativeBridge />
+          <NearbySync />
           <ActivityBeacon />
           <PhoneUsageSync />
           <AppInventorySync />
@@ -209,11 +218,14 @@ function App() {
             <Route path="/fitness" element={<ProtectedRoute isMobile={isMobile}><Health /></ProtectedRoute>} />
             <Route path="/garden" element={<ProtectedRoute isMobile={isMobile}><Garden /></ProtectedRoute>} />
             <Route path="/garden/plants/:id" element={<ProtectedRoute isMobile={isMobile}><PlantDetail /></ProtectedRoute>} />
+            <Route path="/profile/:username?" element={<ProtectedRoute isMobile={isMobile}><Profile /></ProtectedRoute>} />
             <Route path="/family/member/:username?" element={<ProtectedRoute isMobile={isMobile}><FamilyMember /></ProtectedRoute>} />
             {/* The family guardian hub; `/guardian?child=…` (older notices) still
                 opens that child's family member page. */}
             <Route path="/guardian" element={<ProtectedRoute isMobile={isMobile}><Guardian /></ProtectedRoute>} />
             <Route path="/devices" element={<ProtectedRoute isMobile={isMobile}><Devices /></ProtectedRoute>} />
+            {/* Echo Show kiosk (`kiosk-satellite`) in the browser; hassmic keeps wake word/audio. */}
+            <Route path="/display" element={<ProtectedRoute isMobile={isMobile}><DisplayKiosk /></ProtectedRoute>} />
             <Route path="/bible" element={<ProtectedRoute isMobile={isMobile}><Bible /></ProtectedRoute>} />
             {/* Historic alias for the same page. Redirecting rather than
                 mounting a second copy keeps one URL per page, so the query

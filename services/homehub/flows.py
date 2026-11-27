@@ -28,8 +28,11 @@ The device transports are module functions so the tests can replace them.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import json
 import logging
+import os
 import re
 import uuid
 from typing import Any
@@ -290,6 +293,42 @@ async def esphome_probe(host: str, port: int, noise_psk: str | None, password: s
             await asyncio.wait_for(client.disconnect(), 3)
 
 
+#: The all-zero Noise PSK, base64: what an ESPHome node without a key of its own encrypts with.
+ZERO_NOISE_PSK = base64.b64encode(bytes(32)).decode("ascii")
+
+
+async def esphome_provision_noise_psk(host: str, port: int, password: str = "") -> str | None:
+    """Set a fresh Noise PSK on a plaintext ESPHome node at runtime.
+
+    ``echo-dot-assist`` (``hassmic``) starts unencrypted and expects the controller to give it a key; it
+    only syncs its clock and publishes its Sendspin pairing token once encrypted. The node keeps the key,
+    so a node that cannot provision one at runtime (ordinary plaintext ESPHome firmware) answers False and
+    ``None`` is returned: the caller adds it unencrypted. The key is never logged.
+    """
+    from aioesphomeapi import APIClient
+
+    psk = base64.b64encode(os.urandom(32)).decode("ascii")
+    # hassmic takes a first key only over an encrypted connection with the all-zero PSK (so the key never
+    # crosses the network readable) and refuses it over plaintext ("key change refused (plaintext
+    # connection)"); ordinary ESPHome firmware takes it over plaintext. Try the zero PSK first.
+    for transport_psk in (ZERO_NOISE_PSK, None):
+        client = APIClient(host, port, password, client_info="homehub", noise_psk=transport_psk)
+        try:
+            try:
+                await asyncio.wait_for(client.connect(login=True), 10)
+            except Exception:
+                if transport_psk is None:
+                    raise
+                continue  # not a zero-PSK node: plaintext next
+            ok = await asyncio.wait_for(client.noise_encryption_set_key(psk.encode("ascii")), 10)
+            if ok:
+                return psk
+        finally:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(client.disconnect(), 3)
+    return None
+
+
 async def roku_device_info(host: str) -> dict[str, str]:
     import xml.etree.ElementTree as ET
 
@@ -303,27 +342,120 @@ async def roku_device_info(host: str) -> dict[str, str]:
     return {child.tag: (child.text or "") for child in root}
 
 
+#: The password opened the device's own web page, but ``/cm`` took it no way it can be sent.
+TASMOTA_HTTP_API_OFF = ("The password is right, but this Tasmota device refuses commands over HTTP. On the device: "
+                        "Configuration, Configure Other, turn on 'HTTP API Enable' (newer firmware), save, "
+                        "then add it again.")
+
+
+class TasmotaStatus(dict):  # type: ignore[type-arg]
+    """A ``Status 0`` reply, with the way its ``/cm`` took the web password (``drivers.tasmota.AUTH_MODES``)."""
+
+    auth_mode = "both"
+
+
+async def _tasmota_cm(session: Any, host: str, password: str | None, mode: str) -> tuple[int, Any, str]:
+    """``(HTTP status, JSON body or None, reply text)`` of one ``Status 0``; aiohttp errors propagate."""
+    from services.homehub.drivers.tasmota import cm_url
+
+    url, auth = cm_url(host, "Status 0", password, mode)
+    async with session.get(url, auth=auth) as resp:
+        text = await resp.text(errors="replace")
+        if resp.status == 401:
+            try:
+                body = json.loads(text)
+            except ValueError:
+                body = None
+        else:
+            body = json.loads(text)
+        return resp.status, body, text
+
+
+def _log_tasmota_refusal(host: str, password: str, outcome: str, attempts: list[dict[str, Any]]) -> None:
+    """One WARNING when a supplied password ends in a refusal: what each ``/cm`` try answered (status, the reply
+    cut to 200 characters with any trace of the password replaced, ``redact``), and only the password's length and which awkward
+    characters it has (``password_traits``), never the password."""
+    from services.homehub.drivers.tasmota import password_traits, redact
+
+    tried = [{"mode": a["mode"], "status": a["status"], "reply": redact(str(a.get("reply") or "")[:200], password)}
+             for a in attempts]
+    log.warning("Tasmota at %s: %s with a password supplied; tries=%s password=%s",
+                host, outcome, tried, password_traits(password))
+
+
 async def tasmota_status(host: str, password: str | None) -> dict[str, Any]:
-    """``Status 0`` from the device; NeedsInput when it wants its web password."""
+    """``Status 0`` from the device (a ``TasmotaStatus``); NeedsInput when it wants its web password.
+
+    With a password that ``/cm`` refuses (it hangs up, or answers 401), the password is checked against the
+    device's own login page first, so a right password is never reported as wrong: ``/cm`` is then asked
+    again with the password only as query arguments, then only as HTTP Basic, and the first that answers is
+    the entry's ``auth_mode``. A right password that no way gets through is the device's HTTP API being off.
+    Any refusal of a supplied password is logged once (``_log_tasmota_refusal``), without the password.
+    """
     import aiohttp
 
-    from services.homehub.drivers.tasmota import cm_params, needs_password, safe_error
+    from services.homehub.drivers.tasmota import asks_for_login, needs_password, password_accepted, safe_error
 
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6)) as session, \
-                session.get(f"http://{host}/cm", params=cm_params("Status 0", password)) as resp:
-            body = None if resp.status == 401 else await resp.json(content_type=None)
-            status = resp.status
-    except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
-        raise FlowError(f"The Tasmota device at {host} did not answer: {safe_error(exc, password)}", 502) from None
-    if needs_password(status, body):
-        raise NeedsInput([TASMOTA_PASSWORD_REQUIRED], "This Tasmota device asks for its web password.",
-                         "The password was not accepted." if password else None)
-    if status != 200:
-        raise FlowError(f"The Tasmota device at {host} answered HTTP {status}", 502)
-    if not isinstance(body, dict):
-        raise FlowError("The Tasmota device sent an unexpected reply", 502)
-    return body
+    attempts: list[dict[str, Any]] = []
+
+    def did_not_answer(exc: BaseException) -> FlowError:
+        return FlowError(f"The Tasmota device at {host} did not answer: {safe_error(exc, password)}", 502)
+
+    def refused(outcome: str, error: Exception) -> Exception:
+        if password:
+            _log_tasmota_refusal(host, password, outcome, attempts)
+        return error
+
+    def not_accepted(outcome: str) -> Exception:
+        return refused(outcome, NeedsInput([TASMOTA_PASSWORD_REQUIRED], "This Tasmota device asks for its web "
+                                           "password.", "The password was not accepted."))
+
+    async def ask(mode: str) -> tuple[int, Any]:
+        try:
+            status, body, text = await _tasmota_cm(session, host, password, mode)
+        except Exception as exc:
+            attempts.append({"mode": mode, "status": None, "reply": safe_error(exc, password)})
+            raise
+        attempts.append({"mode": mode, "status": status, "reply": text})
+        return status, body
+
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6)) as session:
+        dropped: BaseException | None = None
+        try:
+            status, body = await ask("both")
+        except aiohttp.ServerDisconnectedError as exc:
+            # Some firmwares close /cm without a word when it lacks (or will not take) the web password.
+            status, body, dropped = 0, None, exc
+        except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
+            raise refused("no answer", did_not_answer(exc)) from None
+        if dropped is None and not needs_password(status, body):
+            if status != 200:
+                raise refused(f"HTTP {status}", FlowError(f"The Tasmota device at {host} answered HTTP {status}", 502))
+            if not isinstance(body, dict):
+                raise refused("unexpected reply", FlowError("The Tasmota device sent an unexpected reply", 502))
+            return TasmotaStatus(body)
+        if not password:
+            # A hang-up from a device whose pages ask for a login is a password, not an outage.
+            if dropped is not None and not await asks_for_login(session, host):
+                raise did_not_answer(dropped)
+            raise NeedsInput([TASMOTA_PASSWORD_REQUIRED], "This Tasmota device asks for its web password.")
+        accepted = await password_accepted(session, host, password)
+        if accepted is False:
+            raise not_accepted("not accepted (the web page refused it too)")
+        for mode in ("params", "basic"):
+            try:
+                status, body = await ask(mode)
+            except (aiohttp.ClientError, TimeoutError, ValueError):
+                continue
+            if status == 200 and isinstance(body, dict) and not needs_password(status, body):
+                found = TasmotaStatus(body)
+                found.auth_mode = mode
+                return found
+    if accepted:
+        raise refused("HTTP API refused a right password", FlowError(TASMOTA_HTTP_API_OFF, 502))
+    if dropped is not None:
+        raise refused("no answer", did_not_answer(dropped))
+    raise not_accepted("not accepted (/cm refused it every way)")
 
 
 # -- the flows -------------------------------------------------------------------------
@@ -515,6 +647,37 @@ async def adopt_esphome(runtime: Any, finding: dict[str, Any], name: str | None,
                          ) from exc
     except (APIConnectionError, OSError, TimeoutError) as exc:
         raise FlowError(f"The ESPHome node at {host} did not answer: {exc or type(exc).__name__}", 502) from exc
+
+    # hassmic (echo-dot-assist) starts plaintext and asks the controller for its Noise key. A node that
+    # cannot take one at runtime answers None and is added unencrypted; a node that takes one is probed
+    # again with it, so its ConfigEntry only ever holds a key the node itself has accepted.
+    project = str(getattr(device_info, "project_name", "") or "").lower()
+    auto_key = (bool(getattr(device_info, "api_encryption_supported", False))
+                or bool(getattr(device_info, "api_encryption_provisionable", False))
+                or int(getattr(device_info, "voice_assistant_feature_flags", 0) or 0) > 0
+                or "hassmic" in project or "echo-dot-assist" in project
+                or bool(user_input.get("provision_encryption")))
+    if psk is None and auto_key:
+        try:
+            new_psk = await esphome_provision_noise_psk(host, port, password)
+        except (APIConnectionError, OSError, TimeoutError) as exc:
+            raise FlowError(f"Failed to provision encryption key on {label}: "
+                            f"{exc or type(exc).__name__}", 502) from exc
+        hassmic = "hassmic" in project or "echo-dot-assist" in project
+        if new_psk is None and hassmic:
+            raise FlowError(f"{label} did not accept an encryption key. An Echo running echo-dot-assist must be "
+                            "encrypted (its clock, music pairing, updates and Echo network need it); restart it "
+                            "and add it again.", 502)
+        if new_psk is not None:
+            try:
+                device_info, infos = await esphome_probe(host, port, new_psk, password)
+            except Exception as exc:
+                raise FlowError(
+                    f"{label} accepted a new encryption key but did not reconnect with it. Power-cycle the "
+                    "node and add it again; if it keeps answering unencrypted, add it without a key.", 502
+                ) from exc
+            psk = new_psk
+
     mac_colon = str(device_info.mac_address or "").upper()
     mac = norm_mac(mac_colon)
     if mac is None:
@@ -591,6 +754,9 @@ async def adopt_tasmota(runtime: Any, finding: dict[str, Any], name: str | None,
     data: dict[str, Any] = {"host": host, "mac": ":".join(mac[i:i + 2] for i in range(0, 12, 2))}
     if password:
         data.update({"username": "admin", "password": password})
+        mode = getattr(status, "auth_mode", "both")
+        if mode != "both":  # an entry without it sends both, as every entry did before
+            data["auth_mode"] = mode
     entry = ConfigEntry(entry_id=_new_entry_id(), domain="tasmota", title=title, data=data,
                         source="user" if finding.get("source") == "user" else "zeroconf", unique_id=mac_up)
     plan = Plan(hub, entry)

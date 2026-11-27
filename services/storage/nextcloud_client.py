@@ -99,6 +99,7 @@ class NextCloudClient:
                             props["mtime"] = getattr(prop_node.find("d:getlastmodified", ns), "text", None)
                             props["size"] = getattr(prop_node.find("d:getcontentlength", ns), "text", None)
                             props["contenttype"] = getattr(prop_node.find("d:getcontenttype", ns), "text", None)
+                            props["etag"] = getattr(prop_node.find("d:getetag", ns), "text", None)
 
                             resourcetype = prop_node.find("d:resourcetype", ns)
                             if resourcetype is not None and resourcetype.find("d:collection", ns) is not None:
@@ -134,6 +135,35 @@ class NextCloudClient:
             # already knows how to show.
             log.error(f"Failed to list files in {remote_path}: {e}")
             raise
+
+    async def stat(self, remote_path: str, timeout: float = 10.0) -> dict[str, Any] | None:
+        """One file's ``{"etag", "size", "mtime"}`` (a PROPFIND Depth 0), or ``None``.
+
+        What a cache compares to know a file is unchanged without downloading it.
+        ``None`` on any failure: the caller then downloads, as it did before.
+        """
+        url = await self._full_url(remote_path)
+        body = (
+            '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop>'
+            "<d:getetag/><d:getcontentlength/><d:getlastmodified/></d:prop></d:propfind>"
+        )
+        try:
+            async with self.client.request(
+                "PROPFIND", url, data=body, headers={"Depth": "0", "Content-Type": "application/xml"},
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as resp:
+                if resp.status >= 400:
+                    log.info("DAV stat %s: HTTP %s", remote_path, resp.status)
+                    return None
+                items = self._parse_dav_response(await resp.read())
+        except Exception as e:
+            log.info("DAV stat %s failed: %s", remote_path, describe_exc(e))
+            return None
+        if not items:
+            return None
+        props = items[0]["props"]
+        out = {"etag": props.get("etag"), "size": props.get("size"), "mtime": props.get("mtime")}
+        return out if any(out.values()) else None
 
     async def list_entries(self, path: str = "/", recursive: bool = False) -> list[StorageEntry]:
         entries: list[StorageEntry] = []

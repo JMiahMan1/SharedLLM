@@ -252,6 +252,66 @@ def test_device_restarts_reach_the_hub_for_admins_only(client, hub):
     assert client.get("/api/homehub/devices/bad%20id/restarts", headers=ADMIN).status_code == 404
 
 
+def test_tasmota_templates_reach_the_hub_for_admins_only(client, hub):
+    seen, answers = hub
+    for verb, path in (("get", "/api/homehub/tasmota/templates"), ("get", "/api/homehub/tasmota/t1/template"),
+                       ("post", "/api/homehub/tasmota/t1/template"),
+                       ("post", "/api/homehub/tasmota/t1/template/restore")):
+        assert getattr(client, verb)(path, headers=KID).status_code == 403
+        assert getattr(client, verb)(path).status_code == 401
+    assert seen == []
+    answers["/hub/tasmota/templates"] = (200, {"kinds": ["bulb"], "templates": []})
+    client.get("/api/homehub/tasmota/templates?kind=bulb&q=kauf", headers=ADMIN)
+    assert seen[-1] == ("GET", "/hub/tasmota/templates", {"kind": "bulb", "q": "kauf"}, None)
+    assert client.get("/api/homehub/tasmota/templates?kind=DROP%20TABLE", headers=ADMIN).status_code == 400
+    answers["/hub/tasmota/t1/template"] = (200, {"status": "applied", "verified": True})
+    body = {"catalog_id": "kauf-blf15", "confirm": True, "extra": 1}
+    assert client.post("/api/homehub/tasmota/t1/template", headers=ADMIN, json=body).json()["verified"] is True
+    assert seen[-1] == ("POST", "/hub/tasmota/t1/template", None, {"catalog_id": "kauf-blf15", "confirm": True})
+    answers["/hub/tasmota/t1/template/restore"] = (409, {"message": "There is no previous template"})
+    resp = client.post("/api/homehub/tasmota/t1/template/restore", headers=ADMIN, json={"confirm": True})
+    assert resp.status_code == 409 and resp.json()["detail"] == "There is no previous template"
+    assert seen[-1] == ("POST", "/hub/tasmota/t1/template/restore", None, {"confirm": True})
+    assert client.get("/api/homehub/tasmota/bad%20id/template", headers=ADMIN).status_code == 404
+
+
+def test_the_tasmota_pin_finder_and_measured_templates_reach_the_hub_for_admins_only(client, hub):
+    seen, answers = hub
+    for verb, path in (("get", "/api/homehub/tasmota/t1/pinfinder"), ("post", "/api/homehub/tasmota/t1/pinfinder/start"),
+                       ("post", "/api/homehub/tasmota/t1/pinfinder/answer"),
+                       ("post", "/api/homehub/tasmota/t1/pinfinder/cancel"),
+                       ("post", "/api/homehub/tasmota/t1/measured"), ("post", "/api/homehub/tasmota/measured"),
+                       ("delete", "/api/homehub/tasmota/measured/measured-made-up-ab12")):
+        assert getattr(client, verb)(path, headers=KID).status_code == 403
+        assert getattr(client, verb)(path).status_code == 401
+    assert seen == []
+    answers["/hub/tasmota/t1/pinfinder"] = (200, {"status": "idle"})
+    assert client.get("/api/homehub/tasmota/t1/pinfinder", headers=ADMIN).json()["status"] == "idle"
+    answers["/hub/tasmota/t1/pinfinder/start"] = (200, {"status": "asking"})
+    client.post("/api/homehub/tasmota/t1/pinfinder/start", headers=ADMIN,
+                json={"confirm": True, "model": "A1", "kind": "bulb", "extra": 1})
+    assert seen[-1] == ("POST", "/hub/tasmota/t1/pinfinder/start", None, {"confirm": True, "model": "A1", "kind": "bulb"})
+    answers["/hub/tasmota/t1/pinfinder/answer"] = (409, {"message": "That answer was for an earlier question."})
+    resp = client.post("/api/homehub/tasmota/t1/pinfinder/answer", headers=ADMIN,
+                       json={"step": 3, "answer": "dark", "confirm": True})
+    assert resp.status_code == 409 and seen[-1][3] == {"step": 3, "answer": "dark"}
+    assert client.post("/api/homehub/tasmota/t1/pinfinder/reboot", headers=ADMIN, json={}).status_code == 404
+    answers["/hub/tasmota/t1/measured"] = (200, {"status": "saved"})
+    client.post("/api/homehub/tasmota/t1/measured", headers=ADMIN, json={"model": "A1", "template": "{}"})
+    assert seen[-1] == ("POST", "/hub/tasmota/t1/measured", None, {"model": "A1"})
+    answers["/hub/tasmota/measured"] = (200, {"status": "saved"})
+    client.post("/api/homehub/tasmota/measured", headers=ADMIN,
+                json={"device_name": "Den lamp", "model": "A1", "template": "{}", "secret": "x"})
+    assert seen[-1] == ("POST", "/hub/tasmota/measured", None, {"device_name": "Den lamp", "model": "A1",
+                                                                "template": "{}"})
+    answers["/hub/tasmota/measured/measured-made-up-ab12"] = (200, {"status": "deleted"})
+    assert client.delete("/api/homehub/tasmota/measured/measured-made-up-ab12", headers=ADMIN).status_code == 200
+    assert client.delete("/api/homehub/tasmota/measured/..%2Fetc", headers=ADMIN).status_code == 404
+    answers["/hub/tasmota/t1/template"] = (200, {"status": "applied"})
+    client.post("/api/homehub/tasmota/t1/template", headers=ADMIN, json={"measured_id": "measured-a-1", "confirm": True})
+    assert seen[-1][3] == {"measured_id": "measured-a-1", "confirm": True}
+
+
 def test_device_logs_reach_the_hub_for_admins_only(client, hub):
     seen, answers = hub
     for verb, path in (("get", "/api/homehub/devices/dev1/logs"), ("get", "/api/homehub/devices/dev1/logs/stream"),

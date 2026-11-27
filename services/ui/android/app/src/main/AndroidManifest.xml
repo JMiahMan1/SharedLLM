@@ -31,8 +31,21 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <!-- Settings > Nearby & offline with location sharing off: NearbyService
+         (Bluetooth LE), allowed once a Nearby devices permission is granted. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- Bluetooth before Android 12 (API 28-30). From 12 on the Nearby devices
+         permissions below replace them, each asked for only when its feature is
+         turned on (BLUETOOTH_CONNECT: linking a car in Wander). -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <!-- Family nearby (Android 12+): find the family's phones by their rotating
+         advertisement. Never used to derive location (the phone's location comes
+         from location services), so scans need no location permission. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.NFC" />
@@ -441,6 +454,20 @@
             </intent-filter>
         </receiver>
 
+        <!-- Which linked vehicle's Bluetooth is connected, for Wander's trips. Only
+             the hardware addresses of devices linked to a household vehicle are
+             ever sent, with a location fix; never a name. -->
+        <receiver
+            android:name=".VehicleBluetoothReceiver"
+            android:exported="true">
+            <!-- Protected system broadcasts: no other app can send them. -->
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+                <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
+                <action android:name="android.bluetooth.adapter.action.STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".BootReceiver"
             android:exported="true">
@@ -587,6 +614,58 @@
             android:name=".SelfUpdate$Receiver"
             android:exported="false" />
 
+        <!-- The phone's own voice assistant: hears one turn, answers in the person's voice. -->
+        <service
+            android:name=".AssistService"
+            android:exported="false"
+            android:foregroundServiceType="microphone"
+            android:stopWithTask="false" />
+
+        <!-- The ways into the assistant besides the in-app mic: a home-screen
+             widget, a headset/Bluetooth button, the assistant role (long-press
+             home) and a Quick Settings tile. No single one works on every
+             phone, which is why there are four. -->
+        <receiver
+            android:name=".AssistTriggerReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".VoiceAssistWidget"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/voice_assist_widget_info" />
+        </receiver>
+
+        <service
+            android:name=".AssistTileService"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="Jarvis"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <activity
+            android:name=".AssistActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".DropInService"
             android:exported="false"
@@ -608,6 +687,15 @@
             android:name=".LocationTrackingService"
             android:exported="false"
             android:foregroundServiceType="location"
+            android:stopWithTask="false" />
+
+        <!-- Nearby & offline (Bluetooth LE) while location sharing is off; when
+             LocationTrackingService runs it hosts the engine and this stops,
+             so there is never a second notification. -->
+        <service
+            android:name=".NearbyService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"
             android:stopWithTask="false" />
 
         <!-- Activity Recognition transitions (driving, cycling, walking, still)

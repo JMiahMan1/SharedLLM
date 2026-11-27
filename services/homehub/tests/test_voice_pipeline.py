@@ -21,7 +21,7 @@ from services.homehub.core import UNAVAILABLE, HubError, ServiceNotFound
 from services.homehub.drivers import esphome
 from services.homehub.drivers.esphome import ESPHomeDriver
 from services.homehub.tests.conftest import make_hub
-from services.homehub.voice_pipeline import EnergyVAD, PipelineError, VoiceSettings
+from services.homehub.voice_pipeline import NO_WAKE_WORD, EnergyVAD, PipelineError, VoiceSettings
 
 REAL_CURRENT_SETTINGS = voice_pipeline.current_settings
 
@@ -58,6 +58,8 @@ class VoiceClient:
         self.available_wake_words = [("okay_nabu", "Okay Nabu"), ("hey_jarvis", "Hey Jarvis")]
         self.active_wake_words = ["okay_nabu"]
         self.config_error: Exception | None = None
+        self.max_active = 1
+        self.configured: list[list[str]] = []
         VoiceClient.instances.append(self)
 
     async def get_voice_assistant_configuration(self, timeout, external_wake_words=None):
@@ -66,10 +68,11 @@ class VoiceClient:
         return SimpleNamespace(
             available_wake_words=[SimpleNamespace(id=i, wake_word=w, trained_languages=["en"])
                                   for i, w in self.available_wake_words],
-            active_wake_words=list(self.active_wake_words), max_active_wake_words=1)
+            active_wake_words=list(self.active_wake_words), max_active_wake_words=self.max_active)
 
     async def set_voice_assistant_configuration(self, active_wake_words):
         self.active_wake_words = list(active_wake_words)
+        self.configured.append(list(active_wake_words))
 
     async def connect(self, on_stop=None, login=False):
         self.on_stop = on_stop
@@ -207,7 +210,7 @@ def env(monkeypatch):
 def make_driver(flags: int = FULL, options: dict | None = None):
     hub, entry = make_hub("esphome", dict(DATA), ENTITIES, options=options or {})
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: VoiceClient(flags)  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: VoiceClient(flags)  # type: ignore[method-assign]
     hub.drivers[entry.entry_id] = drv
     return hub, drv
 
@@ -378,11 +381,17 @@ async def test_each_failure_is_an_error_event_then_run_end(env, monkeypatch, bac
 async def test_jarvis_taking_too_long_times_out(env, monkeypatch):
     monkeypatch.setenv("HOMEHUB_VOICE_JARVIS_TIMEOUT_S", "0.05")
     monkeypatch.setattr(voice_pipeline, "JARVIS_GUARD_S", 0.0)
-    Backends(ask_delay=2.0).install(monkeypatch)
+    be = Backends(ask_delay=2.0).install(monkeypatch)
     _hub, drv = make_driver()
     await drv.async_setup()
     await run_turn(drv, drv._client, [_tone(0.6), _silence(1.0)])
-    assert (await _error_of(drv))["code"] == "intent-timeout"
+    # The run still ends as a timeout, but the node hears the ask-later line instead of an error chime.
+    run = drv.voice.last_run
+    assert run.outcome == "error" and run.error["code"] == "intent-timeout" and run.timeout_line
+    assert be.spoken == [voice_pipeline.DEFAULT_TIMEOUT_LINE]
+    kinds = drv._client.kinds()
+    assert E.VOICE_ASSISTANT_ERROR not in kinds and kinds[-2:] == [E.VOICE_ASSISTANT_TTS_END,
+                                                                  E.VOICE_ASSISTANT_RUN_END]
     await drv.async_unload()
 
 
@@ -786,8 +795,8 @@ async def test_a_node_that_cannot_report_its_wake_words_says_so(env, monkeypatch
     hub, drv = make_driver()
     original = drv._make_client
 
-    def failing(host):
-        c = original(host)
+    def failing(host, port=None):
+        c = original(host, port)
         c.config_error = RuntimeError("connection reset")
         return c
 
@@ -801,13 +810,85 @@ async def test_a_node_that_cannot_report_its_wake_words_says_so(env, monkeypatch
 
 
 
+async def _settle():
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+
+async def test_a_satellite_that_ignores_the_wake_word_request_is_reconnected(env, monkeypatch):
+    """hassmic takes one voice subscriber; a stale earlier one leaves ours unheard (no wake words, no wake)."""
+    import services.homehub.voice_pipeline as vp
+
+    monkeypatch.setattr(vp, "WAKE_WORD_RECONNECT_S", 0)
+    Backends().install(monkeypatch)
+    _hub, drv = make_driver()
+    original = drv._make_client
+    dropped: list[object] = []
+
+    def ignored(host, port=None):
+        c = original(host, port)
+        c.config_error = TimeoutError("Timeout waiting for VoiceAssistantConfigurationResponse after 10.0s")
+
+        async def disconnect(force=False):
+            dropped.append(c)
+        c.disconnect = disconnect
+        return c
+
+    drv._make_client = ignored  # type: ignore[method-assign]
+    await drv.async_setup()
+    await _settle()
+    assert len(dropped) == 1 and dropped[0] is drv.voice.client
+
+
+async def test_wake_word_reconnects_are_bounded(env, monkeypatch):
+    import services.homehub.voice_pipeline as vp
+
+    monkeypatch.setattr(vp, "WAKE_WORD_RECONNECT_S", 0)
+    Backends().install(monkeypatch)
+    _hub, drv = make_driver()
+    voice = drv.voice
+    voice.wake_word_error = "the node did not report its wake words: timeout"
+    calls = []
+
+    class Client:
+        async def disconnect(self, force=False):
+            calls.append(1)
+
+    for _ in range(vp.WAKE_WORD_RECONNECTS + 2):
+        client = Client()
+        voice.client = client
+        await voice._reconnect_for_wake_words(client)
+    assert len(calls) == vp.WAKE_WORD_RECONNECTS
+
+
+async def test_no_reconnect_when_the_answer_came_or_it_reconnected_meanwhile(env, monkeypatch):
+    import services.homehub.voice_pipeline as vp
+
+    monkeypatch.setattr(vp, "WAKE_WORD_RECONNECT_S", 0)
+    Backends().install(monkeypatch)
+    _hub, drv = make_driver()
+    voice = drv.voice
+    calls = []
+
+    class Client:
+        async def disconnect(self, force=False):
+            calls.append(1)
+
+    old = Client()
+    voice.client, voice.wake_word_error = Client(), "timeout"
+    await voice._reconnect_for_wake_words(old)          # a newer connection is already there
+    voice.client, voice.wake_word_error = old, None
+    await voice._reconnect_for_wake_words(old)          # the wake words arrived
+    assert calls == []
+
+
 async def test_a_wake_word_fixed_in_firmware_is_not_reported_as_missing(env, monkeypatch, caplog):
     Backends().install(monkeypatch)
     hub, drv = make_driver()
     original = drv._make_client
 
-    def fixed(host):
-        c = original(host)
+    def fixed(host, port=None):
+        c = original(host, port)
         c.available_wake_words, c.active_wake_words = [], []
         return c
 
@@ -841,7 +922,7 @@ async def test_a_node_that_asks_for_flac_fetches_the_reply_through_the_ffmpeg_pr
     streamed = []
     monkeypatch.setattr(voice_pipeline.BACKENDS, "clip_audio", lambda url: streamed.append(url) or _wav(24000, 0.1))
     _hub, drv = make_driver(flags=FULL | int(F.SPEAKER))
-    drv._make_client = lambda host: Node(FULL | int(F.SPEAKER))  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: Node(FULL | int(F.SPEAKER))  # type: ignore[method-assign]
     await drv.async_setup()
     client = drv._client
     await run_turn(drv, client, [_silence(0.3), _tone(1.0), _silence(1.0)])
@@ -851,3 +932,48 @@ async def test_a_node_that_asks_for_flac_fetches_the_reply_through_the_ffmpeg_pr
     assert streamed == [URL]  # the original clip, for the hub's own stream
     await drv.async_unload()
     esphome_audio.reset()
+
+
+WAKE2 = "select.test_device_wake_word_2"  # registered by the hub, under the device's own name
+
+
+async def _two_word_driver(monkeypatch, max_active=2):
+    Backends().install(monkeypatch)
+    hub, drv = make_driver()
+    original = drv._make_client
+
+    def two(host, port=None):
+        c = original(host, port)
+        c.max_active = max_active
+        return c
+
+    drv._make_client = two  # type: ignore[method-assign]
+    await drv.async_setup()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    return hub, drv
+
+
+async def test_a_second_wake_word_listens_beside_the_first(env, monkeypatch):
+    hub, drv = await _two_word_driver(monkeypatch)
+    st = hub.states.get(WAKE2)
+    assert st.state == NO_WAKE_WORD and st.attributes["options"] == ["Okay Nabu", "Hey Jarvis", NO_WAKE_WORD]
+    await drv.async_call(hub.entities[WAKE2], "select", "select_option", {"option": "Hey Jarvis"})
+    client = drv.voice.client
+    assert client.configured[-1] == ["okay_nabu", "hey_jarvis"]
+    assert hub.states.get(WAKE).state == "Okay Nabu" and hub.states.get(WAKE2).state == "Hey Jarvis"
+    # changing the first keeps the second
+    await drv.async_call(hub.entities[WAKE], "select", "select_option", {"option": "Hey Jarvis"})
+    assert client.configured[-1] == ["hey_jarvis"]  # the same word in both is one
+    await drv.async_call(hub.entities[WAKE2], "select", "select_option", {"option": "Okay Nabu"})
+    assert client.configured[-1] == ["hey_jarvis", "okay_nabu"]
+    await drv.async_call(hub.entities[WAKE2], "select", "select_option", {"option": NO_WAKE_WORD})
+    assert client.configured[-1] == ["hey_jarvis"]
+
+
+async def test_a_satellite_with_one_wake_word_shows_the_second_unavailable(env, monkeypatch):
+    hub, drv = await _two_word_driver(monkeypatch, max_active=1)
+    st = hub.states.get(WAKE2)
+    assert st.state == UNAVAILABLE and "one wake word at a time" in st.attributes["reason"]
+    with pytest.raises(HubError, match="one wake word at a time"):
+        await drv.voice.set_wake_word("Hey Jarvis", slot=1)

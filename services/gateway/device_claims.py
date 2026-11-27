@@ -12,6 +12,11 @@ Two small guards:
 * ``drop_repeated_request``: a spoken request the person repeats is wanted
   again, so the earlier exchange for the same words is left out of the history the
   model reads (it is still in the stored history).
+* ``retry_note``: seen on 2026-11-24, a voice request was refused ("Voice can't control the office
+  TV"); the owner turned voice control on and asked again in other words, and the model copied the
+  old refusal from the history word for word without calling a tool. When the history holds such a
+  refusal, the question carries a note that permissions and states may have changed and the action
+  must be tried again with a tool call.
 * ``honest_reply``: when the question was a turn on/off command, and the model's
   answer says a device is now on or off (or was turned/switched), but no device
   tool succeeded in this turn, the answer is replaced by what is true: nothing was
@@ -73,6 +78,33 @@ def drop_repeated_request(history: list, query: str) -> list:
     return out
 
 
+#: An earlier answer that refused or failed to act on a device: worth a retry, never worth repeating.
+_REFUSAL = re.compile(
+    r"\b(?:can'?t|cannot|can not|couldn'?t|could not|wasn'?t able to|unable to|not allowed to|isn'?t allowed to)\s+"
+    r"(?:\w+\s+){0,3}?(?:control|find|reach|turn|switch|play|pause|resume|start|stop|use|access)\b"
+    r"|\bnot (?:exposed|permitted)\b|\bvoice can'?t control\b|\bno (?:permission|access) to\b",
+    re.IGNORECASE,
+)
+
+RETRY_NOTE = ("Note: an earlier answer in this conversation said a device could not be controlled or found. "
+              "Device permissions and states may have changed since then. If this question asks for an action, "
+              "call the tool again now; do not answer from the earlier reply.")
+
+
+def refused_before(history: list) -> bool:
+    """Whether an earlier assistant answer in ``history`` refused or failed to act on a device."""
+    return any(
+        isinstance(m, dict) and m.get("role") == "assistant"
+        and (str(m.get("content") or "").startswith(FAILED_PREFIXES) or _REFUSAL.search(str(m.get("content") or "")))
+        for m in history or []
+    )
+
+
+def retry_note(history: list) -> str:
+    """The note a question carries when the history holds an earlier refusal ("" otherwise)."""
+    return RETRY_NOTE if refused_before(history) else ""
+
+
 def tool_succeeded(result: str | None) -> bool:
     return bool(result) and not str(result).startswith(FAILED_PREFIXES)
 
@@ -94,3 +126,53 @@ def honest_reply(query: str, answer: str, device_runs: list[tuple[str, str]]) ->
         first = re.split(r"(?<=[.!?])\s+", reason, maxsplit=1)[0] if reason else ""
         return f"I couldn't turn that {state}, so nothing was switched. {first}".strip()
     return f"I didn't switch anything just now, so I can't say it's {state}. Please ask me again."
+
+
+# --------------------------------------------------------------------------- actions claimed with no tool
+
+#: The one extra instruction when an answer claims an action no tool did (see ``claims_action``).
+NO_TOOL_NUDGE = ("You did not call any tool, so nothing was done. Call the tool now, "
+                 "or say plainly that you could not do it.")
+
+_ACTION_DONE = (r"play(?:ed|ing)?|start(?:ed|ing)|turn(?:ed|ing)\s+(?:\w+\s+){0,4}?(?:on|off)|switch(?:ed|ing)"
+                r"\s+(?:\w+\s+){0,4}?(?:on|off)|set(?:ting)?|search(?:ed|ing)|look(?:ed|ing)\s+up|read(?:ing)?"
+                r"|open(?:ed|ing)|sen(?:t|ding)|add(?:ed|ing)|sav(?:ed|ing)|queu(?:ed|ing)|put(?:ting)?\s+on")
+#: Leading words an assistant puts before what it did ("Okay, playing ...").
+_ACK = r"(?:(?:ok(?:ay)?|sure(?:\s+thing)?|alright|all\s+right|done|got\s+it|you\s+got\s+it|certainly|absolutely)[,.!]?\s+)*"
+_CLAIMED_ACTION = re.compile(
+    rf"^{_ACK}(?:now\s+)?(?:play(?:ing|ed)|start(?:ing|ed)|turn(?:ing|ed)\s|switch(?:ing|ed)\s|setting\s|search(?:ing|ed)\s"
+    rf"|reading\s|open(?:ing|ed)\s|sending\s|sent\s|adding\s|added\s|saving\s|saved\s|queu(?:ing|ed)\s)"
+    rf"|\bi(?:'ve|\s+have|'m|\s+am)?\s+(?:just\s+|now\s+|also\s+)?(?:{_ACTION_DONE})\b"
+    rf"|\b(?:is|are)\s+now\s+(?:playing|on|off|set)\b|\bnow\s+playing\b"
+    rf"|\b(?:has|have)\s+been\s+(?:played|started|turned|switched|set|sent|added|saved|opened|queued)\b"
+    # A level or a check it reports: "Volume is at 50% on Office TV Cast." and "Yes, it's confirmed at
+    # 50%." were both said with no tool call while the TV sat at 31% (2026-11-24).
+    rf"|\bvolume\s+(?:is|'s)\s+(?:now\s+)?(?:at|set\s+to)\s+\d"
+    rf"|\b(?:it|that)(?:'s|\s+is)\s+(?:now\s+)?(?:at|set\s+to)\s+\d+\s*(?:%|percent)"
+    rf"|\bconfirmed\s+(?:at|to\s+be|it(?:'s|\s+is))\b|\bi(?:'ve|\s+have)\s+(?:checked|confirmed|verified)\b"
+    rf"|\bturned\s+(?:it|the\s+volume)\s+(?:up|down)\b",
+    re.IGNORECASE,
+)
+#: A sentence that asks, offers or says it could not: not a claim that something was done.
+_NOT_A_CLAIM = re.compile(
+    r"\b(?:would\s+you|do\s+you\s+want|want\s+me\s+to|shall\s+i|should\s+i|i\s+can|i\s+could|i\s+would"
+    r"|i(?:'ll|\s+will)|if\s+you(?:'d|\s+would)?\s+like|let\s+me\s+know|can't|cannot|couldn't|could\s+not"
+    r"|unable|not\s+able|didn't|did\s+not|haven't|have\s+not|wasn't|was\s+not|won't|don't|do\s+not"
+    r"|i'd\s+be\s+happy|happy\s+to)\b",
+    re.IGNORECASE,
+)
+
+
+def claims_action(answer: str | None) -> bool:
+    """True when ``answer`` says an action was done ("Playing worship music in the office.", "I searched
+    the web..."), as opposed to asking, offering or saying it could not.
+
+    Word lists only, so it costs nothing; the caller asks the model again only when no tool ran.
+    """
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", (answer or "").strip()):
+        s = sentence.strip(" *-\"'")
+        if not s or s.endswith("?") or _NOT_A_CLAIM.search(s):
+            continue
+        if _CLAIMED_ACTION.search(s):
+            return True
+    return False

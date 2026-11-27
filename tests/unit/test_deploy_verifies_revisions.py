@@ -18,11 +18,17 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "deploy_remote.sh"
 
 
-def _function_source() -> str:
+def _source(name: str) -> str:
+    """One shell function, whole, as the script defines it."""
     text = SCRIPT.read_text()
-    start = text.index("verify_deployed_revisions() {")
+    start = text.index(f"{name}() {{")
     end = text.index("\n}\n", start) + len("\n}\n")
     return text[start:end]
+
+
+def _function_source() -> str:
+    """What verification needs: it asks ``built_from`` which paths a service is built from."""
+    return _source("built_from") + "\n" + _source("verify_deployed_revisions")
 
 
 def _git(repo: Path, *args: str) -> str:

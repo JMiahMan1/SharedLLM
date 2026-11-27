@@ -21,6 +21,12 @@ public final class GuardRules {
 
     public enum Action { ALLOW, BLOCK_TAMPER, BLOCK_LOCKED, BLOCK_APP, BLOCK_INSTALL, BLOCK_BYPASS }
 
+    /** Why a screen is a tamper screen (for reports to parents). */
+    public enum TamperReason {
+        UNINSTALL_JARVIS, JARVIS_SETTINGS_PAGE, DEVICE_ADMIN, GUARD_ACCESSIBILITY,
+        VPN_DISCONNECT, FACTORY_RESET_OR_USERS, PRIVATE_DNS, JARVIS_INSTALL
+    }
+
     /**
      * How a blocked window is taken off the screen: going home closes a
      * full-screen app; a split screen is ended first (home alone can leave the
@@ -125,7 +131,7 @@ public final class GuardRules {
                                 boolean filterOn, Collection<String> bypassApps,
                                 boolean kioskMode, Collection<String> kioskApps) {
         return decide(protectedPhone, locked, unlocked, pkg, cls, text, alwaysAllowed, launcher,
-                blockedApps, awaitingApproval, filterOn, bypassApps, kioskMode, kioskApps, false);
+                blockedApps, awaitingApproval, filterOn, bypassApps, kioskMode, kioskApps, false, false);
     }
 
     /**
@@ -143,12 +149,27 @@ public final class GuardRules {
                                 boolean filterOn, Collection<String> bypassApps,
                                 boolean kioskMode, Collection<String> kioskApps,
                                 boolean selfUpdating) {
+        return decide(protectedPhone, locked, unlocked, pkg, cls, text, alwaysAllowed, launcher,
+                blockedApps, awaitingApproval, filterOn, bypassApps, kioskMode, kioskApps,
+                selfUpdating, false);
+    }
+
+    public static Action decide(boolean protectedPhone, boolean locked, boolean unlocked,
+                                String pkg, String cls, String text,
+                                Collection<String> alwaysAllowed, String launcher,
+                                Collection<String> blockedApps, Collection<String> awaitingApproval,
+                                boolean filterOn, Collection<String> bypassApps,
+                                boolean kioskMode, Collection<String> kioskApps,
+                                boolean selfUpdating, boolean installGrace) {
         if (pkg == null || pkg.isEmpty() || unlocked) return Action.ALLOW;
         String lowerText = text == null ? "" : text.toLowerCase(Locale.ROOT);
         String lowerCls = cls == null ? "" : cls.toLowerCase(Locale.ROOT);
 
         if (protectedPhone && selfUpdating && isOwnUpdateScreen(pkg, lowerCls, lowerText)) return Action.ALLOW;
-        if (protectedPhone && isTamperScreen(pkg, lowerCls, lowerText)) return Action.BLOCK_TAMPER;
+        if (protectedPhone && (selfUpdating || installGrace) && isInstallSourceScreen(pkg, lowerCls, lowerText)) return Action.ALLOW;
+        TamperReason reason = tamperReason(pkg, lowerCls, lowerText);
+        boolean isTamper = reason != null && !(reason == TamperReason.PRIVATE_DNS && !filterOn);
+        if (protectedPhone && isTamper) return Action.BLOCK_TAMPER;
         if (protectedPhone && filterOn && FilterBypass.isPrivateDnsScreen(pkg, lowerText)) return Action.BLOCK_TAMPER;
 
         if (exempt(pkg, launcher, alwaysAllowed)) return Action.ALLOW;
@@ -273,23 +294,61 @@ public final class GuardRules {
 
     /** A screen that would uninstall Jarvis or switch its protection off. */
     static boolean isTamperScreen(String pkg, String lowerCls, String lowerText) {
+        return tamperReason(pkg, lowerCls, lowerText) != null;
+    }
+
+    /** Why this screen is a tamper screen, or null when it is not. */
+    static TamperReason tamperReason(String pkg, String lowerCls, String lowerText) {
         boolean namesJarvis = lowerText.contains(APP_LABEL);
         if (VPN_DIALOGS.equals(pkg)) {
-            // "Disconnect" on the web filter; the first-time consent dialog stays open.
-            return lowerCls.contains("manage") || lowerText.contains("disconnect");
+            if (lowerCls.contains("manage") || lowerText.contains("disconnect")) return TamperReason.VPN_DISCONNECT;
+            return null;
         }
         if (INSTALLERS.contains(pkg)) {
-            // The uninstall dialog ("Do you want to uninstall Jarvis OS?").
-            return namesJarvis || lowerCls.contains("uninstall");
+            if (lowerCls.contains("uninstall") || lowerText.contains("uninstall")) {
+                return namesJarvis ? TamperReason.UNINSTALL_JARVIS : null;
+            }
+            if (namesJarvis) return TamperReason.JARVIS_INSTALL;
+            return null;
         }
         if (SETTINGS.contains(pkg)) {
-            // Device admin apps, and any page about Jarvis itself (app info,
-            // its accessibility switch, force stop, clear storage). The guard's
-            // own Accessibility detail page names its service label, not the app.
-            // The factory reset, usage access and Users pages are ways around it.
-            return lowerCls.contains("deviceadmin") || namesJarvis
-                    || lowerText.contains(GUARD_SERVICE_LABEL)
-                    || containsAny(lowerText, TAMPER_TEXTS);
+            if (lowerCls.contains("deviceadmin")) return TamperReason.DEVICE_ADMIN;
+            if (namesJarvis) return TamperReason.JARVIS_SETTINGS_PAGE;
+            if (lowerText.contains(GUARD_SERVICE_LABEL)) return TamperReason.GUARD_ACCESSIBILITY;
+            if (containsAny(lowerText, TAMPER_TEXTS)) return TamperReason.FACTORY_RESET_OR_USERS;
+            if (FilterBypass.isPrivateDnsScreen(pkg, lowerText)) return TamperReason.PRIVATE_DNS;
+            return null;
+        }
+        if (FilterBypass.isPrivateDnsScreen(pkg, lowerText)) return TamperReason.PRIVATE_DNS;
+        return null;
+    }
+
+    /** The parent-facing event name for a tamper reason. */
+    public static String tamperEvent(TamperReason reason) {
+        switch (reason) {
+            case UNINSTALL_JARVIS: return "uninstall_attempt";
+            case JARVIS_SETTINGS_PAGE: return "jarvis_settings_page";
+            case DEVICE_ADMIN: return "device_admin";
+            case GUARD_ACCESSIBILITY: return "guard_accessibility";
+            case VPN_DISCONNECT: return "vpn_disconnect";
+            case FACTORY_RESET_OR_USERS: return "factory_reset_or_users";
+            case PRIVATE_DNS: return "private_dns_attempt";
+            case JARVIS_INSTALL: return "jarvis_install";
+            default: return "uninstall_attempt";
+        }
+    }
+
+    /** Installer or Settings screens that only name Jarvis as an install source. */
+    static boolean isInstallSourceScreen(String pkg, String lowerCls, String lowerText) {
+        boolean namesJarvis = lowerText.contains(APP_LABEL);
+        if (!namesJarvis) return false;
+        if (INSTALLERS.contains(pkg)) {
+            return !(lowerCls.contains("uninstall") || lowerText.contains("uninstall"));
+        }
+        if (SETTINGS.contains(pkg)) {
+            return lowerText.contains("install unknown apps")
+                    || lowerText.contains("allow from this source")
+                    || lowerText.contains("install confirmation");
         }
         return false;
     }

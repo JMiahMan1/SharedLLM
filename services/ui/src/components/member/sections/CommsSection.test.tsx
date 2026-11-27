@@ -7,7 +7,7 @@ import { api } from '../../../services/api';
 
 vi.mock('../../../services/api', async (orig) => {
   const actual = (await orig()) as { api: Record<string, unknown> };
-  return { api: { ...actual.api, getGuardianComms: vi.fn() } };
+  return { api: { ...actual.api, getGuardianComms: vi.fn(), getGuardianCollectorHealth: vi.fn().mockResolvedValue({ devices: [], staleness: {} }) } };
 });
 
 const now = Date.now();
@@ -69,5 +69,25 @@ describe('CommsSection', () => {
     vi.mocked(api.getGuardianComms).mockRejectedValue(Object.assign(new Error('no'), { isAxiosError: true, response: { status: 403 } }));
     renderIt();
     await waitFor(() => expect(screen.getByTestId('member-comms-error')).toHaveTextContent('Only a parent can see calls and messages.'));
+  });
+
+  it('warns the parent when the phone stopped sending calls and texts, and says what is missing', async () => {
+    vi.mocked(api.getGuardianComms).mockResolvedValue({ days: 7, events: [] } as never);
+    vi.mocked(api.getGuardianCollectorHealth).mockResolvedValueOnce({
+      devices: [{ device_id: 'd1', problems: [{ kind: 'permission', what: 'read_call_log' }] }],
+      staleness: { comms: { stale: true, last_at: '2026-11-21T19:00:00+00:00' } },
+    });
+    renderIt();
+    const banner = await screen.findByTestId('member-collection-banner');
+    expect(banner).toHaveTextContent("Taylor's device has not sent texts or calls since Nov 21. Open Jarvis on the device to restart collection.");
+    expect(banner).toHaveTextContent('missing permission for Call log');
+  });
+
+  it('shows no banner when collection is healthy', async () => {
+    vi.mocked(api.getGuardianComms).mockResolvedValue({ days: 7, events: EVENTS } as never);
+    renderIt();
+    await screen.findByTestId('member-comms-totals');
+    await waitFor(() => expect(api.getGuardianCollectorHealth).toHaveBeenCalled());
+    expect(screen.queryByTestId('member-collection-banner')).toBeNull();
   });
 });

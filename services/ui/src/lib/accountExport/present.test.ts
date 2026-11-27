@@ -6,13 +6,15 @@ import { presentExport, type PresentedService } from './present';
 const ID = 987654;
 const sample: Record<string, Record<string, Record<string, unknown>[]>> = {
   identity: {
-    profile: [{ id: ID, username: 'sam', display_name: 'Sam Example', family_role: 'father', birth_date: null, nextcloud_url: 'https://cloud.example.test', nextcloud_user: 'sam', skylight_enabled: true, preferred_tts_voice: 'af_heart' }],
+    profile: [{ id: ID, username: 'sam', display_name: 'Sam Example', family_role: 'father', birth_date: null, nextcloud_url: 'https://cloud.example.test', nextcloud_user: 'sam', skylight_enabled: true, preferred_tts_voice: 'af_heart', book_metadata: '{"google_books_enabled":true,"open_library_email":"sam@example.test","open_library_enabled":false,"order":["open_library","google_books"]}' }],
     avatar_image: [{ username: 'sam', mime: 'image/png', data: { $base64: 'AAAA' }, updated_at: '2026-01-05T10:00:00' }],
     theme: [{ username: 'sam', data: '{"theme_id":"forest","packs":[]}' }],
     weather: [{ username: 'sam', data: '{"units":"metric","follow":true,"location":{"name":"Home farm","latitude":1,"longitude":2}}' }],
     calendar_settings: [{ username: 'sam', data: '{"default_integration":"nextcloud"}' }],
     notification_preferences: [{ username: 'sam', data: '{"media":false,"weather":true}' }],
+    nearby_settings: [{ username: 'sam', data: '{"car":true,"chat":false,"nearby":true,"offline":false}', updated_by: 'sam', updated_at: '2026-01-06T09:00:00+00:00' }],
     activity_sharing: [{ username: 'sam', data: '{"steps":true,"location":false}' }],
+    profile_sharing: [{ username: 'sam', data: '{"areas":["garden","jarvis_use"]}' }],
     dashboard_widgets: [{ id: ID, username: 'sam', widget_key: 'weather_card', visibility: 'visible', order_index: 1, size: 'medium', is_pinned: true, pinned_devices: '[]', config: '{}', updated_at: 1000 }],
     workspace_sessions: [{ id: ID, username: 'sam', workspace_id: 'ws-abc', data: '{"currentPath":"src/app.py","tabs":[{"path":"a"},{"path":"b"}]}', updated_at: '2026-01-06T09:00:00' }],
     workspace_chats: [{ id: 'chat-xyz', workspace_id: 'ws-abc', username: 'sam', title: 'Fix the build', created_at: '2026-01-06T09:00:00', updated_at: '2026-01-06T09:05:00' }],
@@ -122,6 +124,11 @@ describe('presenting an export', () => {
   });
 
   it('reads like the app', () => {
+    const profileFacts = firstItem('identity', 'profile').facts!;
+    expect(profileFacts).toContainEqual({ label: 'Book catalogues', value: 'Google Books on, Open Library off' });
+    expect(profileFacts).toContainEqual({ label: 'Book catalogue order', value: 'Open Library, then Google Books' });
+    expect(profileFacts).toContainEqual({ label: 'Open Library contact', value: 'sam@example.test' });
+    expect(firstItem('identity', 'profile_sharing').detail).toBe('The family may see: Garden, Jarvis use');
     const weights = find('health', 'metrics')!;
     expect(weights.groups.map((g) => g.label)).toEqual(['March 2026', 'February 2026', 'January 2026']);
     expect(weights.groups.reduce((n, g) => n + g.count, 0)).toBe(12);

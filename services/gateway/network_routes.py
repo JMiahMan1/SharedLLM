@@ -109,3 +109,22 @@ async def save_router_settings(request: Request, body: RouterSettings):
 async def check_network(request: Request):
     await _admin(request)
     return await _control_plane("POST", "/check")
+
+
+@router.get("/devices")
+async def network_devices(request: Request):
+    await _admin(request)
+    return await _call("GET", f"{(CONTROL_PLANE_URL or '').rstrip('/')}/api/network/devices")
+
+
+@router.put("/devices/{mac}")
+async def update_network_device(request: Request, mac: str):
+    await _admin(request)
+    body = await request.json()
+    return await _call("PUT", f"{(CONTROL_PLANE_URL or '').rstrip('/')}/api/network/devices/{mac}", json=body)
+
+
+@router.delete("/devices/{mac}")
+async def delete_network_device(request: Request, mac: str):
+    await _admin(request)
+    return await _call("DELETE", f"{(CONTROL_PLANE_URL or '').rstrip('/')}/api/network/devices/{mac}")

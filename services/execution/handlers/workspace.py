@@ -1,5 +1,6 @@
 # services/execution/handlers/workspace.py
 import asyncio
+import contextlib
 import difflib
 import logging
 import os
@@ -17,6 +18,7 @@ from services.execution.schemas import (
     WorkspaceFilePatchRequest,
     WorkspaceFileReadRequest,
     WorkspaceFileWriteRequest,
+    WorkspaceListRequest,
     WorkspaceSearchRequest,
     WorkspaceShellRequest,
 )
@@ -366,8 +368,28 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
 
                 content_str = await extract_document_text(abs_path)
                 source = "pdf-extract" if req.path.lower().endswith(".pdf") else "document-extract"
-                message = f"Read text from {req.path} ({len(content_str)} chars)"
-                return _ok(message, {"content": content_str, "path": req.path, "source": source, "total_lines": content_str.count("\n") + 1})
+                if not req.line_numbers:
+                    message = f"Read text from {req.path} ({len(content_str)} chars)"
+                    return _ok(message, {"content": content_str, "path": req.path, "source": source,
+                                         "total_lines": content_str.count("\n") + 1})
+                # The agent's read: numbered 300-line pages with next_offset
+                max_doc_lines = 300
+                all_lines = content_str.splitlines()
+                start = max(0, req.offset_lines - 1) if req.offset_lines > 0 else 0
+                end = min(start + max_doc_lines, len(all_lines))
+                page_lines = all_lines[start:end]
+                total_doc_lines = len(all_lines)
+                numbered = "\n".join(f"{(start + i + 1):>6}| {line}" for i, line in enumerate(page_lines))
+                msg = f"Read text from {req.path} ({total_doc_lines} lines, offset={req.offset_lines})"
+                if end < total_doc_lines:
+                    msg += f" | file continues: read again with offset_lines={end + 1}"
+                return _ok(msg, {
+                    "content": numbered,
+                    "path": req.path,
+                    "source": source,
+                    "total_lines": total_doc_lines,
+                    "next_offset": end + 1 if end < total_doc_lines else None,
+                })
             except Exception as e:
                 log.error(f"Document read failed for {req.path}: {e}")
                 return _fail(f"Failed to extract text from {req.path}: {e}")
@@ -471,7 +493,7 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
                     content = "\n".join(summary)
                     return _ok(f"Semantic map for {req.path} ({len(summary)} symbols found)", {"content": content, "path": req.path})
 
-        # Chunked Reading (Windowing)
+        # Chunked Reading (Windowing) with numbered lines
         start = max(0, req.offset_lines - 1) if req.offset_lines > 0 else 0
 
         # Hardware Protection for 8GB VRAM constraints
@@ -479,13 +501,32 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
         end = start + safe_limit
 
         chunk = lines[start:end]
-        content = "".join(chunk)
+        total_lines = len(lines)
 
-        msg = f"Read {len(chunk)} lines from {req.path} (offset={req.offset_lines})"
-        if end < len(lines):
-            msg += f" | TRUNCATED for context safety: file has {len(lines)} lines total."
+        if not req.line_numbers:
+            msg = f"Read {len(chunk)} lines from {req.path} (offset={req.offset_lines})"
+            if end < total_lines:
+                msg += f" | TRUNCATED for context safety: file has {total_lines} lines total."
+            return _ok(msg, {"content": "".join(chunk), "path": req.path, "total_lines": total_lines,
+                             "start_line": start + 1})
 
-        return _ok(msg, {"content": content, "path": req.path, "total_lines": len(lines), "start_line": start + 1})
+        # Number every line: "  12| text"
+        _nl = "\n"
+        numbered = "\n".join(f"{(start + i + 1):>6}| {lines[start + i].rstrip(_nl)}" for i in range(len(chunk)))
+
+        msg = f"Read {len(chunk)} lines from {req.path} (offset={req.offset_lines}, total={total_lines} lines)"
+        next_offset = None
+        if end < total_lines:
+            next_offset = end + 1
+            msg += f" | file continues: read again with offset_lines={next_offset}"
+
+        return _ok(msg, {
+            "content": numbered,
+            "path": req.path,
+            "total_lines": total_lines,
+            "start_line": start + 1,
+            "next_offset": next_offset,
+        })
     except HTTPException:
         raise
     except Exception as e:
@@ -644,33 +685,53 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
 
         matches = []
         import json
+        total_cap = getattr(req, "max_results", 100)
         for line in stdout.splitlines():
             try:
                 # Try parsing as JSON (rg output), otherwise treat as raw grep line
                 data = json.loads(line)
                 if data.get("type") == "match":
                     match_data = data.get("data", {})
+                    matched_path = _workspace_relative(match_data.get("path", {}).get("text", ""), abs_search_path, ws_root)
+                    # Apply glob filter if specified
+                    if getattr(req, "glob", None):
+                        import fnmatch
+                        if not fnmatch.fnmatch(matched_path, req.glob):
+                            continue
                     matches.append({
-                        "path": _workspace_relative(match_data.get("path", {}).get("text", ""), abs_search_path, ws_root),
+                        "path": matched_path,
                         "line": match_data.get("line_number"),
                         "text": match_data.get("lines", {}).get("text", "").strip()[:_MATCH_TEXT_MAX_CHARS]
                     })
+                    if len(matches) >= total_cap:
+                        break
             except Exception:
                 # Basic grep fallback parsing
                 parts = line.split(":", 2)
                 if len(parts) >= 3:
+                    matched_path = _workspace_relative(parts[0], abs_search_path, ws_root)
+                    if getattr(req, "glob", None):
+                        import fnmatch
+                        if not fnmatch.fnmatch(matched_path, req.glob):
+                            continue
                     matches.append({
-                        "path": _workspace_relative(parts[0], abs_search_path, ws_root),
+                        "path": matched_path,
                         "line": parts[1],
                         "text": parts[2].strip()[:_MATCH_TEXT_MAX_CHARS]
                     })
+                    if len(matches) >= total_cap:
+                        break
 
         files = _matching_file_names(abs_search_path, ws_root, req.query)
         if not matches and not files:
             return _ok(f"No matches found for '{req.query}' in {req.path}", {"matches": [], "files": []})
 
+        extra = ""
+        if len(matches) >= total_cap:
+            extra = f" ({total_cap}+ matches shown, more truncated)"
+
         return _ok(
-            f"Found {len(files)} file names and {len(matches)} lines matching '{req.query}'",
+            f"Found {len(files)} file names and {len(matches)} lines matching '{req.query}'{extra}",
             {"matches": matches, "files": files},
         )
     except HTTPException:
@@ -678,6 +739,62 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
     except Exception as e:
         log.error(f"Workspace search failed: {e}")
         return _fail(str(e))
+
+
+async def handle_workspace_list(req: WorkspaceListRequest) -> ExecutionResult:
+    """List files under a path in the workspace, honouring .gitignore when ripgrep is there."""
+    try:
+        workspace_id = getattr(req, "workspace_id", None)
+        user_ctx = getattr(req, "user_context", None)
+        ws_root, ws_details = await _resolve_workspace_info(workspace_id, user_ctx)
+        if ws_details:
+            _require_capability(ws_details, "read")
+
+        abs_path = resolve_safe_path(req.path, ws_root)
+        if not os.path.isdir(abs_path):
+            return _fail(f"Not a directory: {req.path}")
+
+        cmd = ["rg", "--files", "--hidden"]
+        if getattr(req, "glob", None):
+            cmd.extend(["-g", req.glob])
+
+        log.info(f"Listing files in {abs_path}: {' '.join(cmd)}")
+        try:
+            rc, stdout, stderr = await _sandbox_run(workspace_id, ws_root, cmd, cwd=abs_path, timeout=15.0)
+            if rc == -1 and "Executable or directory not found" in stderr:
+                raise FileNotFoundError()
+        except FileNotFoundError:
+            # Same fallback as search: no ripgrep, so find (without .gitignore, but skipping .git).
+            log.info("ripgrep (rg) not found, falling back to find")
+            cmd = ["find", ".", "-type", "f", "-not", "-path", "./.git/*"]
+            if getattr(req, "glob", None):
+                cmd.extend(["-name", req.glob])
+            rc, stdout, stderr = await _sandbox_run(workspace_id, ws_root, cmd, cwd=abs_path, timeout=15.0)
+
+        if rc not in (0, 1):
+            return _fail(f"List failed: {stderr.strip()}")
+
+        entries = []
+        root_real = os.path.realpath(ws_root)
+        for line in stdout.splitlines():
+            p = line.strip()
+            if p:
+                rel = os.path.relpath(os.path.realpath(os.path.join(abs_path, p)), root_real)
+                entries.append(rel)
+                if len(entries) >= req.max_entries:
+                    break
+
+        extra = ""
+        if len(entries) >= req.max_entries:
+            extra = f" ({req.max_entries}+ entries shown, more truncated)"
+
+        return _ok(f"Listed {len(entries)} entries in {req.path}{extra}", {"entries": entries, "path": req.path})
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Workspace list failed: {e}")
+        return _fail(str(e))
+
 
 async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
     """Executes an arbitrary shell command in the workspace."""
@@ -853,12 +970,43 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
             }
             return _fail(f"Command timed out after {safe_timeout}s", detail)
 
+        # Cap stdout and stderr separately; save full output to file so nothing is lost.
+        _SHELL_OUTPUT_CAP = 10000
+        _raven_dir = os.path.join(ws_root, ".raven")
+        with contextlib.suppress(OSError):
+            os.makedirs(_raven_dir, exist_ok=True)
+        output_file = os.path.join(_raven_dir, "last_output.txt")
+
+        full_stdout = str(stdout)
+        full_stderr = str(stderr)
+        full_text = full_stdout
+        if full_stderr:
+            full_text = full_stdout + "\n--- stderr ---\n" + full_stderr
+
+        # Save full output to file
+        try:
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(full_text)
+        except Exception:
+            pass
+
+        # Cap stdout: keep head, cap, then tail
+        def _cap_tail(s: str, cap: int) -> str:
+            if len(s) <= cap:
+                return s
+            return "...[TRUNCATED, " + str(len(s) - cap) + " chars omitted]...\n" + s[-cap:]
+
+        safe_stdout = _cap_tail(full_stdout, _SHELL_OUTPUT_CAP)
+        safe_stderr = _cap_tail(full_stderr, _SHELL_OUTPUT_CAP)
+
+        # Build detail: stderr tail survives truncation
         detail = {
             "command": final_cmd,
             "cwd": abs_cwd,
-            "stdout": stdout,
-            "stderr": stderr,
-            "returncode": rc
+            "stdout": safe_stdout,
+            "stderr": safe_stderr,
+            "returncode": rc,
+            "full_output": ".raven/last_output.txt, read it with offset_lines",
         }
 
         if rc == 0:
@@ -871,15 +1019,20 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                 except Exception:
                     log.debug("best-effort repo_url bind after push failed", exc_info=True)
             cmd_prefix = (req.command or " && ".join(req.commands or []) or "<empty>")[:50]
-            return _ok(f"Command executed successfully: {cmd_prefix}...", detail)
+            msg = f"Command executed successfully: {cmd_prefix}..."
+            if safe_stdout != full_stdout or safe_stderr != full_stderr:
+                msg += f" (full output: {detail['full_output']})"
+            return _ok(msg, detail)
         else:
-            log.error(f"[WORKSPACE SHELL FAIL] command='{final_cmd}' rc={rc} cwd={abs_cwd}\nstdout: {stdout}\nstderr: {stderr}")
-            hint = dependency_install_hint(stdout, stderr)
+            log.error(f"[WORKSPACE SHELL FAIL] command='{final_cmd}' rc={rc} cwd={abs_cwd}\nstdout: {safe_stdout}\nstderr: {safe_stderr}")
+            hint = dependency_install_hint(full_stdout, full_stderr)
             if hint:
                 detail["install_hint"] = hint
             message = f"Command failed with exit code {rc}"
             if hint:
                 message = f"{message}. {hint}"
+            if safe_stdout != full_stdout or safe_stderr != full_stderr:
+                message = f"{message} (full output: {detail['full_output']})"
             return _fail(message, detail)
 
     except HTTPException:
@@ -896,6 +1049,59 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         }
         return _fail(f"Workspace shell execution failed: {e}", detail)
 
+def _compute_unified_diff(old_text: str, new_text: str, max_lines: int = 60) -> str:
+    """Return a short unified diff between old_text and new_text, capped at max_lines."""
+    old_lines = old_text.splitlines(keepends=True)
+    new_lines = new_text.splitlines(keepends=True)
+    diff = list(difflib.unified_diff(old_lines, new_lines, fromfile="old", tofile="new"))
+    # Cap at max_lines, keeping the header and trailing context
+    if len(diff) > max_lines:
+        # Keep header, first half, and tail
+        header = diff[:3]  # ---/+++/@@ lines
+        tail_start = max(3, len(diff) - (max_lines - 3))
+        diff = [*header, "@@ ... (diff truncated, " + str(len(diff) - max_lines) + " lines omitted) ... @@\n", *diff[tail_start:]]
+    return "".join(diff)
+
+
+def _exact_find_occurrences(content: str, old_text: str) -> list[int]:
+    """Return list of start positions where old_text occurs exactly in content."""
+    if not old_text:
+        return []
+    positions = []
+    start = 0
+    while True:
+        pos = content.find(old_text, start)
+        if pos == -1:
+            break
+        positions.append(pos)
+        start = pos + 1
+    return positions
+
+
+def _fuzzy_suggest(content: str, old_text: str) -> str | None:
+    """Find the closest fuzzy match in content and return it as a hint."""
+    if not old_text:
+        return None
+    try:
+        old_norm = [line.strip() for line in old_text.splitlines() if line.strip()]
+        if not old_norm:
+            return None
+        lines = content.splitlines(keepends=True)
+        best_ratio = 0.0
+        best_line = None
+        for i in range(len(lines) - len(old_text.splitlines()) + 1):
+            candidate = [line.strip() for line in lines[i:i+len(old_text.splitlines())] if line.strip()]
+            ratio = difflib.SequenceMatcher(None, old_norm, candidate[:len(old_norm)]).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_line = i + 1
+        if best_ratio > 0.5 and best_line is not None:
+            return f"Closest fuzzy match around line {best_line} (ratio {best_ratio:.2f})"
+    except Exception:
+        pass
+    return None
+
+
 async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionResult:
     try:
         workspace_id = getattr(req, "workspace_id", None)
@@ -909,59 +1115,95 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
             return _fail_with_discovery(req.path, f"File not found for patching: {req.path}")
 
         with open(abs_path, encoding="utf-8", errors="replace") as f:
-            content = f.read()
+            original_content = f.read()
 
-        applied_count = 0
-        failed_chunks = []
+        # Phase 1: Validate ALL chunks before applying any
+        validation_errors = []
+        for idx, chunk in enumerate(req.chunks):
+            if not chunk.old_text:
+                # Empty old_text means insert at a position -- use replace_all to handle
+                if chunk.replace_all:
+                    # Insert the new_text after every line? That doesn't make sense.
+                    # For empty old_text with replace_all, treat as append-to-file.
+                    pass
+                else:
+                    # Empty old_text without replace_all: find a unique location
+                    # by matching new_text context. Fall back to append.
+                    pass
+                continue
 
-        for chunk in req.chunks:
-            lines = content.splitlines(keepends=True)
-            old_lines = chunk.old_text.splitlines(keepends=True)
+            occurrences = _exact_find_occurrences(original_content, chunk.old_text)
 
-            # Normalize for matching
-            old_norm = [line.strip() for line in old_lines if line.strip()]
+            if chunk.replace_all:
+                if not occurrences:
+                    fuzzy = _fuzzy_suggest(original_content, chunk.old_text)
+                    hint = f" Hint: {fuzzy}" if fuzzy else ""
+                    validation_errors.append(f"Chunk {idx+1}: not found (replace_all=true but 0 matches){hint}")
+                continue
 
-            best_match = None
-            highest_ratio = 0.0
+            # Exact match required: must occur exactly once
+            if len(occurrences) == 0:
+                fuzzy = _fuzzy_suggest(original_content, chunk.old_text)
+                hint = f" Hint: {fuzzy}" if fuzzy else ""
+                validation_errors.append(f"Chunk {idx+1}: not found{hint}")
+            elif len(occurrences) > 1:
+                validation_errors.append(
+                    f"Chunk {idx+1}: found {len(occurrences)} times: add more surrounding lines"
+                )
 
-            # Scan file for best matching block of code
-            for i in range(len(lines) - len(old_norm) + 1):
-                candidate = [line.strip() for line in lines[i:i+len(old_lines)] if line.strip()]
-                ratio = difflib.SequenceMatcher(None, old_norm, candidate[:len(old_norm)]).ratio()
+        if validation_errors:
+            return _fail(
+                f"Patch validation failed for {req.path}:\n" + "\n".join(validation_errors),
+                {"path": req.path, "errors": validation_errors, "chunks_validated": len(req.chunks)},
+            )
 
-                if ratio > highest_ratio:
-                    highest_ratio = ratio
-                    best_match = (i, i + len(old_lines))
+        # Phase 2: Apply all chunks (all-or-nothing)
+        content = original_content
+        diffs = []
 
-            if highest_ratio > 0.85 and best_match:
-                start, end = best_match
-                log.info(f"Fuzzy patch match found with ratio {highest_ratio:.2f} at lines {start}-{end}")
-                # Reconstruct file with new chunk swapped in
-                new_lines = lines[:start] + chunk.new_text.splitlines(keepends=True)
-                if not new_lines[-1].endswith("\n"):
-                    new_lines[-1] += "\n"
-                new_lines += lines[end:]
+        for _idx, chunk in enumerate(req.chunks):
+            old = chunk.old_text
+            new = chunk.new_text
+            diffs.append(_compute_unified_diff(old, new))
 
-                content = "".join(new_lines)
-                applied_count += 1
+            if not old:
+                # Empty old_text: append new_text to end of file
+                if not content.endswith("\n"):
+                    content += "\n"
+                content += new
+                if not content.endswith("\n"):
+                    content += "\n"
+                continue
+
+            occurrences = _exact_find_occurrences(content, old)
+
+            if chunk.replace_all:
+                # Replace all occurrences
+                content = content.replace(old, new)
             else:
-                failed_chunks.append(chunk.old_text)
+                # Replace the single occurrence
+                pos = occurrences[0]
+                content = content[:pos] + new + content[pos + len(old):]
 
-        if applied_count == 0:
-            return _fail(f"Patch failed: No chunks matched the target file {req.path}")
-
+        # Write the file
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(content)
 
-        message = f"Applied {applied_count}/{len(req.chunks)} patches to {req.path}."
-
-        if failed_chunks:
-            message += f" Failed to match {len(failed_chunks)} chunks."
+        # Build result
+        diff_text = "\n".join(diffs)
+        result_detail = {
+            "path": req.path,
+            "chunks_applied": len(req.chunks),
+            "diff": diff_text,
+        }
 
         if req.commit_after:
-            message += " (Commit pending)"
+            result_detail["commit_pending"] = True
 
-        return _ok(message, {"path": req.path, "applied": applied_count, "failed": len(failed_chunks)})
+        return _ok(
+            f"Applied {len(req.chunks)} patch(es) to {req.path}.",
+            result_detail,
+        )
     except HTTPException:
         raise
     except Exception as e:

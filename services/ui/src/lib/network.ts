@@ -81,6 +81,48 @@ export interface InternetOutage {
   minutes: number;
 }
 
+/** Kinds the device registry accepts (services/control_plane/network_devices.py). */
+export const NETWORK_DEVICE_KINDS = [
+  'phone', 'tablet', 'laptop', 'desktop', 'tv', 'streaming', 'speaker',
+  'smart_home', 'camera', 'printer', 'console', 'network', 'wearable',
+  'other', 'unknown',
+] as const;
+export type NetworkDeviceKind = (typeof NETWORK_DEVICE_KINDS)[number];
+
+/** One row of the device registry, joined with the monitor's live IP/online state. */
+export interface NetworkDevice {
+  mac: string;
+  alias: string | null;
+  kind: NetworkDeviceKind | null;
+  make: string | null;
+  model: string | null;
+  os: string | null;
+  owner: string | null;
+  notes: string | null;
+  first_seen: number | null;
+  last_seen: number | null;
+  private_mac: boolean;
+  /** manual, oui, user_agent, dns or hostname. */
+  kind_source: string | null;
+  make_source: string | null;
+  model_source: string | null;
+  os_source: string | null;
+  ip: string | null;
+  online: boolean;
+  band: string | null;
+}
+
+/** Only the hand-set fields the registry will accept; '' clears one back to detection. */
+export interface NetworkDeviceFields {
+  alias?: string | null;
+  kind?: NetworkDeviceKind | '' | null;
+  make?: string | null;
+  model?: string | null;
+  os?: string | null;
+  owner?: string | null;
+  notes?: string | null;
+}
+
 /** "3 days", "5 hrs", "12 min" for an uptime in seconds. */
 export function formatUptime(seconds: number | undefined): string {
   if (!seconds || seconds < 0) return '';

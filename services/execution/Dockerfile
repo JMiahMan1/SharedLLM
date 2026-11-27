@@ -54,6 +54,23 @@ RUN set -eux; \
     rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION#v}_linux_${GH_ARCH}"; \
     gh --version
 
+# YouTube (play a video on a TV, handlers/video.py): yt-dlp runs YouTube's signature and
+# "n" challenges as JavaScript, so it needs a JS runtime and the solver scripts. Without
+# one every download failed ("No supported JavaScript runtime could be found"). deno is
+# the runtime yt-dlp enables by default; yt-dlp[default] brings the matching yt-dlp-ejs
+# scripts, so nothing is fetched at play time. All three are pinned together: a YouTube
+# player change can need a newer yt-dlp and yt-dlp-ejs, bumped as a pair (checked
+# 2026-11-24: 2026.10.21 failed every "n" challenge, 2026.11.23 + ejs 0.8.0 extracted).
+RUN set -eux; \
+    DENO_VERSION="v2.5.6"; \
+    curl -fsSL --retry 6 --retry-all-errors --retry-delay 10 --connect-timeout 30 \
+      "https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-$(uname -m)-unknown-linux-gnu.zip" \
+      -o /tmp/deno.zip; \
+    python3 -c "import zipfile; zipfile.ZipFile('/tmp/deno.zip').extract('deno', '/usr/local/bin')"; \
+    chmod 0755 /usr/local/bin/deno; rm -f /tmp/deno.zip; deno --version; \
+    pip install --no-cache-dir "yt-dlp[default]==2026.11.23" "yt-dlp-ejs==0.8.0"; \
+    python3 -c "import yt_dlp, yt_dlp_ejs; print('yt-dlp', yt_dlp.version.__version__)"
+
 # Install Playwright Chromium browser and system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation \
@@ -132,6 +149,11 @@ RUN python3 -c \
 RUN pip install --no-cache-dir "librosa==0.11.0" "scipy==1.17.1" "webrtcvad-wheels==2.0.14.post1" \
     && pip install --no-cache-dir --no-deps "resemblyzer==0.1.4" \
     && python3 -c "from resemblyzer import VoiceEncoder; VoiceEncoder('cpu', verbose=False)"
+
+# WebReadRequest / StorageFileReadRequest (services/execution/pdf_text.py):
+# PDF text with pypdf, and a web page's main article with trafilatura.
+RUN pip install --no-cache-dir "pypdf==6.21.4" "trafilatura==2.4.0" \
+    && python3 -c "import pypdf, trafilatura"
 
 # Per-commit layers last: the build stamp and the source (~14 MB).
 ARG GIT_SHA=unknown

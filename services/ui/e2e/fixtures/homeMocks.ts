@@ -316,6 +316,44 @@ function logbook(areaId: string | null) {
   return { entries: inArea ? rows.filter((r) => inArea.has(r.entity_id)) : rows, truncated: false };
 }
 
+/** The hold music setting as the hub answers it: the game-show clip, the default lines, no upload. */
+function holdMusicSettings() {
+  return {
+    source: 'gameshow' as string,
+    sources: [{ id: 'gameshow', label: 'Game-show thinking' }, { id: 'builtin', label: 'Built-in tune' },
+      { id: 'upload', label: 'Upload your own' }],
+    lines: [] as string[],
+    upload: null as null | { name: string; type: string; seconds: number; bytes: number; uploaded_at: number },
+    limits: { types: ['wav', 'mp3', 'ogg', 'm4a'], max_bytes: 5 * 1024 * 1024, max_seconds: 60, max_lines: 20, max_line_chars: 160 },
+  };
+}
+
+/** A write to the hold music setting, or null for any other path. An upload is "decoded" by its file name. */
+function holdMusicAnswer(state: ReturnType<typeof holdMusicSettings>, method: string, path: string, body: unknown,
+  raw: Buffer | null): { status: number; body: unknown } | null {
+  if (path === '/api/homehub/voice/hold-music' && method === 'PUT') {
+    const b = (body ?? {}) as { source?: string; lines?: string[] };
+    if (b.source) state.source = b.source;
+    if (b.lines) state.lines = b.lines;
+    return { status: 200, body: state };
+  }
+  if (path === '/api/homehub/voice/hold-music/clip' && method === 'POST') {
+    const name = /filename="([^"]+)"/.exec(raw?.toString('latin1') ?? '')?.[1] ?? 'clip.wav';
+    if (name.startsWith('too-long')) {
+      return { status: 400, body: { detail: 'The clip is longer than 60 s; trim it and upload it again' } };
+    }
+    state.upload = { name, type: name.split('.').pop() ?? 'wav', seconds: 24.5, bytes: raw?.length ?? 0, uploaded_at: 1 };
+    state.source = 'upload';
+    return { status: 200, body: state };
+  }
+  if (path === '/api/homehub/voice/hold-music/clip' && method === 'DELETE') {
+    state.upload = null;
+    if (state.source === 'upload') state.source = 'gameshow';
+    return { status: 200, body: state };
+  }
+  return null;
+}
+
 export interface HomeMocks {
   unmocked: string[];
   posts: Array<{ path: string; body: unknown }>;
@@ -349,6 +387,8 @@ export interface HomeOptions {
 /** Answer every server call for the home pages as `role`. */
 export async function mockHome(page: Page, role: Role, options: HomeOptions = {}): Promise<HomeMocks> {
   const unmocked: string[] = [];
+  // Settings > Nearby & offline per person, changed by PUTs so a switch stays where it was put.
+  const nearbySettings: Record<string, Record<string, boolean>> = {};
   // The Rooms page's answer, changed by room writes so a room added, renamed or removed shows on the next read.
   const rooms = structuredClone(options.rooms ?? ROOMS);
   const posts: HomeMocks['posts'] = [];
@@ -366,6 +406,8 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
   // The to-do lists, changed by the page's writes so the next read shows them.
   const lists = todoLists();
   const listOf = (id: string) => lists.find((l) => l.entity_id === id);
+  // Devices > Setup > Voice hold music: the hub's setting, changed by the page's writes.
+  const holdMusic = holdMusicSettings();
   await page.addInitScript((p) => {
     localStorage.setItem('jarvis_api_key', 'test-key');
     localStorage.setItem('jarvis_user', JSON.stringify(p));
@@ -382,12 +424,17 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
       let body: unknown;
       try { body = request.postDataJSON(); } catch { body = null; }
       posts.push({ path: p, body });
+      const hold = holdMusicAnswer(holdMusic, method, p, body, request.postDataBuffer());
+      if (hold) return json(hold.body, hold.status);
       const registry = registries.answer(method, p, body);
       if (registry) {
         mirrorRoomWrite(rooms, method, p, body, registry);
         return json(registry.body, registry.status);
       }
       if (p === '/api/homehub/climate/hold' || p === '/api/homehub/climate/resume') return json(SCHEDULED_THERMOSTAT);
+      if (/^\/api\/network\/devices\/[^/]+$/.test(p) && (method === 'PUT' || method === 'DELETE')) {
+        return json({ status: method === 'PUT' ? 'updated' : 'forgotten' });
+      }
       if (method === 'POST' && p === '/api/garden/profile/detect-zone') {
         return json({ zone: '6b', zone_source: 'auto', latitude: 36, longitude: -86.8,
           last_spring_frost_mmdd: '04-15', first_fall_frost_mmdd: '10-15',
@@ -498,6 +545,9 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     if (p === '/api/info') return json({ service: 'jarvis-ui', version: 'e2e', git_sha: 'e2e' });
 
     // The home pages.
+    // The Devices page's Echo fleet card (EchoFleetPanel) reads the hub's entity list; no Echo
+    // nodes are adopted in this made-up house, so the card shows its empty state.
+    if (p === '/api/entities') return json({ entities: [] });
     if (p === '/api/dashboard/rooms') return json(rooms);
     if (p === '/api/dashboard/climate') return json({ thermostats: [DASH_THERMOSTAT] });
     if (p === '/api/dashboard/history') return json({ series: {} });
@@ -596,6 +646,24 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     if (p === '/api/network/usage') return json({ hours: 24, devices: [], networks: [], series: [], bucket: 'hour', source: 'nlbw' });
     if (p === '/api/network/log') return json({ lines: [], source: 'forwarded' });
     if (p === '/api/network/outages') return json({ days: 30, outages: [] });
+    // The device registry behind Admin > Network's Devices list and editor.
+    if (p === '/api/network/devices') {
+      const nowSeconds = NOW.getTime() / 1000;
+      return json({ devices: [
+        { mac: '02:00:00:00:00:01', alias: 'Desk lamp', kind: 'smart_home', make: 'Example Make', model: 'Model A', os: null,
+          owner: 'parent', notes: null, first_seen: nowSeconds - 30 * 86400, last_seen: nowSeconds - 20, private_mac: false,
+          kind_source: 'manual', make_source: 'dns', model_source: 'dns', os_source: null,
+          ip: '192.168.10.11', online: true, band: '2.4 GHz' },
+        { mac: '02:00:00:00:00:02', alias: null, kind: 'phone', make: 'Test Make', model: 'Handset', os: 'TestOS',
+          owner: null, notes: null, first_seen: nowSeconds - 2 * 86400, last_seen: nowSeconds - 600, private_mac: true,
+          kind_source: 'user_agent', make_source: 'user_agent', model_source: 'user_agent', os_source: 'dns',
+          ip: '192.168.10.12', online: false, band: null },
+        { mac: '02:00:00:00:00:03', alias: null, kind: null, make: null, model: null, os: null,
+          owner: null, notes: null, first_seen: nowSeconds - 3 * 86400, last_seen: null, private_mac: false,
+          kind_source: null, make_source: null, model_source: null, os_source: null,
+          ip: null, online: false, band: null },
+      ] });
+    }
     if (p === '/api/network/sites/devices') {
       const now = Date.now() / 1000;
       return json({ hours: Number(url.searchParams.get('hours') || 24), receiving: true, devices: [
@@ -658,7 +726,18 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     if (p === '/api/homehub/flows') return json({ flows: FLOWS });
     if (p === '/api/homehub/phones') return json(PHONES);
     if (p === '/api/homehub/phones/settings') return json(PHONES.settings);
+    if (p === '/api/homehub/voice/hold-music') return json(holdMusic);
     if (p === '/api/homehub/bluetooth/map') return json(ROOM_MAP);
+    // Room detection > Bluetooth listeners: the server's adapter with no room yet, and one proxy in the kitchen.
+    if (p === '/api/homehub/bluetooth/listeners') {
+      return json({
+        host_adapter: { configured: '00:11:22:33:44:55', enabled: true, reason: null },
+        scanners: [
+          { id: 'bluez_001122334455', name: null, area_id: null, online: true, advertisements: 41210 },
+          { id: 'esphome_aabbccddeeff', name: 'Kitchen display', area_id: 'kitchen', online: true, advertisements: 9120 },
+        ],
+      });
+    }
     if (p.startsWith('/api/homehub/bluetooth/map/sessions/')) {
       return json({ status: 'done', samples: 58, scanners_heard: 3, seconds_left: 0 });
     }
@@ -777,6 +856,20 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     }
     if (p === '/api/garden/species') {
       return json({ category: null, usda_zone: null, count: 0, results: [], seed_present: true });
+    }
+    // Settings > Nearby & offline (and Guardian's card for a child): a child's are their parents' to set.
+    const nearbyUser = p.match(/^\/api\/users\/([^/]+)\/nearby-settings$/)?.[1];
+    if (nearbyUser) {
+      const self = nearbyUser === 'me' || nearbyUser === profile.username;
+      const minor = self ? profile.is_minor === true : !['parent', 'robin'].includes(nearbyUser);
+      const key = self ? String(profile.username) : nearbyUser;
+      const saved = (nearbySettings[key] ??= { nearby: false, chat: false, offline: false, car: true, mine: false });
+      if (method === 'PUT') {
+        const body = (request.postDataJSON() ?? {}) as { settings?: Record<string, boolean> };
+        Object.assign(saved, body.settings ?? {});
+      }
+      return json({ username: key, settings: { ...saved }, managed_by_parent: minor,
+        can_change: self ? !minor : minor && role === 'admin', always_on: minor ? ['parent_link'] : [] });
     }
     // No deploy under way (the "Jarvis is updating" flag, served from a file: 404 when there is none).
     if (p === '/api/deploy-status') return route.fulfill({ status: 404, body: '' });

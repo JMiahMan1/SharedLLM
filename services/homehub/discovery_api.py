@@ -112,4 +112,10 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
         except HubError as exc:
             return flow_failure(exc)
 
+    @router.get("/api/network/mdns")
+    async def mdns_identities(request: Request) -> dict[str, Any]:
+        admin(request)
+        devices = manager().mdns_identities()
+        return {"devices": devices, "count": len(devices)}
+
     return router

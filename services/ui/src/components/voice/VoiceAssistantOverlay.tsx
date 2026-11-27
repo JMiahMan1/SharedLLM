@@ -1,60 +1,124 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useVoiceAssistant } from '../../hooks/useVoiceAssistant';
-import { X, Mic, Loader2 } from 'lucide-react';
-import { api } from '../../services/api';
-import toast from 'react-hot-toast';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Capacitor } from '@capacitor/core';
+import { Keyboard, Loader2, Mic, Send, Sparkles, Square, X } from 'lucide-react';
+import { JarvisAssist, askJarvis, type AssistEvent, type AssistState } from '../../plugins/jarvisAssist';
 
-interface VoiceAssistantOverlayProps {
+/**
+ * Ask Jarvis, out loud.
+ *
+ * One screen, one orb, no chrome. The orb is the assistant: it breathes while it
+ * waits, swells with your voice while it listens, turns while it thinks and
+ * sends out rings while it talks. What it heard sits above what it is saying, so
+ * a misheard question is obvious at a glance instead of a mystery.
+ *
+ * The turn itself runs on the household's own server - the phone records a
+ * question, the gateway hears it, answers it, and the sentence being spoken is
+ * synthesised while the next is still being written. Nothing leaves the house.
+ */
+interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onCommand?: (transcript: string) => void;
   userId?: string;
 }
 
-const VoiceAssistantOverlay = ({ isOpen, onClose, onCommand, userId }: VoiceAssistantOverlayProps) => {
-  const { state, activate, deactivate, startAudioVisualization, stopAudioVisualization } = useVoiceAssistant();
-  const [bars, setBars] = useState<number[]>(Array.from({ length: 32 }, () => 0));
-  const [processing, setProcessing] = useState(false);
+export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props) {
+  const [state, setState] = useState<AssistState>('idle');
+  const [level, setLevel] = useState(0);
+  const [heard, setHeard] = useState('');
+  const [said, setSaid] = useState('');
+  const [error, setError] = useState('');
+  /** A one-line diagnostic (microphone granted or blocked), so silence explains itself. */
+  const [note, setNote] = useState('');
+  const [typing, setTyping] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [roleOffer, setRoleOffer] = useState(false);
+  const native = Capacitor.isNativePlatform();
+  const scroller = useRef<HTMLDivElement | null>(null);
 
+  // What the service reports, however it is running (native plugin or this page).
   useEffect(() => {
-    if (state.isActive) {
-      startAudioVisualization((frequencies) => {
-        setBars(frequencies);
-      });
-    } else {
-      stopAudioVisualization();
-    }
-  }, [state.isActive, startAudioVisualization, stopAudioVisualization]);
-
-  useEffect(() => {
-    if (isOpen) {
-      activate();
-    } else {
-      deactivate();
-    }
-  }, [isOpen, activate, deactivate]);
-
-  const handleSubmit = useCallback(async () => {
-    if (!state.transcript.trim()) return;
-    setProcessing(true);
-    try {
-      if (userId) {
-        const result = await api.executeVoiceCommand(state.transcript, userId);
-        if (result.status === 'SUCCESS') {
-          toast.success(`Voice command executed: "${state.transcript}"`);
-        } else {
-          toast.error(result.message || 'Command failed');
-        }
+    if (!isOpen) return;
+    let remove: (() => void) | undefined;
+    void JarvisAssist.addListener('assist', (event: AssistEvent) => {
+      if (event.type === 'state' && event.text) setState(event.text as AssistState);
+      if (event.type === 'level') setLevel(typeof event.level === 'number' ? event.level : 0);
+      if (event.type === 'transcript' && event.text) {
+        setHeard(event.text);
       }
-      onCommand?.(state.transcript);
-    } catch {
-      toast.error('Failed to execute voice command');
-    } finally {
-      setProcessing(false);
-      onClose();
-    }
-  }, [state.transcript, onCommand, onClose, userId]);
+      if (event.type === 'sentence' && event.text) setSaid((prev) => (prev ? `${prev} ${event.text}` : String(event.text)));
+      if (event.type === 'reply' && event.text) setSaid(event.text);
+      if (event.type === 'status' && event.text) setNote(event.text);
+      if (event.type === 'error') {
+        setError(event.text || 'That did not work.');
+        setState('idle');
+      }
+    }).then((handle) => {
+      remove = () => void handle.remove();
+    });
+    return () => remove?.();
+  }, [isOpen]);
+
+  // A new turn starts as the sheet opens.
+  useEffect(() => {
+    if (!isOpen) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- opening the sheet is a deliberate
+       reset of the turn before it; it runs once per open, never in a render loop. */
+    setError('');
+    setNote('');
+    setHeard('');
+    setSaid('');
+    setLevel(0);
+    setState('listening');
+    /* eslint-enable react-hooks/set-state-in-effect */
+    void JarvisAssist.start({ wake: false }).catch(() => {
+      setState('idle');
+      setTyping(true);
+      setError('This device will not open the microphone. Type instead.');
+    });
+  }, [isOpen]);
+
+  // Ask once whether this phone could hand us the assistant role.
+  useEffect(() => {
+    if (!isOpen || !native) return;
+    void JarvisAssist.assistantRole()
+      .then((role) => {
+        if (role.canHold && !role.held) setRoleOffer(true);
+      })
+      .catch(() => {});
+  }, [isOpen, native]);
+
+  useEffect(() => {
+    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' });
+  }, [said]);
+
+  const close = () => {
+    void JarvisAssist.stop();
+    onClose();
+  };
+
+  const send = async (text: string) => {
+    const question = text.trim();
+    if (!question) return;
+    setDraft('');
+    setError('');
+    setSaid('');
+    // The typed question runs the spoken turn, so it answers out loud the same
+    // way a microphone turn does (and is cut off by the same stop button).
+    await askJarvis(question, userId);
+  };
+
+  const speaking = state === 'speaking';
+  const thinking = state === 'thinking';
+  const listening = state === 'listening';
+  const swell = listening ? 1 + Math.min(level, 100) / 260 : speaking ? 1.06 : 1;
+
+  const words: Record<AssistState, string> = {
+    idle: 'Ask me anything',
+    listening: 'Listening',
+    thinking: 'Thinking',
+    speaking: 'Speaking',
+  };
 
   return (
     <AnimatePresence>
@@ -63,90 +127,173 @@ const VoiceAssistantOverlay = ({ isOpen, onClose, onCommand, userId }: VoiceAssi
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-3xl"
+          transition={{ duration: 0.18 }}
+          className="fixed inset-0 z-[100] flex flex-col overflow-hidden text-white"
+          style={{ background: 'var(--color-bg-base, #0b0d12)' }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Ask Jarvis"
         >
-          <motion.div
-            initial={{ scale: 0.9, y: 20, opacity: 0 }}
-            animate={{ scale: 1, y: 0, opacity: 1 }}
-            exit={{ scale: 0.9, y: 20, opacity: 0 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 250 }}
-            className="flex flex-col items-center gap-6 w-full max-w-md px-6 relative"
-          >
-            <button
-              onClick={onClose}
-              className="absolute top-0 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
-            >
-              <X size={20} className="text-white" />
-            </button>
+          {/* the accent glow: the only light in the room */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                'radial-gradient(60% 45% at 50% 34%, color-mix(in srgb, var(--site-accent, #8b5cf6) 26%, transparent) 0%, transparent 70%)',
+            }}
+          />
 
-            <div className="flex flex-col items-center gap-2 mt-8">
-              <div className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 ${
-                processing
-                  ? 'bg-cyan-500/30 border-2 border-cyan-400/50 shadow-lg shadow-cyan-500/20'
-                  : state.isListening
-                  ? 'bg-purple-500/30 border-2 border-purple-400/50 shadow-lg shadow-purple-500/20'
-                  : state.isSpeaking
-                  ? 'bg-cyan-500/30 border-2 border-cyan-400/50 shadow-lg shadow-cyan-500/20'
-                  : 'bg-white/10 border-2 border-white/20'
-              }`}>
-                {processing ? (
-                  <Loader2 size={32} className="text-cyan-400 animate-spin" />
-                ) : state.isListening ? (
-                  <Mic size={32} className="text-purple-400 animate-pulse" />
-                ) : state.isSpeaking ? (
-                  <Loader2 size={32} className="text-cyan-400 animate-spin" />
+          <div className="relative flex items-center justify-between px-[calc(1rem+var(--safe-left))] pt-[calc(0.75rem+var(--safe-top))] pr-[calc(1rem+var(--safe-right))]">
+            <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.28em] text-white/40">
+              <Sparkles size={12} /> Jarvis
+            </span>
+            <button
+              onClick={close}
+              aria-label="Close"
+              className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          {/* the orb */}
+          <div className="relative flex flex-1 flex-col items-center justify-center gap-8 px-6">
+            <div className="relative grid place-items-center">
+              {speaking &&
+                [0, 0.35, 0.7].map((delay) => (
+                  <motion.span
+                    key={delay}
+                    aria-hidden
+                    className="absolute h-44 w-44 rounded-full border border-white/15"
+                    initial={{ scale: 0.9, opacity: 0.5 }}
+                    animate={{ scale: 2.1, opacity: 0 }}
+                    transition={{ duration: 2.4, repeat: Infinity, delay, ease: 'easeOut' }}
+                  />
+                ))}
+              <motion.div
+                aria-hidden
+                className="absolute h-44 w-44 rounded-full blur-2xl"
+                style={{ background: 'var(--site-accent, #8b5cf6)', opacity: speaking ? 0.55 : 0.35 }}
+                animate={{ scale: swell * 1.05 }}
+                transition={{ type: 'spring', stiffness: 120, damping: 18 }}
+              />
+              <motion.div
+                className="relative grid h-44 w-44 place-items-center rounded-full shadow-2xl"
+                style={{
+                  background:
+                    'radial-gradient(circle at 34% 28%, rgba(255,255,255,0.92) 0%, var(--site-accent, #8b5cf6) 46%, rgba(9,11,16,0.92) 100%)',
+                }}
+                animate={{ scale: swell, rotate: speaking ? [0, 4, -4, 0] : 0 }}
+                transition={
+                  speaking
+                    ? { rotate: { duration: 2.6, repeat: Infinity, ease: 'easeInOut' }, scale: { type: 'spring', stiffness: 120, damping: 18 } }
+                    : { type: 'spring', stiffness: 120, damping: 18 }
+                }
+              >
+                {thinking ? (
+                  <Loader2 size={40} className="animate-spin text-white/90" />
+                ) : listening ? (
+                  <Mic size={40} className="text-white/95" />
                 ) : (
-                  <Mic size={32} className="text-slate-400" />
+                  <Sparkles size={36} className="text-white/90" />
+                )}
+              </motion.div>
+            </div>
+
+            <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-white/45">{words[state]}</p>
+            {note && !error && (
+              <p className="text-[10px] uppercase tracking-[0.22em] text-white/25">{note}</p>
+            )}
+
+            {(heard || said) && (
+              <div
+                ref={scroller}
+                className="max-h-[34vh] w-full max-w-md space-y-3 overflow-y-auto text-center [scrollbar-width:none]"
+              >
+                {heard && <p className="text-2xl font-medium leading-snug text-white/95">{heard}</p>}
+                {said && (
+                  <p aria-live="polite" className="text-base leading-relaxed text-white/70">
+                    {said}
+                  </p>
                 )}
               </div>
-              <p className="text-sm text-slate-400">
-                {processing ? 'Executing...' : state.isListening ? 'Listening...' : state.isSpeaking ? 'Processing...' : 'Tap to speak'}
+            )}
+          </div>
+
+          {/* controls */}
+          <div className="relative flex flex-col items-center gap-3 px-6 pb-[calc(1.5rem+var(--safe-bottom))]">
+            {error && (
+              <p className="rounded-full border border-amber-300/30 bg-amber-400/10 px-4 py-2 text-center text-sm text-amber-100">
+                {error}
               </p>
-            </div>
-
-            <div className="w-full h-24 flex items-center justify-center gap-1">
-              {bars.map((height, i) => (
-                <div
-                  key={i}
-                  className="w-1 rounded-full bg-gradient-to-t from-purple-500 to-cyan-400 transition-all duration-75"
-                  style={{
-                    height: `${Math.max(4, height)}%`,
-                    opacity: 0.4 + (height / 100) * 0.6,
+            )}
+            {native && roleOffer && (
+              <p className="text-center text-xs text-white/40">
+                Hold your home button and talk to me:{' '}
+                <button
+                  onClick={() => {
+                    void JarvisAssist.requestAssistantRole().finally(() => setRoleOffer(false));
                   }}
-                />
-              ))}
-            </div>
+                  className="text-white/70 underline underline-offset-2"
+                >
+                  make Jarvis your assistant
+                </button>
+              </p>
+            )}
 
-            {state.transcript && (
-              <div className="w-full glass-panel p-4 min-h-[60px]">
-                <p className="text-sm text-slate-300 text-center">{state.transcript}</p>
+            {typing ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void send(draft);
+                }}
+                className="flex w-full max-w-md items-center gap-2"
+              >
+                <input
+                  autoFocus
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="Ask in writing…"
+                  aria-label="Ask in writing"
+                  className="h-12 flex-1 rounded-full border border-white/10 bg-white/5 px-5 text-base text-white placeholder:text-white/35 focus:border-white/25 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  aria-label="Send"
+                  className="grid h-12 w-12 place-items-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+                >
+                  <Send size={18} />
+                </button>
+              </form>
+            ) : (
+              <div className="flex items-center gap-5">
+                <button
+                  onClick={() => setTyping(true)}
+                  aria-label="Type instead"
+                  className="grid h-16 w-16 place-items-center rounded-full border border-white/10 bg-white/5 text-white/65 transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  <Keyboard size={22} />
+                </button>
+                <button
+                  onClick={() => (speaking ? void JarvisAssist.stopSpeaking() : close())}
+                  aria-label={speaking ? 'Stop talking' : 'Stop listening'}
+                  className="grid h-20 w-20 place-items-center rounded-full bg-white text-[#0b0d12] shadow-xl transition-transform active:scale-95"
+                >
+                  <Square size={26} fill="currentColor" />
+                </button>
+                <button
+                  onClick={() => void JarvisAssist.start({ wake: false })}
+                  aria-label="Ask again"
+                  className="grid h-16 w-16 place-items-center rounded-full border border-white/10 bg-white/5 text-white/65 transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  <Mic size={22} />
+                </button>
               </div>
             )}
-
-            {state.error && (
-              <p className="text-sm text-red-400 text-center">{state.error}</p>
-            )}
-
-            <div className="flex gap-4 w-full">
-              <button
-                onClick={onClose}
-                className="flex-1 py-3 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={!state.transcript.trim() || processing}
-                className="flex-1 py-3 rounded-xl bg-purple-500/30 border border-purple-500/30 text-white font-medium hover:bg-purple-500/40 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                {processing ? 'Executing...' : 'Send'}
-              </button>
-            </div>
-          </motion.div>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>
   );
-};
-
-export default VoiceAssistantOverlay;
+}

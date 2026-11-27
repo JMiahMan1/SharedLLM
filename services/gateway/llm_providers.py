@@ -9,7 +9,7 @@ from typing import Any
 
 import aiohttp
 
-from services.common.backend_health import is_unreachable
+from services.common.backend_health import is_suspect, is_unreachable
 from services.gateway import local_ai
 from services.gateway.config import OLLAMA_SLOT_POLL_INTERVAL, OLLAMA_SLOT_POLL_MAX
 
@@ -154,7 +154,22 @@ class OllamaProvider(BaseLLMProvider):
         except Exception as e:
             if is_unreachable(e):
                 raise
+            await self._confirm_ready(e)
         return None
+
+    async def _confirm_ready(self, exc: BaseException) -> None:
+        """The proxy could not even list its models in time: ask whether its model server is there.
+
+        The proxy answers ``/api/ps`` only after reaching llama-server, so a status
+        read that times out is either a busy moment or a proxy waiting on a server
+        that is gone (a GPU box rebooted without its GPU: the chat after it waited
+        54 s). The breaker's readiness probe tells them apart in milliseconds; if
+        the proxy says its server is unreachable, this call fails fast instead.
+        """
+        if not is_suspect(exc):
+            return
+        if not await asyncio.to_thread(local_ai.LLM.confirm, f"{type(exc).__name__} reading {self.base_url}/api/ps"):
+            raise local_ai.LLM.unavailable() from exc
 
     async def _wait_for_model(self, client: aiohttp.ClientSession, model: str) -> bool:
         """Poll /api/ps until the target model appears in loaded models.
@@ -181,6 +196,7 @@ class OllamaProvider(BaseLLMProvider):
         except Exception as e:
             if is_unreachable(e):
                 raise  # the machine is off: no point "proceeding anyway"
+            await self._confirm_ready(e)
         return False
 
     async def _wait_for_slot(self, client: aiohttp.ClientSession, model: str = "") -> bool:
@@ -225,7 +241,8 @@ class OllamaProvider(BaseLLMProvider):
         except Exception as e:
             if is_unreachable(e):
                 raise  # the machine is off: no point "proceeding anyway"
-            log.warning(f"[OllamaProvider] Could not check slots ({e}), proceeding anyway")
+            await self._confirm_ready(e)
+            log.warning(f"[OllamaProvider] Could not check slots ({e!r}), proceeding anyway")
             return True
 
     async def generate(
@@ -260,12 +277,26 @@ class OllamaProvider(BaseLLMProvider):
         chunk_callback: Callable[[str], Awaitable[None]] | None = None
     ) -> str:
         from services.gateway.main import shared_http_client
-        # Queue-and-wait: check if Ollama has available slots before submitting
-        async with shared_http_client() as slot_client:
-            if not await self._wait_for_slot(slot_client, model=model):
-                raise RuntimeError(f"No slots available within {self.slot_wait_timeout}s")
+        from services.gateway.messaging import PRIORITY_HIGH
 
-        opts = options or {}
+        opts = dict(options or {})
+        raw_priority = opts.pop("priority", None)
+        priority_int: int | None = None
+        if raw_priority is not None:
+            try:
+                priority_int = int(raw_priority)
+            except (TypeError, ValueError):
+                priority_int = None
+        request_source = str(opts.pop("request_source", None) or "shared-llm/app")
+
+        # HIGH/CRITICAL requests (voice, home control, emergency SOS) skip the
+        # client-side /api/ps sleep-poll and enter Alpaca's priority-FIFO queue
+        # directly so they jump ahead of queued normal/low/trainer/coding traffic.
+        if priority_int is None or priority_int < PRIORITY_HIGH:
+            async with shared_http_client() as slot_client:
+                if not await self._wait_for_slot(slot_client, model=model):
+                    raise RuntimeError(f"No slots available within {self.slot_wait_timeout}s")
+
         show_thinking = opts.get("show_thinking", False)
 
         payload = {
@@ -287,11 +318,15 @@ class OllamaProvider(BaseLLMProvider):
             opts["think"] = False
             opts["enable_thinking"] = False
 
+        headers = {"X-Request-Source": request_source}
+        if priority_int is not None:
+            headers["X-Priority"] = str(priority_int)
+
         full_content = ""
         async with shared_http_client() as client:
             log.info(f"[OllamaProvider] Calling {self.base_url}/api/chat for model {model}")
             if not chunk_callback:
-                resp = await client.post(f"{self.base_url}/api/chat", json=payload, headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout)
+                resp = await client.post(f"{self.base_url}/api/chat", json=payload, headers=headers, timeout=self.timeout)
                 if resp.status >= 400:
                     raw_text = await resp.text()
                     raise RuntimeError(f"Ollama HTTP {resp.status}: {raw_text}")
@@ -336,7 +371,7 @@ class OllamaProvider(BaseLLMProvider):
                     return ""
 
             # Streaming
-            async with client.post(f"{self.base_url}/api/chat", json=payload, headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout) as response:
+            async with client.post(f"{self.base_url}/api/chat", json=payload, headers=headers, timeout=self.timeout) as response:
                 if response.status >= 400:
                     await response.read()
                     raise RuntimeError(f"Ollama stream HTTP {response.status}: {await response.text()}")

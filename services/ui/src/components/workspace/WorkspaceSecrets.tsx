@@ -150,7 +150,7 @@ export function WorkspaceSecrets({ workspace, onClose }: WorkspaceSecretsProps) 
               />
               <div className="flex-1 min-w-0 relative">
                 <input
-                  type={reveal['new'] ? 'text' : 'password'}
+                  type={reveal['new'] ? 'text' : 'password'} // password-toggle: its own eye button below
                   value={newValue}
                   onChange={(e) => setNewValue(e.target.value)}
                   aria-label="Secret value"
@@ -160,6 +160,7 @@ export function WorkspaceSecrets({ workspace, onClose }: WorkspaceSecretsProps) 
                 <button
                   type="button"
                   aria-label={reveal['new'] ? 'Hide secret value' : 'Show secret value'}
+                  aria-pressed={Boolean(reveal['new'])}
                   onClick={() => setReveal((p) => ({ ...p, new: !p.new }))}
                   className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center justify-center h-8 w-8 pointer-coarse:h-10 pointer-coarse:w-10 text-slate-400 hover:text-white rounded"
                 >

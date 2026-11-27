@@ -122,6 +122,12 @@ public class TokenBridgePlugin extends Plugin {
                     UnifiedPushDistributor.switchAccount(getContext(), previousServer, previousKey);
                 }
                 PushService.start(getContext());
+                // Signing in (again) puts the collecting workers back: a
+                // sign-out cancelled them, and they used to come back only
+                // when the activity was created from scratch.
+                if (BackgroundWork.ensureScheduled(getContext())) {
+                    DeviceHealth.reportSoon(getContext());
+                }
             }
         }
         if ((accountChanged || serverChanged) && p.getString(KEY_API_KEY, null) != null) {
@@ -144,6 +150,12 @@ public class TokenBridgePlugin extends Plugin {
         UsageSyncWorker.cancel(context);
         CommsSyncWorker.cancel(context);
         PhotoScanWorker.cancel(context);
+        // Nearby & offline is per person: back to the defaults, engine stopped.
+        try {
+            NearbyParts.reset(context);
+        } catch (Exception e) {
+            Log.w(TAG, "Could not reset Nearby & offline", e);
+        }
         Intent stopLocation = new Intent(context, LocationTrackingService.class);
         stopLocation.setAction("stop");
         Intent stopSteps = new Intent(context, StepSyncService.class);

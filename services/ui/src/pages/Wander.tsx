@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { api } from '../services/api';
@@ -49,6 +49,9 @@ import {
 } from '../lib/wanderQueries';
 import { buildFamilyCards, groupByPlace, motionLabel, roomLabel, type FamilyMemberStatus, type MemberGroup, type Place } from '../lib/familyCards';
 import PlacesPanel from '../components/wander/PlacesPanel';
+import VehicleBluetoothPanel from '../components/wander/VehicleBluetoothPanel';
+import { bandLabel, nearOf, togetherLine } from '../lib/proximity';
+import { vehicleSourceLabel } from '../lib/vehicleBluetooth';
 import toast from 'react-hot-toast';
 import { errorText } from '../lib/errorText';
 import {
@@ -78,6 +81,7 @@ import {
   ChevronRight,
   ChevronDown,
   Layers,
+  Radio,
 } from 'lucide-react';
 
 interface VehicleOption {
@@ -189,6 +193,14 @@ const Wander = () => {
     ...houseConfigQueryOptions,
   });
   const peopleDirectory = useFamilyDirectory();
+  // Family phones near mine lately (Bluetooth LE), within the family's location sharing.
+  const nearQuery = useQuery({
+    queryKey: ['geo-proximity-near'],
+    queryFn: () => api.getProximityNear(),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: false,
+  });
 
   const trips = useMemo(() => tripsQuery.data?.trips ?? [], [tripsQuery.data]);
   const vehicles = useMemo(
@@ -404,6 +416,26 @@ const Wander = () => {
       setEditFuelType(found.fuel_type || 'gasoline');
       setEditMpg(found.mpg);
       setEditCostPerGallon(found.cost_per_gallon);
+    }
+  };
+
+  // Undo a vehicle chosen by hand: back to the one a linked car's Bluetooth detected.
+  const handleUseDetectedVehicle = async () => {
+    if (!editingTrip) return;
+    setIsSavingTrip(true);
+    try {
+      const updated = await api.updateTrip(editingTrip.id, { vehicle_auto: true });
+      queryClient.setQueryData<TripsResponse>(tripsQueryKey(), (prev) =>
+        prev
+          ? { ...prev, trips: prev.trips.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)) }
+          : prev,
+      );
+      toast.success(`Back to ${updated.vehicle_name ?? 'the detected car'}`);
+      setEditingTrip(null);
+    } catch (err: unknown) {
+      toast.error(errorText(err, 'Could not change the vehicle'));
+    } finally {
+      setIsSavingTrip(false);
     }
   };
 
@@ -683,6 +715,27 @@ const Wander = () => {
                         <span>{trip.vehicle_name || 'Assigned Vehicle'}</span>
                       </div>
 
+                      {/* Who it was taken with (phones close together, or the same linked car) */}
+                      {togetherLine(trip.together, (id) => peopleDirectory(id)?.display_name) && (
+                        <span data-testid="trip-together" className="font-medium text-emerald-200">
+                          {togetherLine(trip.together, (id) => peopleDirectory(id)?.display_name)}
+                        </span>
+                      )}
+
+                      {/* How the vehicle was decided: a linked car's Bluetooth, or by hand */}
+                      {vehicleSourceLabel(trip.vehicle_source) && (
+                        <span
+                          data-testid="trip-vehicle-source"
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                            trip.vehicle_source === 'bluetooth'
+                              ? 'bg-sky-500/15 text-sky-200 border-sky-500/30'
+                              : 'bg-white/5 text-slate-300 border-white/10'
+                          }`}
+                        >
+                          {vehicleSourceLabel(trip.vehicle_source)}
+                        </span>
+                      )}
+
                       {/* Fuel Type Badge */}
                       <span
                         className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
@@ -774,6 +827,11 @@ const Wander = () => {
                   </span>
                 )}
               </h3>
+              {nearOf(nearQuery.data?.near, person?.username ?? member.id) && (
+                <span data-testid="member-near" className="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-200 border border-emerald-500/30">
+                  {bandLabel(nearOf(nearQuery.data?.near, person?.username ?? member.id)?.band)}
+                </span>
+              )}
               <div className="flex items-center gap-1.5 text-xs text-slate-400">
                 <MapPin size={12} className="text-purple-400" />
                 <span>{member.zone}</span>
@@ -1025,6 +1083,23 @@ const Wander = () => {
           isAdmin={Boolean(user?.is_admin)}
           onSaved={() => void queryClient.invalidateQueries({ queryKey: geoZonesQueryKey() })}
         />
+
+        <VehicleBluetoothPanel
+          vehicles={vehiclesQuery.data?.vehicles ?? []}
+          currentUser={currentUsername}
+          isAdmin={Boolean(user?.is_admin)}
+          onChanged={() => void queryClient.invalidateQueries({ queryKey: vehiclesQueryKey() })}
+        />
+
+        {/* Find family nearby, the offline chat, offline mode and car detection are
+            switched in Settings; the chat is in Chat and the parent controls in Guardian. */}
+        <Link
+          to="/settings#nearby-offline"
+          className="flex min-h-11 items-center gap-2 rounded-xl px-2 text-xs font-semibold text-purple-300 hover:bg-white/5"
+          data-testid="wander-nearby-link"
+        >
+          <Radio size={14} aria-hidden /> Nearby &amp; offline settings
+        </Link>
       </div>
 
       {/* Aggregate Statistics Ribbon */}
@@ -1348,6 +1423,21 @@ const Wander = () => {
                 ))}
               </select>
             </div>
+            {editingTrip.vehicle_source === 'manual' && editingTrip.bt_vehicle_id && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-100" data-testid="trip-vehicle-detected">
+                <span>
+                  Bluetooth saw {vehicles.find((v) => v.id === editingTrip.bt_vehicle_id)?.name ?? 'a linked car'} on this trip.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleUseDetectedVehicle()}
+                  disabled={isSavingTrip}
+                  className="min-h-11 rounded-lg px-3 font-semibold text-sky-200 underline disabled:opacity-50"
+                >
+                  Use the detected car
+                </button>
+              </div>
+            )}
 
             {/* Vehicle Name input */}
             <div className="space-y-1.5">

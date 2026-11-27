@@ -94,3 +94,24 @@ def test_a_down_home_assistant_is_reported_but_never_fails_execution(client: Tes
     assert body["status"] == "healthy"
     assert body["checks"]["home_assistant"] == "down"
     assert body["checks"]["home_assistant_hosts"]["http://ha.local"]["last_error"] == "connection refused"
+
+
+class _DownSession(_Session):
+    """Identity away (an update swapping it): its probe times out; the rest answer."""
+
+    async def get(self, url: str, **kwargs):
+        if "identity" in url or ":8001" in url:
+            raise TimeoutError()
+        return await super().get(url, **kwargs)
+
+
+def test_identity_away_degrades_execution_but_never_fails_its_health(client: TestClient, monkeypatch):
+    """2026-11-22: identity was away for three minutes and execution's /health,
+    retrying identity through the shared pool, stopped answering in time; the
+    gateway then treated execution as down although it was serving."""
+    monkeypatch.setattr(main.aiohttp, "ClientSession", _DownSession)
+    resp = client.get("/health", headers=HEADERS)
+    body = resp.json()
+    assert resp.status_code == 200, body
+    assert body["status"] == "degraded"
+    assert body["checks"]["identity"] != "ok"

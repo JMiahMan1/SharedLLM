@@ -53,6 +53,28 @@ wake word:
    ``TTS_END``. ``HOMEHUB_VOICE_STREAM=0`` turns streaming off. Each run logs
    ``stt``, ``first_audio`` (end of the command to the reply's first audio) and
    ``total``.
+   A slow answer is held: after ``INTENT_START`` the node hears nothing until the
+   first reply audio, and an Echo (hassmic) turns its light ring off and goes
+   quiet before a long answer arrives. So when no reply audio has started
+   ``HOMEHUB_VOICE_HOLD_AFTER_S`` after ``INTENT_START`` (6 s; 0 turns it off), a
+   short phrase (``HOMEHUB_VOICE_HOLD_PHRASE``, "One moment.") is spoken as the
+   first part of the streamed reply; the answer follows in the same stream. It is
+   synthesised once per voice and cached, never played after the answer's first
+   audio, and logged as ``hold`` (ms after ``INTENT_START``). Streamed replies only.
+   Still no answer ``HOMEHUB_VOICE_HOLD_MUSIC_AFTER_S`` after that (6 s; 0 or
+   ``HOMEHUB_VOICE_HOLD_MUSIC=0`` turns it off), a playful line picked at random
+   (``HOMEHUB_VOICE_HOLD_LINES``, "|"-separated; never the same one twice running)
+   is said and hold music is added a chunk at a time until the answer's first
+   sentence is ready. Which music is a HomeHub setting (``hold_music.py``, Devices >
+   Setup > Voice hold music): an original game-show "thinking" loop (the default),
+   the soft I-vi-IV-V made in code (``hold_music_loop``, also the fallback when a
+   clip cannot play), or a clip an admin uploaded; each at the stream's own rate,
+   about -24 dBFS RMS. The same setting can replace the hold lines; it then fades out over 0.3 s and the answer
+   follows, never interleaved with it. Logged as ``music`` (ms of music).
+   When Jarvis does not answer within ``HOMEHUB_VOICE_JARVIS_TIMEOUT_S``, or answers
+   that it is busy (HTTP 503 or 429, a ``queue_timeout``), the run does not go quiet:
+   ``HOMEHUB_VOICE_TIMEOUT_LINE`` is said (into the open stream, else as a whole
+   reply), the error is still logged, and the summary line has ``timeout_line=1``.
 
 Each stage sends HA's ``VoiceAssistantEventType`` sequence (``RUN_START``,
 ``STT_START``, ``STT_VAD_START``/``END``, ``STT_END`` with the text,
@@ -78,6 +100,7 @@ import json
 import logging
 import math
 import os
+import random
 import secrets
 import statistics
 import sys
@@ -96,6 +119,7 @@ from aioesphomeapi import (
     VoiceAssistantFeature,
 )
 
+from services.homehub import hold_music, voice_whisper
 from services.homehub.core import UNAVAILABLE, DeviceUnavailable, EntityEntry, HubError, utcnow
 
 log = logging.getLogger("homehub.voice")
@@ -108,6 +132,16 @@ ANNOUNCE_TIMEOUT_S = 120.0
 JARVIS_GUARD_S = 5.0
 #: How long a start_conversation's question is remembered for the run it starts.
 PENDING_CONTEXT_S = 60.0
+#: After a whole reply is handed over, the node still has to fetch it before it plays.
+PLAYBACK_FETCH_S = 1.0
+#: The whispered volume is put back this long after the reply should have finished playing.
+PLAYBACK_TAIL_S = 1.0
+#: Never hold a lowered volume longer than this after a run, whatever the reply's length.
+MAX_RESTORE_WAIT_S = 120.0
+#: The command's own audio kept for the whisper features (numbers only), at most this long.
+WHISPER_AUDIO_MAX_S = 20.0
+#: Each satellite's usual speech level (``voice_whisper.LevelBaseline``) in the hub's store.
+LEVEL_KV = "voice_level:{entry_id}"
 #: HA's "Finished speaking detection" (VadSensitivity) in seconds of silence.
 FINISHED_SPEAKING_S = {"relaxed": 1.25, "default": 0.7, "aggressive": 0.25}
 
@@ -131,6 +165,33 @@ SPEECH_DETECTION = {
 #: A follow-up listen (after a reply that asked a question, or a start_conversation) begins right after the
 #: satellite spoke: its first moments are not listened to, and the gate is this much higher until speech starts.
 FOLLOW_UP_HOLDOFF_S = 0.5
+#: How long after the holding phrase a still unanswered run logs that it is waiting (once).
+HOLD_STILL_WAITING_S = 30.0
+#: The playful lines said before the hold music, one picked at random per wait (HOMEHUB_VOICE_HOLD_LINES).
+DEFAULT_HOLD_LINES = (
+    "Please hold. Your question is very important to us.",
+    "Hold please, I am consulting the scrolls.",
+    "Still thinking. Good answers take a little simmering.",
+    "Bear with me, my thinking cap is still warming up.",
+    "One more moment. I am asking the hamsters to run a little faster.",
+    "Hang tight, I am checking under the couch cushions for that answer.",
+    "Thanks for waiting. Enjoy some elevator music, on the house.",
+    "Almost there. I would tell you a joke about waiting, but it takes too long.",
+    "Let me think about that... cue the thinking music.",
+    "Good question. The clock is ticking while I think it over.",
+)
+#: Said when Jarvis does not answer in time or is too busy to (HOMEHUB_VOICE_TIMEOUT_LINE).
+DEFAULT_TIMEOUT_LINE = "I'm still tied up with something. Please ask me again in a minute."
+#: Hold music is added to the stream this much at a time, kept at most HOLD_MUSIC_LEAD_S ahead of the
+#: node's playback, so it stops within about a chunk of the answer being ready.
+HOLD_MUSIC_CHUNK_S = 0.4
+HOLD_MUSIC_LEAD_S = 0.6
+#: The music fades out over this long before the answer.
+HOLD_MUSIC_FADE_S = 0.3
+#: The music's level: well under speech (Kokoro speaks at about -18 to -14 dBFS RMS).
+HOLD_MUSIC_DBFS = hold_music.TARGET_DBFS
+#: Errors that mean "busy, try again later" rather than "broken": the ask-later line is said for them.
+ASK_LATER_CODES = frozenset({"intent-timeout", "intent-busy"})
 FOLLOW_UP_THRESHOLD_FACTOR = 1.5
 #: A run is a follow-up when the satellite's conversation asked to continue this recently.
 FOLLOW_UP_WINDOW_S = 120.0
@@ -138,6 +199,12 @@ FOLLOW_UP_WINDOW_S = 120.0
 NO_WAKE_WORD = "No wake word"
 #: How long the node may take to report its wake words.
 WAKE_WORD_TIMEOUT_S = 10.0
+#: A satellite that does not answer the wake word request is reconnected after this long, at most
+#: WAKE_WORD_RECONNECTS times an hour. echo-dot-assist (hassmic) takes one voice subscriber: when an
+#: earlier connection (adoption, before the encryption key) still holds it, this one is ignored, the
+#: request goes unanswered and a wake word starts nothing; a fresh connection is heard again.
+WAKE_WORD_RECONNECT_S = 60.0
+WAKE_WORD_RECONNECTS = 3
 SATELLITE_FEATURE_ANNOUNCE, SATELLITE_FEATURE_START_CONVERSATION = 1, 2  # AssistSatelliteEntityFeature
 #: Audio chunk size and pace when streaming a reply to a node's own speaker.
 STREAM_CHUNK = 1024
@@ -186,6 +253,8 @@ class VoiceSettings:
     jarvis_url: str = ""
     language: str = "en"
     tts_voice: str | None = None
+    whisper_volume: float = 0.22
+    whisper_tts_voice: str | None = None
     max_seconds: float = 15.0
     no_speech_seconds: float = 8.0
     stt_timeout: float = 30.0
@@ -196,6 +265,19 @@ class VoiceSettings:
     input_gain: float | None = None
     #: Speak the reply as the gateway writes it (a growing stream), not only after the whole answer.
     stream_replies: bool = True
+    #: Seconds after INTENT_START with no reply audio before ``hold_phrase`` is spoken as the reply's
+    #: first part, so the node does not go dark on a slow answer; 0 turns it off. Streamed replies only:
+    #: with ``stream_replies`` off (or a node that is sent its audio over the API) nothing is held.
+    hold_after_s: float = 6.0
+    hold_phrase: str = "One moment."
+    #: Hold music (on by default): when the answer has still not started ``hold_music_after_s`` after the
+    #: holding phrase, one of ``hold_lines`` is said and gentle music plays until the answer's first
+    #: sentence is ready. 0 seconds, or ``hold_music`` off, means neither the line nor the music.
+    hold_music: bool = True
+    hold_music_after_s: float = 6.0
+    hold_lines: tuple[str, ...] = DEFAULT_HOLD_LINES
+    #: Said instead of going quiet when Jarvis does not answer within ``jarvis_timeout`` or is too busy.
+    timeout_line: str = DEFAULT_TIMEOUT_LINE
     #: How long the start of a follow-up listen is not listened to (the end of the reply, the chime).
     followup_holdoff_s: float = FOLLOW_UP_HOLDOFF_S
     #: "auto" adds WebRTC's speech detector to the loudness gate when it is installed; "energy" never does.
@@ -210,6 +292,8 @@ class VoiceSettings:
             jarvis_url=os.getenv("HOMEHUB_VOICE_JARVIS_URL", "").strip().rstrip("/"),
             language=os.getenv("HOMEHUB_VOICE_LANGUAGE", "").strip() or "en",
             tts_voice=os.getenv("HOMEHUB_VOICE_TTS_VOICE", "").strip() or None,
+            whisper_volume=_whisper_volume_env(),
+            whisper_tts_voice=os.getenv("HOMEHUB_VOICE_WHISPER_TTS_VOICE", "").strip() or None,
             max_seconds=_float_env("HOMEHUB_VOICE_MAX_S", 15.0),
             no_speech_seconds=_float_env("HOMEHUB_VOICE_NO_SPEECH_S", 8.0),
             stt_timeout=_float_env("HOMEHUB_VOICE_STT_TIMEOUT_S", 30.0),
@@ -218,6 +302,12 @@ class VoiceSettings:
             vad_min_rms=_float_env("HOMEHUB_VOICE_VAD_MIN_RMS", 40.0),
             input_gain=_gain_env("HOMEHUB_VOICE_INPUT_GAIN"),
             stream_replies=_flag_env("HOMEHUB_VOICE_STREAM", True),
+            hold_after_s=_float_env("HOMEHUB_VOICE_HOLD_AFTER_S", 6.0, zero_ok=True),
+            hold_phrase=os.getenv("HOMEHUB_VOICE_HOLD_PHRASE", "").strip() or "One moment.",
+            hold_music=_flag_env("HOMEHUB_VOICE_HOLD_MUSIC", True),
+            hold_music_after_s=_float_env("HOMEHUB_VOICE_HOLD_MUSIC_AFTER_S", 6.0, zero_ok=True),
+            hold_lines=_lines_env("HOMEHUB_VOICE_HOLD_LINES", DEFAULT_HOLD_LINES),
+            timeout_line=os.getenv("HOMEHUB_VOICE_TIMEOUT_LINE", "").strip() or DEFAULT_TIMEOUT_LINE,
             followup_holdoff_s=_float_env("HOMEHUB_VOICE_FOLLOWUP_HOLDOFF_S", FOLLOW_UP_HOLDOFF_S, zero_ok=True),
             vad_engine=_vad_engine_env(),
             internal_secret=os.getenv("INTERNAL_SECRET", "").strip(),
@@ -240,15 +330,25 @@ class VoiceSettings:
 
     def public(self) -> dict[str, Any]:
         return {"stt": self.stt or None, "jarvis_url": self.jarvis_url or None, "language": self.language,
-                "tts_voice": self.tts_voice, "max_seconds": self.max_seconds,
+                "tts_voice": self.tts_voice, "whisper_volume": self.whisper_volume,
+                 "whisper_tts_voice": self.whisper_tts_voice, "max_seconds": self.max_seconds,
                 "no_speech_seconds": self.no_speech_seconds, "stt_timeout_s": self.stt_timeout,
                 "jarvis_timeout_s": self.jarvis_timeout, "continue_conversation": self.continue_conversation,
                 "vad_min_rms": self.vad_min_rms,
                 "input_gain": "auto" if self.input_gain is None else self.input_gain,
                 "stream_replies": self.stream_replies, "followup_holdoff_s": self.followup_holdoff_s,
+                "hold_after_s": self.hold_after_s, "hold_phrase": self.hold_phrase,
+                "hold_music": self.hold_music, "hold_music_after_s": self.hold_music_after_s,
+                "hold_lines": list(self.hold_lines), "timeout_line": self.timeout_line,
                 "vad_engine": self.vad_engine,
                 "speech_detector": "webrtc+energy" if speech_classifier(self.vad_engine, 2) else "energy",
                 "problems": self.problems()}
+
+
+def _lines_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    """A "|"-separated list of lines; unset or empty is ``default``."""
+    lines = tuple(part.strip() for part in (os.getenv(name) or "").split("|") if part.strip())
+    return lines or default
 
 
 def _gain_env(name: str) -> float | None:
@@ -256,6 +356,20 @@ def _gain_env(name: str) -> float | None:
     if raw in ("", "auto"):
         return None
     return _float_env(name, 1.0)
+
+
+def _whisper_volume_env() -> float:
+    raw = os.getenv("HOMEHUB_VOICE_WHISPER_VOLUME")
+    if raw is None or str(raw).strip() == "":
+        return 0.22
+    raw = str(raw).strip()
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise HubError(f"HOMEHUB_VOICE_WHISPER_VOLUME must be a number, not {raw!r}") from exc
+    if not (0.0 < value <= 1.0):
+        raise HubError(f"HOMEHUB_VOICE_WHISPER_VOLUME must be > 0 and <= 1, not {raw!r}")
+    return value
 
 
 def _settings_at_startup() -> VoiceSettings | HubError:
@@ -524,6 +638,18 @@ class Reply(str):
     #: Streamed replies: how many sentences were already said, and what is left to say after them.
     streamed: int = 0
     rest: str | None = None
+    #: The speaker sounded like nobody enrolled (the gateway's ``new_voice``), and the line to say after
+    #: the answer (``voice_note``: the invitation to be learned, at most once a day per voice).
+    new_voice: bool = False
+    note: str | None = None
+
+
+def _with_new_voice(out: Reply, data: Any) -> Reply:
+    if isinstance(data, dict):
+        out.new_voice = data.get("new_voice") is True
+        note = data.get("voice_note")
+        out.note = note.strip() if isinstance(note, str) and note.strip() else None
+    return out
 
 
 def chat_reply_text(body: Any) -> str | None:
@@ -559,13 +685,16 @@ def _reply_from_answer(status: int, data: Any) -> Reply:
         return out
     if status != 200 or (isinstance(data, dict) and str(data.get("status") or "").upper() == "ERROR"):
         detail = (data.get("message") or data.get("detail") or data.get("error")) if isinstance(data, dict) else data
+        code = data.get("code") if isinstance(data, dict) else None
+        if status in (429, 503) or _busy_error(detail) or _busy_error(code):
+            raise PipelineError("intent-busy", f"Jarvis is busy (HTTP {status}): {detail}")
         raise PipelineError("intent-failed", f"Jarvis could not answer (HTTP {status}): {detail}")
     reply = chat_reply_text(data)
     if not reply:
         raise PipelineError("intent-failed", "Jarvis answered with no text")
     out = Reply(reply)
     out.voice = _voice_of(data)
-    return out
+    return _with_new_voice(out, data)
 
 
 def _voice_of(data: Any) -> str | None:
@@ -616,6 +745,8 @@ async def read_speech_stream(lines: Any, on_sentence: OnSentence) -> Reply:
             continue
         voice = _voice_of(obj) or voice
         if obj.get("error"):
+            if _busy_error(obj["error"]) or _busy_error(obj.get("code")):
+                raise PipelineError("intent-busy", f"Jarvis is busy: {obj['error']}")
             raise PipelineError("intent-failed", f"Jarvis could not answer: {obj['error']}")
         text = chat_reply_text(obj) or ""
         if obj.get("speech") and text:
@@ -627,6 +758,8 @@ async def read_speech_stream(lines: Any, on_sentence: OnSentence) -> Reply:
                 content.append(text)
             continue
         if text.startswith("[ERROR]:"):
+            if _busy_error(text):
+                raise PipelineError("intent-busy", f"Jarvis is busy: {text[8:].strip()}")
             raise PipelineError("intent-failed", f"Jarvis could not answer: {text[8:].strip()}")
         if text:
             content.append(text)
@@ -637,7 +770,7 @@ async def read_speech_stream(lines: Any, on_sentence: OnSentence) -> Reply:
         out.rest = str(obj["speech_rest"]).strip() if "speech_rest" in obj else (None if streamed else whole)
         if not whole and not streamed:
             raise PipelineError("intent-failed", "Jarvis answered with no text")
-        return out
+        return _with_new_voice(out, obj)
     raise PipelineError("intent-failed", "Jarvis's answer ended before it was finished")
 
 
@@ -696,6 +829,9 @@ class Backends:
     ask_stream: Callable[[VoiceSettings, str, dict[str, Any], OnSentence], Awaitable[Reply]] | None = None
     synth: Callable[[str, str | None], Awaitable[bytes]] | None = None
     open_stream: Callable[[], tuple[str, Any]] | None = None
+    #: Makes a spoken clip (``speak``'s URL) quieter in place, for a whispered command on a satellite
+    #: whose volume cannot be set.
+    quieten: Callable[[str, float], bool] = field(default=lambda url, factor: _quieten_clip(url, factor))
 
 
 def _clip_bytes(url: str) -> bytes | None:
@@ -705,7 +841,105 @@ def _clip_bytes(url: str) -> bytes | None:
     return tts.clip(token)
 
 
+def _quieten_clip(url: str, factor: float) -> bool:
+    from services.homehub import tts
+
+    return tts.scale_clip(url.rsplit("/", 1)[-1].removesuffix(".wav"), factor)
+
+
+def _clip_seconds(audio: bytes | None) -> float | None:
+    from services.homehub import tts
+
+    return tts.clip_seconds(audio) if audio else None
+
+
 BACKENDS = Backends(ask_stream=ask_jarvis_stream, synth=synthesize_speech, open_stream=open_reply_stream)
+
+#: The holding phrase's audio per (phrase, voice): made once, then free.
+_HOLD_AUDIO: dict[tuple[str, str | None], bytes] = {}
+
+
+async def _hold_audio(phrase: str, voice: str | None) -> bytes:
+    key = (phrase, voice)
+    audio = _HOLD_AUDIO.get(key)
+    if audio is None:
+        synth = BACKENDS.synth
+        assert synth is not None
+        audio = await synth(phrase, voice)
+        _HOLD_AUDIO[key] = audio
+    return audio
+
+
+#: The hold line said last (in any run), so the next wait never opens with the same one.
+_LAST_HOLD_LINE: str | None = None
+_HOLD_LINE_RANDOM = random.Random()
+
+
+def pick_hold_line(lines: tuple[str, ...] | list[str]) -> str | None:
+    """One of ``lines`` at random, never the one picked last time (unless it is the only one)."""
+    global _LAST_HOLD_LINE
+    choices = [line for line in lines if line]
+    if not choices:
+        return None
+    if len(choices) > 1:
+        choices = [line for line in choices if line != _LAST_HOLD_LINE] or choices
+    line = _HOLD_LINE_RANDOM.choice(choices)
+    _LAST_HOLD_LINE = line
+    return line
+
+
+#: The hold music's chords: a slow I-vi-IV-V in C (C, A minor, F, G), each a bass note and a triad, in Hz.
+_HOLD_CHORDS = (
+    (65.41, 261.63, 329.63, 392.00),  # C2  C4 E4 G4
+    (55.00, 220.00, 261.63, 329.63),  # A1  A3 C4 E4
+    (87.31, 220.00, 261.63, 349.23),  # F2  A3 C4 F4
+    (98.00, 246.94, 293.66, 392.00),  # G2  B3 D4 G4
+)
+HOLD_CHORD_S = 2.0
+_HOLD_MUSIC: dict[int, bytes] = {}
+
+
+def hold_music_loop(rate: int) -> bytes:
+    """The hold music: one seamless loop of mono 16-bit little-endian PCM at ``rate``, made once per rate.
+
+    Deterministic and generated here (no file, no network): soft triangle-like tones (a sine with a
+    faint third harmonic, so it sounds rounded, as if low-passed), each chord fading in over 0.4 s and
+    ringing on 0.8 s into the next one so the changes are smooth, and the last chord's tail wrapping
+    round onto the start so the loop has no seam. Scaled to ``HOLD_MUSIC_DBFS`` RMS.
+    """
+    cached = _HOLD_MUSIC.get(rate)
+    if cached is not None:
+        return cached
+    import numpy as np
+
+    n_chord = int(HOLD_CHORD_S * rate)
+    total = n_chord * len(_HOLD_CHORDS)
+    ring = int(0.8 * rate)
+    t = np.arange(n_chord + ring) / rate
+    attack = np.minimum(1.0, t / 0.4)
+    attack = 0.5 - 0.5 * np.cos(np.pi * attack)  # an S-curve fade in
+    decay = np.exp(-t / 2.5)  # a soft bell-like settle while it holds
+    tail = np.clip((n_chord + ring - np.arange(n_chord + ring)) / ring, 0.0, 1.0)
+    tail = 0.5 - 0.5 * np.cos(np.pi * tail)  # an S-curve fade out over the ring
+    env = attack * decay * tail
+    out = np.zeros(total)
+    for i, chord in enumerate(_HOLD_CHORDS):
+        tone = np.zeros_like(t)
+        for k, freq in enumerate(chord):
+            weight = 0.8 if k == 0 else 0.5  # the bass a little stronger
+            tone += weight * (np.sin(2 * np.pi * freq * t) + np.sin(2 * np.pi * 3 * freq * t) / 9)
+        idx = (i * n_chord + np.arange(len(t))) % total
+        np.add.at(out, idx, tone * env)
+    rms = float(np.sqrt(np.mean(out ** 2))) or 1.0
+    out *= 32767 * 10 ** (HOLD_MUSIC_DBFS / 20) / rms
+    pcm = np.clip(np.round(out), -32768, 32767).astype("<i2").tobytes()
+    _HOLD_MUSIC[rate] = pcm
+    return pcm
+
+
+def _busy_error(detail: Any) -> bool:
+    """An answer that means Jarvis is busy (its slot queue timed out), not broken."""
+    return "queue_timeout" in str(detail or "").lower()
 
 
 # -- audio helpers ------------------------------------------------------------------
@@ -840,6 +1074,27 @@ class Run:
     reply_mode: str | None = None
     #: Sentences spoken before the whole answer was in.
     streamed_sentences: int = 0
+    #: Whether the person spoke quietly (whispered) for this run.
+    whispered: bool = False
+    #: Milliseconds of hold music put into the reply (0: none).
+    music_ms: int = 0
+    #: Which hold music played ("gameshow", "builtin" or "upload"; "builtin" too when a clip could not play).
+    music_source: str | None = None
+    #: The ask-later line was said (Jarvis timed out or was too busy).
+    timeout_line: bool = False
+    #: The whisper features of the command (numbers only), the satellite's usual level and what decided.
+    whisper: dict[str, Any] | None = None
+    #: The gateway said the voice sounded like nobody enrolled, and whether the invitation was said.
+    new_voice: bool | None = None
+    new_voice_invited: bool = False
+    #: What was done to the volume for a whispered command, and whether it came back.
+    volume: str | None = None
+    volume_restored: str | None = None
+    #: The audio of a whispered command's reply is scaled by this when the volume cannot be set.
+    reply_gain: float = 1.0
+    #: When the satellite should have finished playing the reply (monotonic), if anything was handed to it.
+    playback_until: float | None = None
+    summary_logged: bool = False
 
     def mark(self, name: str) -> None:
         self.marks.setdefault(name, time.monotonic())
@@ -849,10 +1104,13 @@ class Run:
         what the person waits through, and ``total`` the whole run."""
         m, out = self.marks, {}
         spans = (("listen", "listen", "listened"), ("stt", "listened", "transcribed"),
-                 ("intent", "intent", "answered"), ("tts", "tts", "spoken"), ("first_audio", "listened", "first_audio"))
+                 ("intent", "intent", "answered"), ("tts", "tts", "spoken"), ("first_audio", "listened", "first_audio"),
+                 ("hold", "intent", "hold"))
         for name, a, b in spans:
             if a in m and b in m:
                 out[name] = round((m[b] - m[a]) * 1000)
+        if self.music_ms:
+            out["music"] = self.music_ms
         if "ended" in m:
             out["total"] = round((m["ended"] - self.started) * 1000)
         return out
@@ -863,6 +1121,10 @@ class Run:
                 "continue_conversation": self.continue_conversation, "speech_ms": self.speech_ms,
                 "heard": self.heard, "levels": self.levels, "follow_up": self.follow_up,
                 "reply_mode": self.reply_mode, "streamed_sentences": self.streamed_sentences,
+                 "whispered": self.whispered, "timeout_line": self.timeout_line,
+                "whisper": self.whisper, "new_voice": self.new_voice, "new_voice_invited": self.new_voice_invited,
+                "volume": self.volume, "volume_restored": self.volume_restored,
+                "music_source": self.music_source,
                 "timings_ms": self.timings_ms()}
 
 
@@ -873,6 +1135,10 @@ class _StreamSpeaker:
     audio joins the stream the moment it is made. The first one tells the node to start playing
     (``INTENT_PROGRESS`` with ``tts_start_streaming``, what HA sends with streaming TTS), so the person
     hears the answer's start while the rest is still being written.
+
+    A slow answer is held in the same stream: the holding phrase, then (still waiting) a playful line
+    and gentle hold music, added a chunk at a time until the answer's first sentence is ready. The
+    music then fades out and the answer follows; the two are never interleaved.
     """
 
     def __init__(self, satellite: SatelliteVoice, run: Run, clip_stream: Any) -> None:
@@ -881,8 +1147,162 @@ class _StreamSpeaker:
         self.default_voice: str | None = None
         self.sentences = 0  # given by the gateway (the rest at the end is not counted)
         self._queue: asyncio.Queue[tuple[str, str | None] | None] = asyncio.Queue()
-        self._started = False
+        self._started = False  # the node was told to play the stream (holding phrase or reply)
+        self._play_t0 = 0.0  # when it was told (to keep the music only a little ahead of playback)
+        self.held = False  # the holding phrase is in the stream
+        self._hold_task: asyncio.Task[None] | None = None
+        self._music_task: asyncio.Task[None] | None = None
+        self._music_stopped = False
+        self._music_pos = 0  # bytes into the music loop
+        self._music_loop = b""  # the loop this run plays (hold_music.loop_for), chosen once when it starts
+        self._music_bytes = 0  # music put into the stream, fade included
         self._task = asyncio.get_running_loop().create_task(self._work(), name=f"voice:{satellite.name}:speak")
+
+    def _start_playing(self) -> None:
+        if not self._started:
+            self._started = True
+            self._play_t0 = time.monotonic()
+            self.satellite._event(self.run, VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_PROGRESS,
+                                  {"tts_start_streaming": "1"})
+
+    def _answer_coming(self) -> bool:
+        """The answer is on its way (a sentence given or already said) or the stream is over."""
+        return bool(self.sentences) or "first_audio" in self.run.marks or self.stream.closed
+
+    def start_hold(self, after_s: float, phrase: str, voice: str | None, *, music_after_s: float = 0.0,
+                   lines: tuple[str, ...] | list[str] = ()) -> None:
+        """Speak ``phrase`` first if no reply audio has started ``after_s`` seconds from now (once per run);
+        then, ``music_after_s`` later and still no answer, one of ``lines`` and hold music (0: neither)."""
+        if after_s > 0 and phrase and self._hold_task is None:
+            self._hold_task = asyncio.get_running_loop().create_task(
+                self._hold(after_s, phrase, voice, music_after_s, tuple(lines)),
+                name=f"voice:{self.satellite.name}:hold")
+
+    async def _hold(self, after_s: float, phrase: str, voice: str | None, music_after_s: float,
+                    lines: tuple[str, ...]) -> None:
+        await asyncio.sleep(after_s)
+        if self._started or self.sentences or self.stream.closed:
+            return
+        try:
+            audio = await _hold_audio(phrase, voice)
+            # The answer got there while the phrase was made: it is never said after (or instead of) it.
+            # No await between this check and the append, so the order cannot change in between.
+            if self._started or self.sentences or self.stream.closed:
+                return
+            self.stream.append(audio)
+            self.held = True
+            self.run.mark("hold")
+            self._start_playing()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # the holding phrase is a courtesy: it never fails the run
+            self.satellite.log.warning("voice satellite %s run %s: the holding phrase could not be said: %s",
+                                       self.satellite.name, self.run.id, exc)
+            return
+        held_at = time.monotonic()
+        steps = [(HOLD_STILL_WAITING_S, "log")]
+        if music_after_s > 0 and lines:
+            steps.append((music_after_s, "music"))
+        for at, step in sorted(steps):
+            await asyncio.sleep(max(0.0, at - (time.monotonic() - held_at)))
+            if step == "music":
+                await self._start_music(voice, lines)
+            elif "first_audio" not in self.run.marks and "answered" not in self.run.marks:
+                waited = time.monotonic() - self.run.marks.get("intent", self.run.started)
+                self.satellite.log.info("voice satellite %s run %s: still waiting for Jarvis after %d s",
+                                        self.satellite.name, self.run.id, round(waited))
+
+    async def _start_music(self, voice: str | None, lines: tuple[str, ...]) -> None:
+        """Still no answer: a playful line, then the hold music until the answer's first sentence is ready."""
+        if self._answer_coming():
+            return
+        try:
+            line = pick_hold_line(lines)
+            if line:
+                audio = await _hold_audio(line, voice)
+                if self._answer_coming():  # the answer came while the line was made: no line, no music
+                    return
+                self.stream.append(audio)
+            if self.stream.rate is None:
+                return
+            # Made (once per clip and rate, off the event loop) before it is wanted; never silence: a clip
+            # that cannot play is the built-in tune.
+            self._music_loop, source = await asyncio.to_thread(
+                hold_music.loop_for, getattr(self.satellite, "hub", None), self.stream.rate, hold_music_loop)
+            self.run.music_source = source
+            if self._answer_coming():
+                return
+            self._music_task = asyncio.get_running_loop().create_task(
+                self._play_music(), name=f"voice:{self.satellite.name}:music")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # like the holding phrase, a courtesy
+            self.satellite.log.warning("voice satellite %s run %s: the hold music could not play: %s",
+                                       self.satellite.name, self.run.id, exc)
+
+    def _music_chunk(self, seconds: float, *, fade: bool = False) -> bytes:
+        """The next ``seconds`` of the music loop (wrapping round), faded out to silence when ``fade``."""
+        rate = self.stream.rate
+        loop = self._music_loop or hold_music_loop(rate)
+        size = int(seconds * rate) * 2
+        out = bytearray()
+        while len(out) < size:
+            piece = loop[self._music_pos:self._music_pos + size - len(out)]
+            out += piece
+            self._music_pos = (self._music_pos + len(piece)) % len(loop)
+        if fade:
+            samples = array.array("h")
+            samples.frombytes(bytes(out))
+            if sys.byteorder == "big":
+                samples.byteswap()
+            n = len(samples)
+            for i in range(n):
+                samples[i] = int(samples[i] * (0.5 + 0.5 * math.cos(math.pi * i / max(1, n - 1))))
+            if sys.byteorder == "big":
+                samples.byteswap()
+            out = bytearray(samples.tobytes())
+        self._music_bytes += len(out)
+        return bytes(out)
+
+    async def _play_music(self) -> None:
+        """Hold music, a chunk at a time, kept only a little ahead of what the node has played."""
+        while True:
+            ahead = self.stream.seconds - (time.monotonic() - self._play_t0)
+            if ahead > HOLD_MUSIC_LEAD_S:
+                await asyncio.sleep(min(ahead - HOLD_MUSIC_LEAD_S, HOLD_MUSIC_CHUNK_S))
+                continue
+            # No await between this check and the append: the answer cannot slip in between.
+            if self._music_stopped or self.stream.closed:
+                return
+            self.stream.append_pcm(self._music_chunk(HOLD_MUSIC_CHUNK_S))
+            await asyncio.sleep(0)
+
+    def _stop_music(self, *, fade: bool = True) -> None:
+        """The answer is ready: the music fades out now, before anything else goes into the stream."""
+        if self._music_task is None or self._music_stopped:
+            return
+        self._music_stopped = True
+        self._music_task.cancel()
+        if fade and not self.stream.closed and self.stream.rate:
+            with contextlib.suppress(HubError):
+                self.stream.append_pcm(self._music_chunk(HOLD_MUSIC_FADE_S, fade=True))
+        if self.stream.rate:
+            self.run.music_ms = round(self._music_bytes / 2 / self.stream.rate * 1000)
+
+    def playback_ends(self) -> float:
+        """When the node should finish playing what is in the stream (monotonic seconds)."""
+        if not self._started:
+            return time.monotonic()
+        return self._play_t0 + self.stream.seconds
+
+    async def stop_hold(self) -> None:
+        """The answer is in: no holding phrase, line or music from now on (what is in the stream stays,
+        and music already playing goes on until the answer's first audio is ready)."""
+        task = self._hold_task
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
 
     async def say(self, text: str, voice: str | None) -> None:
         """One sentence from the gateway (``on_sentence``), or the rest of the reply at the end."""
@@ -899,14 +1319,13 @@ class _StreamSpeaker:
             text, voice = item
             try:
                 audio = await synth(text, voice)
+                self._stop_music()  # no await from here to the append: music never follows the answer
                 self.stream.append(audio)
             except (HubError, OSError) as exc:
                 raise PipelineError("tts-failed", f"Jarvis's voice could not speak the reply: {exc}") from exc
-            if not self._started:
-                self._started = True
+            if "first_audio" not in self.run.marks:
                 self.run.mark("first_audio")
-                self.satellite._event(self.run, VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_PROGRESS,
-                                      {"tts_start_streaming": "1"})
+                self._start_playing()  # already playing when the holding phrase went first
                 self.satellite._publish_satellite("responding")
 
     async def finish(self) -> None:
@@ -915,9 +1334,12 @@ class _StreamSpeaker:
         try:
             await self._task
         finally:
+            self._stop_music(fade=False)
             self.stream.close()
 
     async def abort(self) -> None:
+        await self.stop_hold()
+        self._stop_music(fade=False)
         if not self._task.done():
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -928,6 +1350,114 @@ class _StreamSpeaker:
 #: Runs kept per satellite, newest first, in the hub's store so a restart or deploy keeps them.
 HISTORY_KEEP = 20
 HISTORY_KV = "voice_runs:{entry_id}"
+
+
+class _WhisperVolume:
+    """A satellite's volume while a whispered command's reply plays, and putting it back afterwards.
+
+    The volume is lowered before Jarvis starts on the answer (so the holding phrase and hold music are
+    quiet too) and put back once the reply should have finished playing on the node
+    (``Run.playback_until`` plus ``PLAYBACK_TAIL_S``), not when the hub has merely handed it over: the
+    node is still playing then. A run that fails is put back after whatever it did say (the ask-later
+    line), or at once when nothing was said; a run that is cut off (stopped, superseded,
+    disconnected) is put back at once, in a task of its own. A whispered follow-up keeps the low
+    volume (and the volume from before the first whisper); an ordinary command puts it back first.
+    A satellite with no volume to set (no ``assistant_volume`` number, no media player) gets the reply
+    audio itself scaled by the whisper volume instead (``Run.reply_gain``).
+    """
+
+    def __init__(self, satellite: SatelliteVoice) -> None:
+        self.sat = satellite
+        self.entity: Any = None
+        self.original: Any = None
+        self.run: Run | None = None
+        self._timer: asyncio.Task[None] | None = None
+
+    @property
+    def lowered(self) -> bool:
+        return self.entity is not None
+
+    def _cancel_timer(self) -> None:
+        timer, self._timer = self._timer, None
+        if timer is not None and timer is not asyncio.current_task() and not timer.done():
+            timer.cancel()
+
+    async def prepare(self, run: Run, whisper: voice_whisper.WhisperSettings) -> None:
+        """Before Jarvis answers: lower the volume for a whispered command, else put a lowered one back."""
+        if not run.whispered:
+            if self.lowered:
+                await self.restore("an ordinary command came next")
+            return
+        if self.lowered:  # the last reply was whispered too and may still be playing: keep it low
+            self._cancel_timer()
+            earlier, self.run = self.run, run
+            run.volume = "kept low"
+            if earlier is not None and earlier is not run:
+                earlier.volume_restored = "kept low for the next whispered command"
+                self.sat._log_summary(earlier)
+            return
+        entity, current, scale, raw = self.sat._whisper_volume_target()
+        if entity is None or current is None:
+            run.reply_gain = whisper.volume
+            run.volume = f"no volume to set: reply audio scaled to {whisper.volume:g}"
+            return
+        if current <= whisper.volume:
+            run.volume = f"already quiet ({current:g})"
+            return
+        try:
+            await self.sat._apply_volume(entity, round(whisper.volume * scale, 2))
+        except Exception as exc:  # never fail the answer over the volume: make the audio quieter instead
+            self.sat.log.warning("voice satellite %s: could not lower the volume for a whisper: %s", self.sat.name, exc)
+            run.reply_gain = whisper.volume
+            run.volume = f"could not be lowered: reply audio scaled to {whisper.volume:g}"
+            return
+        self.entity, self.original, self.run = entity, raw if raw is not None else current, run
+        run.volume = f"lowered {current:g} to {whisper.volume:g}"
+
+    def after_run(self, run: Run, *, cut_off: bool) -> None:
+        """The run is over: put the volume back after its reply has played (at once when cut off)."""
+        if not self.lowered or self.run is not run:
+            if self.run is not run:
+                self.sat._log_summary(run)
+            return
+        self._cancel_timer()
+        if cut_off or run.playback_until is None:
+            delay, why = 0.0, ("cut off" if cut_off else "nothing was played")
+        else:
+            delay = min(MAX_RESTORE_WAIT_S, max(0.0, run.playback_until - time.monotonic()) + PLAYBACK_TAIL_S)
+            why = None
+        self._timer = asyncio.get_running_loop().create_task(self._restore_later(delay, why),
+                                                             name=f"voice:{self.sat.name}:volume")
+
+    async def _restore_later(self, delay: float, why: str | None) -> None:
+        if delay > 0:
+            await asyncio.sleep(delay)
+        await self.restore(why)
+
+    async def restore(self, why: str | None = None) -> None:
+        """Put the volume from before the whisper back now."""
+        self._cancel_timer()
+        entity, original, run = self.entity, self.original, self.run
+        self.entity = self.original = self.run = None
+        if entity is None:
+            return
+        try:
+            await self.sat._apply_volume(entity, original)
+            outcome = f"restored to {original:g}"
+        except Exception as exc:
+            self.sat.log.warning("voice satellite %s: could not restore the volume after a whisper: %s",
+                                 self.sat.name, exc)
+            outcome = "restore failed"
+        if run is not None:
+            run.volume_restored = outcome + (f" ({why})" if why else "")
+            self.sat._log_summary(run)
+
+    async def settled(self) -> None:
+        """Wait for a pending restore (tests, and a satellite going away)."""
+        timer = self._timer
+        if timer is not None and not timer.done():
+            with contextlib.suppress(asyncio.CancelledError):
+                await timer
 
 
 def feature_names(flags: int) -> list[str]:
@@ -965,7 +1495,12 @@ class SatelliteVoice:
         self.active_wake_words: list[str] = []
         self.max_active_wake_words = 0
         self.wake_word_error: str | None = None
+        #: When this satellite was reconnected for an unanswered wake word request (the last hour's).
+        self._wake_reconnects: list[float] = []
         self.log = logging.getLogger(f"homehub.voice.{driver.device_name or driver.host}")
+        #: The command just heard (after the satellite's own gain), for the whisper features; never kept.
+        self._command_audio: bytearray | None = None
+        self._volume = _WhisperVolume(self)
         self._restore_history()
 
     # -- run history ----------------------------------------------------------------
@@ -1045,6 +1580,7 @@ class SatelliteVoice:
     LOCAL_ENTITIES: ClassVar[dict[str, tuple[str, str | None, str | None]]] = {
         "assist_satellite": ("assist_satellite", None, None),
         "wake_word": ("select", "Wake word", "config"),
+        "wake_word_2": ("select", "Wake word 2", "config"),
         "vad_sensitivity": ("select", "Finished speaking detection", "config"),
         "speech_detection": ("select", "Speech detection", "config"),
     }
@@ -1150,6 +1686,7 @@ class SatelliteVoice:
             self.wake_word_error = f"the node did not report its wake words: {exc}"
             self.log.warning("voice satellite %s: %s", self.name, self.wake_word_error)
             self._publish_wake_word_select()
+            self._spawn(self._reconnect_for_wake_words(client), "wake word reconnect")
             return
         self.wake_words = {str(w.id): str(w.wake_word) for w in (cfg.available_wake_words or [])}
         self.active_wake_words = [str(w) for w in (cfg.active_wake_words or [])]
@@ -1170,6 +1707,24 @@ class SatelliteVoice:
                              "one with its Wake word select", self.name)
         self._publish_wake_word_select()
 
+    async def _reconnect_for_wake_words(self, client: Any) -> None:
+        """Drop the connection that got no answer, so the driver reconnects and asks again (bounded)."""
+        now = time.monotonic()
+        self._wake_reconnects = [t for t in self._wake_reconnects if now - t < 3600]
+        if len(self._wake_reconnects) >= WAKE_WORD_RECONNECTS:
+            self.log.warning("voice satellite %s: still no wake words after %d reconnects this hour; leaving it",
+                             self.name, WAKE_WORD_RECONNECTS)
+            return
+        await asyncio.sleep(WAKE_WORD_RECONNECT_S)
+        if self.client is not client or not self.wake_word_error:
+            return  # it reconnected meanwhile, or the answer came
+        self._wake_reconnects.append(time.monotonic())
+        self.log.warning("voice satellite %s: reconnecting, since a node that ignores the wake word request "
+                         "also ignores its wake word (attempt %d of %d this hour)",
+                         self.name, len(self._wake_reconnects), WAKE_WORD_RECONNECTS)
+        with contextlib.suppress(Exception):
+            await client.disconnect()
+
     def _publish_wake_word_select(self) -> None:
         sel = self._local("wake_word")
         if sel is None:
@@ -1178,22 +1733,41 @@ class SatelliteVoice:
             self.hub.publish(sel, UNAVAILABLE, {"reason": self.wake_word_error or (
                 "the wake word is fixed in this satellite's firmware; there is none to choose")})
             return
-        active = next((self.wake_words[w] for w in self.active_wake_words if w in self.wake_words), NO_WAKE_WORD)
-        self.hub.publish(sel, active, {"options": [*self.wake_words.values(), NO_WAKE_WORD]})
+        options = {"options": [*self.wake_words.values(), NO_WAKE_WORD]}
+        active = [self.wake_words[w] for w in self.active_wake_words if w in self.wake_words]
+        self.hub.publish(sel, active[0] if active else NO_WAKE_WORD, options)
+        second = self._local("wake_word_2")
+        if second is not None:
+            if self.max_active_wake_words < 2:
+                self.hub.publish(second, UNAVAILABLE, {"reason": "this satellite listens for one wake word at a time"})
+            else:
+                self.hub.publish(second, active[1] if len(active) > 1 else NO_WAKE_WORD, options)
 
-    async def set_wake_word(self, phrase: str) -> None:
-        """Make the node listen for ``phrase`` (one of its own wake words), or none."""
+    async def set_wake_word(self, phrase: str, slot: int = 0) -> None:
+        """Make the node listen for ``phrase`` (one of its own wake words), or none.
+
+        ``slot`` 0 is the "Wake word" select, 1 is "Wake word 2": a satellite that listens for two at once
+        (``max_active_wake_words`` >= 2, hassmic's Echos) hears both, each starting its own run. The other
+        slot's word is kept; picking the same word in both leaves one.
+        """
         if self.client is None:
             raise DeviceUnavailable(f"ESPHome {self.name} is not connected")
-        if phrase == NO_WAKE_WORD:
-            ids: list[str] = []
-        else:
+        if slot and self.max_active_wake_words < 2:
+            raise HubError(f"{self.name} listens for one wake word at a time")
+        wid = None
+        if phrase != NO_WAKE_WORD:
             wid = next((i for i, w in self.wake_words.items() if w == phrase), None)
             if wid is None:
                 raise HubError(f"{phrase!r} is not one of {self.name}'s wake words: {list(self.wake_words.values())}")
-            ids = [wid]
+        slots = [w for w in self.active_wake_words if w in self.wake_words][:2]
+        slots += [None] * (2 - len(slots))
+        slots[slot] = wid
+        ids: list[str] = []
+        for w in slots:
+            if w is not None and w not in ids:
+                ids.append(w)
         await self.client.set_voice_assistant_configuration(ids)
-        self.log.info("voice satellite %s: wake word set to %r", self.name, phrase)
+        self.log.info("voice satellite %s: wake word%s set to %r", self.name, " 2" if slot else "", phrase)
         await self.load_wake_words()
 
     def detach(self) -> None:
@@ -1325,6 +1899,7 @@ class SatelliteVoice:
         settings: VoiceSettings | None = None
         stt = None
         speaker: _StreamSpeaker | None = None
+        features_task: asyncio.Task[voice_whisper.Features | None] | None = None
         try:
             stream = self._open_reply_stream()
             # HA's RUN_START names the URL of the reply's growing stream; the node plays it when told the
@@ -1353,6 +1928,12 @@ class SatelliteVoice:
             run.mark("listen")
             await self._listen(run, settings, stt)
             run.mark("listened")
+            heard, self._command_audio = self._command_audio, None
+            whisper = self._whisper_settings(settings)
+            if whisper.enabled and heard:
+                # Measured beside speech to text (numbers only; the audio is not kept).
+                features_task = asyncio.get_running_loop().create_task(
+                    asyncio.to_thread(voice_whisper.measure, bytes(heard)), name=f"voice:{self.name}:whisper")
             try:
                 async with asyncio.timeout(settings.stt_timeout):
                     text = await stt.finish()
@@ -1366,20 +1947,53 @@ class SatelliteVoice:
             self.log.debug("voice satellite %s run %s heard: %s", self.name, run.id, text)
             self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_STT_END, {"text": text})
 
+            features = None
+            if features_task is not None:
+                try:
+                    features = await features_task
+                except Exception as exc:  # whisper mode is a courtesy: a failure means "not whispered"
+                    self.log.warning("voice satellite %s run %s: whisper features failed: %s", self.name, run.id, exc)
+            self._decide_whisper(run, whisper, features)
+            # A whispered command gets a quieter reply: the satellite's volume, else the audio itself.
+            await self._volume.prepare(run, whisper)
+            if speaker is not None and run.reply_gain != 1.0:
+                speaker.stream.gain = run.reply_gain  # the holding phrase and hold music too
+
+            whisper_voice = settings.whisper_tts_voice if run.whispered and settings.whisper_tts_voice else None
             self._publish_satellite("processing")
             self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_START, {})
             run.mark("intent")
             try:
-                async with asyncio.timeout(settings.jarvis_timeout + JARVIS_GUARD_S):
-                    if speaker is not None and BACKENDS.ask_stream is not None:
-                        speaker.default_voice = settings.tts_voice
-                        reply = await BACKENDS.ask_stream(settings, text, self._context(run), speaker.say)
-                    else:
-                        reply = await BACKENDS.ask(settings, text, self._context(run))
-            except TimeoutError as exc:
-                raise PipelineError("intent-timeout",
-                                    f"Jarvis did not answer within {settings.jarvis_timeout:g} s") from exc
+                try:
+                    async with asyncio.timeout(settings.jarvis_timeout + JARVIS_GUARD_S):
+                        if speaker is not None and BACKENDS.ask_stream is not None:
+                            speaker.default_voice = whisper_voice or settings.tts_voice
+                            async def _on_sentence(text: str, voice: str | None) -> None:
+                                if whisper_voice is not None:
+                                    voice = whisper_voice
+                                await speaker.say(text, voice)
+                            music_after = settings.hold_music_after_s if settings.hold_music else 0.0
+                            speaker.start_hold(settings.hold_after_s, settings.hold_phrase, speaker.default_voice,
+                                               music_after_s=music_after,
+                                               lines=hold_music.hold_lines(self.hub, settings.hold_lines))
+                            try:
+                                reply = await BACKENDS.ask_stream(settings, text, self._context(run),
+                                                                  _on_sentence)
+                            finally:
+                                await speaker.stop_hold()
+                        else:
+                            reply = await BACKENDS.ask(settings, text, self._context(run))
+                except TimeoutError as exc:
+                    raise PipelineError("intent-timeout",
+                                        f"Jarvis did not answer within {settings.jarvis_timeout:g} s") from exc
+            except PipelineError as exc:
+                if exc.code in ASK_LATER_CODES:
+                    await self._say_ask_later(run, settings, speaker, whisper_voice)
+                raise
             run.mark("answered")
+            run.new_voice = bool(getattr(reply, "new_voice", False))
+            note = getattr(reply, "note", None) if not run.whispered else None
+            run.new_voice_invited = bool(note)
             self.log.debug("voice satellite %s run %s reply: %s", self.name, run.id, reply)
             run.continue_conversation = settings.continue_conversation and reply.rstrip().endswith("?")
             self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_END, {
@@ -1389,12 +2003,13 @@ class SatelliteVoice:
             self._publish_satellite("responding")
             self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_START, {"text": reply})
             run.mark("tts")
-            if speaker is not None and speaker.sentences:
-                await self._finish_streamed_reply(run, reply, speaker)
+            if speaker is not None and (speaker.sentences or speaker.held):
+                # Also when only the holding phrase streamed: the node is playing that stream already.
+                await self._finish_streamed_reply(run, reply, speaker, settings, note=note)
             else:
                 if speaker is not None:
                     await speaker.abort()  # nothing was streamed (a shortcut answer): the whole reply, as before
-                await self._speak_whole_reply(run, settings, reply)
+                await self._speak_whole_reply(run, settings, reply, note=note)
             run.outcome = "ok"
         except asyncio.CancelledError:
             # Superseded, stopped by the node or disconnected: the node is no longer in this run, and a
@@ -1402,6 +2017,9 @@ class SatelliteVoice:
             run.outcome = "aborted" if run.aborted else "cancelled"
             run.run_end_sent = True
             self._finish(run, settings)
+            # Cut off: whatever was playing stopped, so the volume goes back now (in its own task, which
+            # this cancellation cannot stop).
+            self._volume.after_run(run, cut_off=True)
             raise
         except PipelineError as exc:
             self._fail(run, exc)
@@ -1409,12 +2027,16 @@ class SatelliteVoice:
             self.log.exception("voice satellite %s run %s failed", self.name, run.id)
             self._fail(run, PipelineError("pipeline-error", f"The hub's voice pipeline failed: {exc}"))
         finally:
+            if features_task is not None and not features_task.done():
+                features_task.cancel()
             if speaker is not None:
                 await speaker.abort()
             if stt is not None:
                 with contextlib.suppress(Exception):
                     await stt.close()
         self._finish(run, settings)
+        # After the reply has played (or now, when nothing was handed to the satellite to play).
+        self._volume.after_run(run, cut_off=False)
 
     # -- the reply -----------------------------------------------------------------------
     def _open_reply_stream(self) -> tuple[Any, str] | None:
@@ -1439,41 +2061,106 @@ class SatelliteVoice:
             return None
         return clip_stream, self._node_url(url)
 
-    async def _finish_streamed_reply(self, run: Run, reply: str, speaker: _StreamSpeaker) -> None:
-        """The first sentences are playing already: say the rest into the same stream, then end it."""
+    async def _finish_streamed_reply(self, run: Run, reply: str, speaker: _StreamSpeaker, settings: Any = None,
+                                     *, note: str | None = None) -> None:
+        """The first sentences are playing already: say the rest (and ``note``, a line the gateway added
+        after the answer) into the same stream, then end it."""
         run.reply_mode = "stream"
         run.streamed_sentences = speaker.sentences
         rest = getattr(reply, "rest", None)
+        if not speaker.sentences and not rest:
+            rest = str(reply)  # only the holding phrase is in the stream: the whole answer follows it
         if rest:
-            await speaker.say(rest, getattr(reply, "voice", None))
+            voice = getattr(reply, "voice", None)
+            wtv = None
+            if settings is not None:
+                wtv = getattr(settings, "whisper_tts_voice", None)
+            if wtv is None and getattr(run, "whispered", False):
+                try:
+                    wtv = current_settings().whisper_tts_voice
+                except HubError:
+                    wtv = None
+            voice = (wtv if getattr(run, "whispered", False) and wtv
+                     else voice or (settings.tts_voice if settings is not None else None))
+            await speaker.say(rest, voice)
+        if note:
+            await speaker.say(note, speaker.default_voice or getattr(reply, "voice", None)
+                              or (settings.tts_voice if settings is not None else None))
         await speaker.finish()
+        run.playback_until = speaker.playback_ends()
         run.mark("spoken")
         # Firmware that started the stream on INTENT_PROGRESS does not play this again; older firmware
         # that ignores INTENT_PROGRESS plays it now, whole.
         self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_END, {"url": speaker.node_url})
 
-    async def _speak_whole_reply(self, run: Run, settings: VoiceSettings, reply: str) -> None:
+    async def _say_ask_later(self, run: Run, settings: VoiceSettings, speaker: _StreamSpeaker | None,
+                             whisper_voice: str | None) -> None:
+        """Jarvis timed out or is too busy: say so plainly (``timeout_line``) instead of going quiet.
+
+        Into the open stream when the node is already playing it (the holding phrase, hold music or
+        part of the answer), else as a whole reply. The run still ends with its error; failing to say
+        the line changes nothing about that.
+        """
+        line = settings.timeout_line
+        if not line:
+            return
+        try:
+            self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_END, {
+                "conversation_id": run.conversation_id, "continue_conversation": "0"})
+            self._publish_satellite("responding")
+            self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_START, {"text": line})
+            run.mark("tts")
+            if speaker is not None and (speaker.sentences or speaker.held) and not speaker.stream.closed:
+                run.reply_mode = "stream"
+                run.streamed_sentences = speaker.sentences
+                await speaker.say(line, whisper_voice or settings.tts_voice)
+                await speaker.finish()
+                run.playback_until = speaker.playback_ends()
+                run.mark("spoken")
+                self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_END, {"url": speaker.node_url})
+            else:
+                if speaker is not None:
+                    await speaker.abort()
+                await self._speak_whole_reply(run, settings, line)
+            run.timeout_line = True
+        except PipelineError as exc:
+            self.log.warning("voice satellite %s run %s: the ask-later line could not be said: %s",
+                             self.name, run.id, exc.message)
+
+    async def _speak_whole_reply(self, run: Run, settings: VoiceSettings, reply: str, *,
+                                 note: str | None = None) -> None:
         run.reply_mode = "whole"
         try:
             # The person's own voice when the gateway chose one, else the hub's
             # setting, else (None) Jarvis's.
-            url = await BACKENDS.speak(reply, getattr(reply, "voice", None) or settings.tts_voice)
+            voice = getattr(reply, "voice", None)
+            voice = (settings.whisper_tts_voice if getattr(run, "whispered", False) and settings.whisper_tts_voice
+                     else voice or settings.tts_voice)
+            url = await BACKENDS.speak(f"{reply} {note}" if note else reply, voice)
         except (HubError, OSError) as exc:
             raise PipelineError("tts-failed", f"Jarvis's voice could not speak the reply: {exc}") from exc
+        if run.reply_gain != 1.0:
+            BACKENDS.quieten(url, run.reply_gain)
         run.mark("spoken")
         run.mark("first_audio")
         # The node fetches the reply in its own announcement format (the hub's ffmpeg proxy), never the
         # 22050 Hz original it would have to resample while it plays; streamed audio uses the original.
         self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_END, {"url": self._node_url(url)})
+        # How long it plays matters only while a whisper's lowered volume waits for it to finish.
+        seconds = _clip_seconds(BACKENDS.clip_audio(url)) if self._volume.run is run else None
+        run.playback_until = time.monotonic() + (seconds or 0.0) + PLAYBACK_FETCH_S
         if self.flags & int(VoiceAssistantFeature.SPEAKER):
             await self._stream_reply(run, url)
+            run.playback_until = time.monotonic() + (seconds or 0.0) * 0.1
 
     def _fail(self, run: Run, exc: PipelineError) -> None:
         run.outcome = "error"
         run.error = {"code": exc.code, "message": exc.message}
         self.last_error = {**run.error, "run": run.id, "at": utcnow().isoformat()}
         self.log.warning("voice satellite %s run %s: %s (%s)", self.name, run.id, exc.message, exc.code)
-        if exc.code != "satellite-disconnected":
+        # A run whose ask-later line was said ends quietly: the person heard what happened, and an
+        # error now would cut the node's playback short with an error chime.
+        if exc.code != "satellite-disconnected" and not run.timeout_line:
             with contextlib.suppress(PipelineError):
                 self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_ERROR,
                             {"code": exc.code, "message": exc.message})
@@ -1500,7 +2187,8 @@ class SatelliteVoice:
         self.log.info("voice satellite %s run %s: %s%s; ended by %s%s%s; %s", self.name, run.id, run.outcome,
                       f" ({run.error['code']})" if run.error else "", run.ended_by or "-",
                       "; follow-up" if run.follow_up else "", reply,
-                      " ".join(f"{k}={v}ms" for k, v in t.items()) or "no timings")
+                      (" ".join(f"{k}={v}ms" for k, v in t.items()) or "no timings")
+                      + (" timeout_line=1" if run.timeout_line else ""))
         if self.client is not None and self.subscribed:
             self._publish_satellite("idle")
 
@@ -1528,6 +2216,9 @@ class SatelliteVoice:
         started = loop.time()
         gain = float(getattr(self._audio_settings, "volume_multiplier", 1.0) or 1.0)
         boost = InputGain(settings.input_gain)
+        heard = bytearray()
+        self._command_audio = heard
+        keep = int(WHISPER_AUDIO_MAX_S * BYTES_PER_S)
         while True:
             now = loop.time()
             limit = settings.max_seconds if vad.speech_frames else settings.no_speech_seconds
@@ -1553,6 +2244,8 @@ class SatelliteVoice:
                 if not chunk:
                     continue
             chunk = _gain(chunk, gain)
+            if len(heard) < keep:
+                heard += chunk[: keep - len(heard)]
             await stt.send(boost.apply(chunk))
             for edge in vad.process(chunk):
                 if edge == "start":
@@ -1571,6 +2264,169 @@ class SatelliteVoice:
                       "detector": vad.engine, "not_speech_ms": vad.rejected_frames * EnergyVAD.FRAME_MS}
         self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_STT_VAD_END, {})
 
+    def _satellite_device_id(self) -> str | None:
+        ent = self.satellite_entity()
+        if ent is not None and getattr(ent, "device_id", None):
+            return ent.device_id
+        for e in self.driver.entities:
+            if getattr(e, "device_id", None):
+                return e.device_id
+        return None
+
+    def _is_whispered(self) -> bool:
+        dev = self._satellite_device_id()
+        for ent in self.hub.entities.values():
+            if dev is not None and getattr(ent, "device_id", None) != dev:
+                continue
+            if ent.domain != "binary_sensor":
+                continue
+            fields = " ".join(str(x or "") for x in (getattr(ent, "unique_id", None),
+                                                     ent.entity_id, getattr(ent, "original_name", None),
+                                                     getattr(ent, "name", None))).lower()
+            if "last_request_whispered" not in fields and "last request whispered" not in fields:
+                continue
+            st = self.hub.states.get(ent.entity_id)
+            if st is not None and str(st.state).lower() == "on":
+                return True
+        return False
+
+    def _whisper_volume_target(self) -> tuple[Any, float | None, float, Any]:
+        dev = self._satellite_device_id()
+        candidates = []
+        for ent in self.hub.entities.values():
+            if dev is not None and getattr(ent, "device_id", None) != dev:
+                continue
+            if ent.domain not in ("number", "media_player"):
+                continue
+            fields = " ".join(str(x or "") for x in (getattr(ent, "unique_id", None),
+                                                     ent.entity_id, getattr(ent, "original_name", None),
+                                                     getattr(ent, "name", None))).lower()
+            if ent.domain == "number":
+                if "assistant_volume" not in fields and "assistant volume" not in fields:
+                    continue
+                candidates.append(("number", ent))
+            else:
+                candidates.append(("media", ent))
+        # prefer assistant_volume number if available
+        number_ent = None
+        media_ent = None
+        for kind, ent in candidates:
+            if kind == "number" and number_ent is None:
+                number_ent = ent
+            if kind == "media" and media_ent is None:
+                media_ent = ent
+        ent = number_ent if number_ent is not None else media_ent
+        if ent is None:
+            return None, None, 1.0, None
+        if ent.domain == "media_player":
+            st = self.hub.states.get(ent.entity_id)
+            attrs = dict(st.attributes or {}) if st is not None else {}
+            raw = attrs.get("volume_level")
+            try:
+                cur = float(raw) if raw is not None else None
+            except (TypeError, ValueError):
+                cur = None
+            return ent, cur, 1.0, cur
+        st = self.hub.states.get(ent.entity_id)
+        if st is None:
+            return ent, None, 1.0, None
+        try:
+            val = float(st.state)
+        except (TypeError, ValueError):
+            return ent, None, 1.0, None
+        attrs = dict(getattr(st, "attributes", None) or {})
+        max_attr = attrs.get("max")
+        try:
+            max_val = float(max_attr) if max_attr is not None else None
+        except (TypeError, ValueError):
+            max_val = None
+        scale = 100.0 if ((max_val is not None and max_val > 1) or val > 1) else 1.0
+        normalized = val / scale if scale else val
+        return ent, normalized, scale, val
+
+    async def _apply_volume(self, entity: Any, value: float) -> None:
+        if entity.domain == "number":
+            await self.hub.call_service("number", "set_value",
+                                        {"entity_id": entity.entity_id, "value": value})
+        else:
+            await self.hub.call_service("media_player", "volume_set",
+                                        {"entity_id": entity.entity_id, "volume_level": value})
+
+    # -- whisper mode ---------------------------------------------------------------------
+    def _whisper_settings(self, settings: VoiceSettings) -> voice_whisper.WhisperSettings:
+        """Whisper mode as set in the hub (``PUT /hub/voice/settings``); on by default."""
+        return voice_whisper.load_settings(getattr(self.hub, "store", None), settings.whisper_volume)
+
+    @property
+    def _level_key(self) -> str | None:
+        entry = getattr(self.driver, "entry", None)
+        return LEVEL_KV.format(entry_id=entry.entry_id) if entry is not None else None
+
+    def _level_baseline(self) -> voice_whisper.LevelBaseline:
+        store, key = getattr(self.hub, "store", None), self._level_key
+        if store is None or key is None:
+            return voice_whisper.LevelBaseline()
+        return voice_whisper.LevelBaseline.from_dict(store.get_kv(key))
+
+    def _decide_whisper(self, run: Run, whisper: voice_whisper.WhisperSettings,
+                        features: voice_whisper.Features | None) -> None:
+        """Whether this command was whispered: the satellite says so (``last_request_whispered``), or its
+        audio is pitchless and quieter than this satellite's usual speech (``voice_whisper.decide``).
+        A clearly spoken command teaches the satellite's usual level."""
+        if not whisper.enabled:
+            run.whispered = False
+            run.whisper = {"mode": "off"}
+            return
+        baseline = self._level_baseline()
+        usual = baseline.usual_db
+        by_satellite = self._is_whispered()
+        by_audio = voice_whisper.decide(features, usual, whisper.level_drop_db)
+        run.whispered = by_satellite or by_audio
+        run.whisper = {**(features.public() if features is not None else {}),
+                       "usual_db": round(usual, 1) if usual is not None else None,
+                       "by": "satellite" if by_satellite else "audio" if by_audio else None}
+        if (features is not None and not run.whispered
+                and features.voiced_ratio > voice_whisper.MAX_VOICED_RATIO):
+            baseline.add(features.level_db)
+            store, key = getattr(self.hub, "store", None), self._level_key
+            if store is not None and key is not None:
+                try:
+                    store.set_kv(key, baseline.to_dict())
+                except Exception as exc:  # the next command learns it instead
+                    self.log.warning("voice satellite %s: the usual speech level could not be saved: %s",
+                                     self.name, exc)
+
+    def _log_summary(self, run: Run) -> None:
+        """One line per run: whisper (with the measured features), new voice, and the volume."""
+        if run.summary_logged:
+            return
+        run.summary_logged = True
+        w = run.whisper or {}
+        if w.get("mode") == "off":
+            whisper = "off"
+        elif "level_db" in w:
+            usual = w.get("usual_db")
+            whisper = (f"{'yes' if run.whispered else 'no'} (level {w['level_db']} dBFS, usual "
+                       f"{usual if usual is not None else 'not learned yet'}, voiced {w['voiced']}, "
+                       f"hnr {w['hnr_db']} dB, tilt {w['tilt_db']} dB{', by ' + w['by'] if w.get('by') else ''})")
+        else:
+            whisper = ("yes (by satellite)" if run.whispered else "no (not measured)") if run.whisper else "-"
+        new_voice = ("-" if run.new_voice is None else
+                     "yes, invited" if run.new_voice_invited else "yes" if run.new_voice else "no")
+        volume = "unchanged"
+        if run.volume:
+            volume = run.volume + (f", {run.volume_restored}" if run.volume_restored else "")
+        self.log.info("voice satellite %s run %s: whisper=%s; new_voice=%s; volume=%s",
+                      self.name, run.id, whisper, new_voice, volume)
+
+    def own_media_player(self) -> str | None:
+        """The satellite's own speaker (a ``media_player`` on the same device), when it has one."""
+        dev = self._satellite_device_id()
+        players = [e for e in self.driver.entities if e.domain == "media_player"]
+        same = [e for e in players if dev is not None and getattr(e, "device_id", None) == dev]
+        pick = (same or players or [None])[0]
+        return pick.entity_id if pick is not None else None
+
     def _context(self, run: Run) -> dict[str, Any]:
         ent = self.satellite_entity()
         area_id, area = self.area()
@@ -1583,11 +2439,17 @@ class SatelliteVoice:
             "conversation_id": run.conversation_id,
             "wake_word": run.wake_word,
         }
+        # "Play music" with no device named plays here, on the satellite's own speaker (gateway fast path).
+        player = self.own_media_player()
+        if player:
+            ctx["media_player"] = player
         if self._pending is not None:
             at, extra = self._pending
             self._pending = None
             if time.monotonic() - at <= PENDING_CONTEXT_S:
                 ctx.update(extra)
+        if getattr(run, "whispered", False):
+            ctx["whispered"] = True
         return ctx
 
     def _node_url(self, url: str) -> str:
@@ -1600,7 +2462,7 @@ class SatelliteVoice:
         audio = BACKENDS.clip_audio(url)
         if not audio:
             raise PipelineError("tts-failed", "the spoken reply expired before it could be sent")
-        pcm = to_satellite_pcm(audio)
+        pcm = to_satellite_pcm(audio)  # already quieter for a whispered command (``BACKENDS.quieten``)
         self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_STREAM_START, {})
         udp_target = self._udp_proto.remote if self._udp_proto is not None else None
         for i in range(0, len(pcm), STREAM_CHUNK):

@@ -14,6 +14,7 @@ from typing import Any
 import redis.asyncio as redis
 
 from services.identity.crypto import decrypt, encrypt
+from services.telemetry import collector_health
 from services.telemetry.config import (
     GEO_SVC,
     IDENTITY_SVC,
@@ -246,6 +247,10 @@ async def append_activity(rc, user: str, event: dict[str, Any]) -> None:
     key = f"{ACTIVITY_PREFIX}{user}"
     await rc.rpush(key, json.dumps(event))
     await rc.ltrim(key, -ACTIVITY_MAX, -1)
+    # When each kind last arrived (not when it happened): a phone that stops
+    # sending calls and texts shows up against its other activity
+    # (collector_health.staleness).
+    await collector_health.note_arrival(rc, user, str(event.get("feature") or "other"))
 
 
 async def list_activity(rc, user: str, limit: int = 50) -> list[dict[str, Any]]:

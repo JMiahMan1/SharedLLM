@@ -6,7 +6,7 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * Install approvals (Phase 11 step 5, Family Link's "ask to install"): an app
+ * Install approvals (Phase 11 step 5, "ask to install"): an app
  * installed on a child's phone after the guard first ran stays closed until a
  * parent says yes. Apps already on the phone then (the baseline) are left as
  * they were; Jarvis itself is never held.

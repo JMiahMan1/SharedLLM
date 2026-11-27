@@ -50,7 +50,7 @@ def test_home_merges_ma_shelves_with_abs_last_played(client, upstream, ma):
         {"uri": "library://track/1", "name": "Recent Song"}
     ]
     ma["responses"]["music/in_progress_items"] = [
-        {"uri": "library://audiobook/9", "name": "Continue Book", "media_type": "audiobook"}
+        {"uri": "library://podcast/9", "name": "Continue Podcast", "media_type": "podcast"}
     ]
     ma["responses"]["music/playlists/library_items"] = [
         {"uri": "library://playlist/6", "name": "Road Trip"}
@@ -77,7 +77,7 @@ def test_home_merges_ma_shelves_with_abs_last_played(client, upstream, ma):
     body = resp.json()
     assert [item["name"] for item in body["recent"]] == ["Recent Song", "Abs Book"]
     assert body["recent"][1]["uri"] == "abs://b1"
-    assert body["continue"][0]["name"] == "Continue Book"
+    assert body["continue"][0]["name"] == "Continue Podcast"
     assert body["playlists"][0]["name"] == "Road Trip"
     assert body["favorites"][0]["name"] == "Fav Song"
     assert body["radio"] == []
@@ -89,6 +89,39 @@ def test_home_merges_ma_shelves_with_abs_last_played(client, upstream, ma):
         if command == "music/tracks/library_items"
     ]
     assert favorite_calls and favorite_calls[0]["favorite"] is True
+
+
+def test_a_podcast_in_last_played_is_a_podcast_not_a_book(client, upstream, ma):
+    """Continue listening carries both; a show opens to its episodes."""
+    for command in (
+        "music/recently_played_items",
+        "music/in_progress_items",
+        "music/playlists/library_items",
+        "music/tracks/library_items",
+        "music/radios/library_items",
+    ):
+        ma["responses"][command] = []
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {
+                "books": [
+                    {"id": "b1", "title": "A Book", "has_podcast": False},
+                    {"id": "p1", "title": "A Show", "has_podcast": True},
+                ]
+            },
+        },
+    )
+
+    resp = client.get("/api/media/home")
+
+    assert resp.status_code == 200, resp.text
+    recent = {item["name"]: item for item in resp.json()["recent"]}
+    assert recent["A Book"]["media_type"] == "audiobook"
+    assert recent["A Show"]["media_type"] == "podcast"
 
 
 def test_home_partial_when_ma_is_unreachable(client, upstream, ma):
@@ -296,6 +329,34 @@ def test_item_abs_podcast_detail(client, upstream, ma):
     assert body["name"] == "The Daily"
     assert body["children"][0]["uri"] == "abs://pod1/ep1"
     assert body["children"][0]["media_type"] == "podcast_episode"
+
+
+def test_item_abs_podcast_episode_numbers_that_are_not_numbers(client, upstream, ma):
+    """ABS keeps an episode number as the feed wrote it: "" or "Bonus" is normal."""
+    from conftest_media import TEST_ABS_URL
+
+    mock_upstream(
+        upstream,
+        "GET",
+        f"{TEST_ABS_URL}/api/items/pod2",
+        payload={
+            "media": {
+                "metadata": {"title": "Night Signals", "authorName": "Someone"},
+                "episodes": [
+                    {"id": "ep1", "title": "Pilot Episode", "duration": 60, "episode": ""},
+                    {"id": "ep2", "title": "An Extra", "duration": 60, "episode": "Bonus"},
+                    {"id": "ep3", "title": "Third", "duration": 60, "episode": "3"},
+                ],
+            }
+        },
+    )
+
+    resp = client.get("/api/media/item", params={"uri": "abs://pod2"})
+
+    assert resp.status_code == 200, resp.text
+    indexes = [child["index"] for child in resp.json()["children"]]
+    # Position stands in for a number the feed did not write; a real one is kept.
+    assert indexes == [1, 2, 3]
 
 
 def test_item_unknown_ma_uri_is_404(client, ma):
@@ -801,3 +862,165 @@ def test_an_audiobookshelf_cover_is_its_cover_url_not_its_path_on_disk():
     assert _media_abs_cover("p1", "/api/items/p1/cover?width=400") == "/api/items/p1/cover?width=400"
     assert _media_abs_cover("p1", "https://example.org/c.jpg") == "https://example.org/c.jpg"
     assert _media_abs_cover("p1", None) == ""
+
+
+def test_abs_item_detail_computes_chapter_start_and_duration_from_start_end(client, upstream):
+    """Real Audiobookshelf chapters send ``start`` and ``end`` (seconds) with no ``duration`` field."""
+    from conftest_media import TEST_ABS_URL
+
+    mock_upstream(
+        upstream,
+        "GET",
+        f"{TEST_ABS_URL}/api/items/wild-1",
+        payload={
+            "id": "wild-1",
+            "media": {
+                "duration": 5400.0,
+                "metadata": {"title": "Wild at Heart", "authorName": "John Eldredge"},
+                "chapters": [
+                    {"id": 0, "start": 0, "end": 1800.5, "title": "Chapter 1"},
+                    {"id": 1, "start": 1800.5, "end": 3900.0, "title": "Chapter 2"},
+                    {"id": 2, "start": 3900.0, "end": 5400.0, "title": "Chapter 3"},
+                ],
+            },
+        },
+    )
+    mock_upstream(upstream, "GET", f"{TEST_ABS_URL}/api/me/progress/wild-1", status=404, payload={})
+
+    resp = client.get("/api/media/item", params={"uri": "abs://wild-1"})
+    assert resp.status_code == 200, resp.text
+    children = resp.json()["children"]
+    assert [(c["name"], c["start"], c["duration"]) for c in children] == [
+        ("Chapter 1", 0.0, 1800.5),
+        ("Chapter 2", 1800.5, 2099.5),
+        ("Chapter 3", 3900.0, 1500.0),
+    ]
+
+
+def test_search_and_home_drop_music_assistant_mirrored_audiobooks(client, upstream, ma):
+    """Audiobooks come solely from the caller's Audiobookshelf account, never duplicated by MA."""
+    ma["responses"]["music/search"] = {
+        "tracks": [{"uri": "library://track/1", "name": "Wild Things"}],
+        "audiobooks": [
+            {"uri": "library://audiobook/7", "name": "Wild at Heart (Unabridged)", "media_type": "audiobook"},
+        ],
+    }
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {
+                "books": [{"id": "abs-wild-1", "title": "Wild at Heart (Unabridged)", "author": "John Eldredge"}],
+                "podcasts": [],
+                "authors": [],
+            },
+        },
+    )
+    body = client.get("/api/media/search", params={"q": "Wild"}).json()
+    assert [b["uri"] for b in body["audiobooks"]] == ["abs://abs-wild-1"]
+
+    # Listen Now also strips MA's mirrored audiobooks from recent so ABS books are not duplicated.
+    ma["responses"]["music/recently_played_items"] = [
+        {"uri": "library://track/1", "name": "Song", "media_type": "track"},
+        {"uri": "library://audiobook/7", "name": "Wild at Heart (Unabridged)", "media_type": "audiobook"},
+    ]
+    ma["responses"]["music/in_progress_items"] = [
+        {"uri": "library://audiobook/7", "name": "Wild at Heart (Unabridged)", "media_type": "audiobook"},
+        {"uri": "library://podcast/9", "name": "Pod", "media_type": "podcast"},
+    ]
+    ma["responses"]["music/playlists/library_items"] = []
+    ma["responses"]["music/tracks/library_items"] = []
+    ma["responses"]["music/radios/library_items"] = []
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {
+                "books": [{"id": "abs-wild-1", "title": "Wild at Heart (Unabridged)", "author": "John Eldredge"}],
+            },
+        },
+    )
+    home = client.get("/api/media/home").json()
+    assert [i["uri"] for i in home["recent"]] == ["library://track/1", "abs://abs-wild-1"]
+    assert [i["uri"] for i in home["continue"]] == ["library://podcast/9"]
+
+
+def test_search_lists_a_mirrored_podcast_once_as_the_audiobookshelf_item(client, upstream, ma):
+    """The same show arrived twice and only one of the two entries worked.
+
+    Music Assistant mirrors the Audiobookshelf podcast library, so searching for
+    a show returned its abs:// item (episodes, artwork, download settings) next to
+    MA's library://podcast/<n> copy of the same show. The Audiobookshelf entry is
+    the one that opens, so the mirror is dropped by title while a show only MA
+    knows is still listed.
+    """
+    ma["responses"]["music/search"] = {
+        "podcasts": [
+            {"uri": "library://podcast/15", "name": "Night Signals", "media_type": "podcast"},
+            {"uri": "library://podcast/22", "name": "Something MA Only Has", "media_type": "podcast"},
+        ],
+    }
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {
+                "books": [],
+                "podcasts": [{"id": "abs-signals", "title": "Night Signals"}],
+                "authors": [],
+            },
+        },
+    )
+    body = client.get("/api/media/search", params={"q": "signals"}).json()
+
+    uris = [item["uri"] for item in body["podcasts"]]
+    assert uris.count("abs://abs-signals") == 1
+    assert "library://podcast/15" not in uris
+    # A show only Music Assistant has is not hidden by the one ABS knows.
+    assert "library://podcast/22" in uris
+
+
+def test_a_podcast_title_that_differs_only_in_punctuation_is_still_the_same_show(client, upstream, ma):
+    ma["responses"]["music/search"] = {
+        "podcasts": [
+            {"uri": "library://podcast/15", "name": "The Pioneer's Journal (Audio)", "media_type": "podcast"},
+        ],
+    }
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {"books": [], "podcasts": [{"id": "abs-journal", "title": "the pioneers journal"}], "authors": []},
+        },
+    )
+    body = client.get("/api/media/search", params={"q": "pioneers"}).json()
+    assert [item["uri"] for item in body["podcasts"]] == ["abs://abs-journal"]
+
+
+def test_blank_abs_podcast_title_does_not_drop_non_ascii_ma_podcasts(client, upstream, ma):
+    """An ABS entry whose title normalizes to empty must not wipe out non-ASCII MA shows."""
+    ma["responses"]["music/search"] = {
+        "podcasts": [
+            {"uri": "library://podcast/31", "name": "東京ポッドキャスト", "media_type": "podcast"},
+        ],
+    }
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {"books": [], "podcasts": [{"id": "abs-blank", "title": "..."}], "authors": []},
+        },
+    )
+    body = client.get("/api/media/search", params={"q": "podcast"}).json()
+    uris = [item["uri"] for item in body["podcasts"]]
+    assert "library://podcast/31" in uris

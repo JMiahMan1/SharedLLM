@@ -64,6 +64,9 @@ def index_capabilities():
         "WorkspaceFilePatchRequest": "Surgically patches a file in the local Git workspace using old_text/new_text chunks. PREFERRED for small code edits.",
         "WorkspaceShellRequest": "Executes a shell command in the workspace root. Use for advanced CLI operations.",
         "WorkspaceSearchRequest": "Performs a codebase-wide search (grep/ripgrep) to find patterns or function definitions.",
+        "WorkspaceListRequest": "Lists files under a path in the workspace, honouring .gitignore.",
+        "MissionObjectivesRequest": "Sets a Raven mission's objective checklist (replaces it; a dropped item needs a note).",
+        "MissionCompleteRequest": "Ends a Raven mission with a debrief, accepted only when objectives are closed and written files verified.",
         "WorkspaceLintRequest": "Runs linters (black, flake8, eslint, etc.) on a specific file to ensure code quality.",
         "WorkspaceCreateRequest": "Creates a new isolated workspace environment (id, display_name, scope).",
         "WorkspaceSettingsUpdateRequest": "Updates an existing workspace's settings (repo_url, git_remote, default_branch, display_name, sync_mode, nextcloud_path).",
@@ -96,6 +99,7 @@ def index_capabilities():
         "SpeakerIdentifyRequest": "Identifies which enrolled household speaker is speaking in a workspace audio clip.",
         "ListVoicesRequest": "Lists enrolled speaker voice profiles and curated podcast host pairs.",
         "DocumentBroadcastRequest": "Reads a Nextcloud document and broadcasts it as TTS to a Home Assistant media player.",
+        "DropInRequest": "Starts, ends or lists Echo-to-Echo Drop In calls to a room or to the room a person is in.",
         "NightModeRequest": "Runs the composite night-mode scene across lights, climate, and media.",
         "StorageTextToAudioRequest": "Converts a text file in Nextcloud storage to an audio file using Kokoro narration.",
         "AudiobookRegenerateRequest": "Regenerates an audiobook chapter or full book from text files via TTS.",
@@ -105,6 +109,32 @@ def index_capabilities():
     # Inline JSON schemas for string-type / raw-JSON tools that have no Pydantic
     # model in services.execution.schemas or services.gateway.schemas.
     _inline_schemas = {
+        "MissionObjectivesRequest": json.dumps({
+            "title": "MissionObjectivesRequest",
+            "type": "object",
+            "properties": {
+                "objectives": {"title": "Objectives", "type": "array", "maxItems": 12, "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "text": {"type": "string", "maxLength": 200},
+                        "status": {"type": "string", "enum": ["pending", "in_progress", "done", "dropped"]},
+                        "note": {"type": "string", "description": "Required when status is dropped: why."},
+                    },
+                    "required": ["text", "status"],
+                }},
+            },
+            "required": ["objectives"],
+        }, indent=2),
+        "MissionCompleteRequest": json.dumps({
+            "title": "MissionCompleteRequest",
+            "type": "object",
+            "properties": {
+                "summary": {"title": "Summary", "type": "string", "description": "What was done; this is the mission's answer."},
+                "verification": {"title": "Verification", "type": "string", "description": "How it was checked, e.g. the test command and its result."},
+            },
+            "required": ["summary"],
+        }, indent=2),
         "RavenMissionRequest": json.dumps({
             "title": "RavenMissionRequest",
             "type": "object",

@@ -8,10 +8,12 @@ background, so Jarvis and the Fasting card see it without a full crawl.
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
 import re
+import time
 from collections import defaultdict
 from contextlib import suppress
 from typing import Any
@@ -19,16 +21,19 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from services.storage import book_lookup
+from services.common import book_metadata
+from services.storage import book_cache, book_chapters, book_lookup, book_sources
 from services.storage.artifacts_api import require_internal_secret
 from services.storage.calibre_writer import MAX_BOOK_BYTES, LibraryWriteError, LibraryWriter
 from services.storage.models import IndexScanRequest, ProviderConfig
 from services.storage.providers import build_provider
+from services.storage.providers_impl.calibre import _TEXT_FORMATS, forget_catalog_checks
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/calibre", dependencies=[Depends(require_internal_secret)])
 
-_TEXT_FORMATS = {"EPUB", "AZW3", "MOBI", "FB2"}
+#: Formats whose text Jarvis reads are the shelf provider's own ``_TEXT_FORMATS``
+#: (PDF among them): a book in one of them is searchable by its words, not its title only.
 
 
 def _provider(library_path: str):
@@ -39,14 +44,15 @@ def _provider(library_path: str):
 
 @contextlib.asynccontextmanager
 async def _opened(library_path: str):
-    """The library's provider, closed afterwards: each request builds one, and its
-    Nextcloud session was left for the garbage collector ("Unclosed client
-    session" on every library request)."""
-    provider = _provider(library_path)
-    try:
-        yield provider
-    finally:
-        await provider.close()
+    """The library's provider, kept open between requests.
+
+    ``build_provider`` keeps one provider per login and library, and its
+    Nextcloud session with it: closing it after each request (as this once did,
+    when every request built its own) made the next request open a new
+    connection and have Nextcloud check the password again, seconds per call.
+    ``build_provider`` closes a provider when it drops it.
+    """
+    yield _provider(library_path)
 
 
 async def _catalog(library_path: str) -> dict[int, dict[str, Any]]:
@@ -132,6 +138,181 @@ async def list_tags(req: LibraryRef):
     return {"tags": [{"name": name, "books": n} for name, n in tags]}
 
 
+class ChapterQuery(BaseModel):
+    library_path: str
+    chapter: str = Field(default="", max_length=200)
+    part: int = Field(default=1, ge=1, le=1000)
+    max_chars: int = Field(default=book_chapters.DEFAULT_PART_CHARS, ge=500, le=200000)
+
+
+#: Formats whose chapters can be read, best first.
+_CHAPTER_FORMATS = ("EPUB", "PDF", "TXT")
+
+
+def _locate(book: dict[str, Any] | None, book_id: int) -> tuple[str, str]:
+    """The format chosen for chapters and that file's path, or the refusal."""
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"No book with id {book_id} in the library.")
+    files = {f["format"]: f["path"] for f in _files(book)}
+    fmt = next((f for f in _CHAPTER_FORMATS if f in files), None)
+    if fmt is None:
+        stored = ", ".join(book.get("formats") or []) or "no file"
+        raise HTTPException(
+            status_code=422,
+            detail=f"{book['title']} is stored only as {stored}, which has no chapter reader here. "
+            "Converting it to EPUB in Calibre makes its chapters readable.",
+        )
+    return fmt, files[fmt]
+
+
+async def _file_signature(provider: Any, book: dict[str, Any], path: str) -> tuple[Any, ...]:
+    """What says the book file is unchanged: its WebDAV ETag, size and mtime.
+
+    When the server cannot be asked, the catalogue's own record of the file
+    (Calibre rewrites metadata.db whenever it replaces a format) stands in.
+    """
+    stat = getattr(provider.client, "stat", None)
+    found = None
+    if callable(stat):
+        with suppress(Exception):
+            found = await stat(path)
+    if isinstance(found, dict) and any(found.values()):
+        return ("dav", found.get("etag"), found.get("size"), found.get("mtime"))
+    size = next((f.get("size") for f in _files(book) if f["path"] == path), None)
+    return ("catalogue", size, getattr(provider, "_catalog_digest", None))
+
+
+async def _opened_book(library_path: str, book_id: int) -> tuple[dict[str, Any], str, book_chapters.OpenedBook]:
+    """The book's row, its chapter format, and the book opened for reading, from the cache when unchanged.
+
+    Logs one line per call with where the time went (catalogue, stat, download,
+    open), which is how a slow chapter read is diagnosed.
+    """
+    timings: dict[str, float] = {}
+    started = time.perf_counter()
+    try:
+        async with _opened(library_path) as provider:
+            book = (await provider._load_catalog(refresh=True)).get(book_id)
+            timings["catalogue"] = time.perf_counter() - started
+            fmt, path = _locate(book, book_id)
+            mark = time.perf_counter()
+            signature = await _file_signature(provider, book, path)
+            timings["stat"] = time.perf_counter() - mark
+            key = (getattr(provider, "catalog_key", library_path), book_id, path)
+
+            async def load() -> tuple[book_chapters.OpenedBook, int]:
+                mark = time.perf_counter()
+                data = await provider.client.get_file_bytes(path, timeout=provider.download_timeout)
+                timings["download"] = time.perf_counter() - mark
+                if not data:
+                    raise HTTPException(status_code=502, detail=f"The {fmt} file of {book['title']} could not be downloaded.")
+                timings["mb"] = len(data) / 1e6
+                mark = time.perf_counter()
+                try:
+                    opened = await asyncio.to_thread(book_chapters.open_book, data, fmt)
+                except book_chapters.ChapterError as exc:
+                    raise HTTPException(status_code=422, detail=f"{book['title']}: {exc}") from exc
+                timings["open"] = time.perf_counter() - mark
+                return opened, opened.size_bytes()
+
+            opened, cached = await book_cache.BOOKS.get_or_load(key, signature, load)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.warning("[library] book %s file read failed: %s", book_id, exc)
+        raise HTTPException(status_code=502, detail="The book file could not be read from the library.") from exc
+    log.info(
+        "[library] book %s (%s): %s; %s, total %.2f s",
+        book_id, fmt, "cached" if cached else "downloaded and opened",
+        ", ".join(f"{k} {v:.1f} MB" if k == "mb" else f"{k} {v:.2f} s" for k, v in timings.items()),
+        time.perf_counter() - started,
+    )
+    return book, fmt, opened
+
+
+def _as_opened(fmt: str, data: bytes | book_chapters.OpenedBook) -> book_chapters.OpenedBook:
+    return data if isinstance(data, book_chapters.OpenedBook) else book_chapters.open_book(data, fmt)
+
+
+def chapter_payload(book: dict[str, Any], fmt: str, data: bytes | book_chapters.OpenedBook, *, chapter: str = "",
+                    part: int = 1, max_chars: int = book_chapters.DEFAULT_PART_CHARS) -> dict[str, Any]:
+    """The book's contents and, when ``chapter`` is named, that chapter's text (one part of it)."""
+    try:
+        opened = _as_opened(fmt, data)
+    except book_chapters.ChapterError as exc:
+        raise HTTPException(status_code=422, detail=f"{book['title']}: {exc}") from exc
+    chapters = opened.chapters
+    out: dict[str, Any] = {
+        "book": _row(book), "format": fmt, "source": opened.source, "chapter": None,
+    }
+    if not str(chapter or "").strip():
+        out["chapters"] = [c.row(i) for i, c in enumerate(chapters)]
+        return out
+    try:
+        index = book_chapters.find_chapter(chapters, chapter)
+    except book_chapters.ChapterError as exc:
+        raise HTTPException(status_code=404, detail=f"{book['title']}: {exc}") from exc
+    started = time.perf_counter()
+    text = opened.chapter_text(index)
+    extract_s = time.perf_counter() - started
+    found = chapters[index]
+    out["chapters"] = [c.row(i) for i, c in enumerate(chapters)]
+    parts = book_chapters.split_parts(text, max_chars)
+    if part > len(parts):
+        raise HTTPException(status_code=422, detail=f"{book['title']}, {found.title}: there are only {len(parts)} parts.")
+    out["chapter"] = {**found.row(index), "part": part, "parts": len(parts), "text": parts[part - 1]}
+    log.info("[library] book %s chapter %r: extracted in %.2f s (%d chars, %d pages read so far)",
+             book.get("id"), chapter, extract_s, len(text), opened.pages_extracted)
+    return out
+
+
+def _resize_cached(opened: book_chapters.OpenedBook) -> None:
+    """A PDF chapter just read grew its cache entry; keep the byte budget honest."""
+    if isinstance(opened, book_chapters.OpenedBook):
+        book_cache.BOOKS.resize_value(opened, opened.size_bytes())
+
+
+@router.post("/books/{book_id}/chapters")
+async def book_chapter_list(book_id: int, req: ChapterQuery):
+    """A book's chapters (from its contents, outline or headings), and one chapter's text if named."""
+    book, fmt, opened = await _opened_book(req.library_path, book_id)
+    out = await asyncio.to_thread(
+        chapter_payload, book, fmt, opened, chapter=req.chapter, part=req.part, max_chars=req.max_chars,
+    )
+    _resize_cached(opened)
+    return out
+
+
+class BookTextQuery(BaseModel):
+    library_path: str
+    max_chars: int = Field(default=20000, ge=500, le=200000)
+
+
+def text_payload(book: dict[str, Any], fmt: str, data: bytes | book_chapters.OpenedBook, *,
+                 max_chars: int = 20000) -> dict[str, Any]:
+    """A whole book's text, cut at ``max_chars``, read from its own file."""
+    try:
+        text = (data.whole_text() if isinstance(data, book_chapters.OpenedBook)
+                else book_chapters.read_book_text(data, fmt))
+    except book_chapters.ChapterError as exc:
+        raise HTTPException(status_code=422, detail=f"{book['title']}: {exc}") from exc
+    if not text.strip():
+        raise HTTPException(status_code=422, detail=f"{book['title']}: its {fmt} file has no extractable text "
+                            "(a scanned book needs OCR).")
+    total = len(text)
+    return {"book": _row(book), "format": fmt, "text": text[:max_chars], "total_chars": total,
+            "truncated": total > max_chars}
+
+
+@router.post("/books/{book_id}/text")
+async def book_text(book_id: int, req: BookTextQuery):
+    """A book's whole text from its EPUB, PDF or TXT file."""
+    book, fmt, opened = await _opened_book(req.library_path, book_id)
+    out = await asyncio.to_thread(text_payload, book, fmt, opened, max_chars=req.max_chars)
+    _resize_cached(opened)
+    return out
+
+
 _NOISE = re.compile(
     r"\((?:[^)]*)\)|\[(?:[^\]]*)\]|\b(?:annotated|illustrated|unabridged|abridged|revised|updated|complete|"
     r"edition|ed\.|ebook|e-book|kindle|epub|pdf|\d+(?:st|nd|rd|th))\b",
@@ -181,7 +362,7 @@ def audit(books: list[dict[str, Any]], limit: int = 40) -> dict[str, Any]:
         "no_file": {"count": len(no_file), "books": [_row(b) for b in no_file[:limit]],
                     "why": "A record with no book file: nothing to read."},
         "unreadable": {"count": len(unreadable), "books": [_row(b) for b in unreadable[:limit]],
-                       "why": "Only in a format Jarvis cannot read (usually PDF): only the title is searchable. Converting to EPUB in Calibre fixes it."},
+                       "why": "Only in a format Jarvis cannot read (such as DJVU or CBZ): only the title is searchable. Converting to EPUB or PDF in Calibre fixes it."},
         "untagged": {"count": len(untagged), "books": [_row(b) for b in untagged[:limit]],
                      "why": "No tags, so no topic (fasting, prayer, Bible) can find it."},
         "counts": {"copies": len(copies), "editions": len(editions)},
@@ -240,6 +421,8 @@ async def change_tags(book_id: int, req: TagChange, background: BackgroundTasks)
             result = await writer.set_tags(book_id, req.add, req.remove)
         except LibraryWriteError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        finally:
+            forget_catalog_checks()
     background.add_task(_rag_tags, book_id, result["tags"])
     return {"status": "SUCCESS", **result}
 
@@ -255,21 +438,45 @@ def _list(value: str) -> list[str]:
     return [part.strip() for part in re.split(r"[;,]", value) if part.strip()]
 
 
+async def _tag_usage(library_path: str) -> tuple[list[str], dict[str, int]]:
+    """The library's tags, and how many books use each (empty when it cannot be read)."""
+    usage: dict[str, int] = defaultdict(int)
+    with suppress(HTTPException):
+        for book in (await _catalog(library_path)).values():
+            for tag in book["tags"]:
+                usage[tag] += 1
+    return sorted(usage), dict(usage)
+
+
+class CataloguesQuery(BaseModel):
+    #: The person whose integrations apply; empty is the household's.
+    user: str = ""
+
+
+@router.post("/catalogues")
+async def catalogues(req: CataloguesQuery):
+    """The book catalogue integrations as they apply to ``user``: on, ready, why not, last answer."""
+    return await book_sources.status_for(req.user)
+
+
 @router.post("/books/inspect")
 async def inspect_book(
     library_path: str = Form(...),
     file: UploadFile = File(...),
     online: bool = Form(default=True),
+    user: str = Form(default=""),
 ):
-    """Everything Jarvis can find about a book before it is added (nothing is saved)."""
+    """Everything Jarvis can find about a book before it is added (nothing is saved).
+
+    ``user`` is the person asking: their catalogue integrations are used."""
     data = await file.read(MAX_BOOK_BYTES + 1)
     if not data or len(data) > MAX_BOOK_BYTES:
         raise HTTPException(status_code=422, detail=f"Choose a book file under {MAX_BOOK_BYTES // (1024 * 1024)} MB.")
     # Suggestions without the library's own tags are still suggestions.
-    existing: list[str] = []
-    with suppress(HTTPException):
-        existing = sorted({t for book in (await _catalog(library_path)).values() for t in book["tags"]})
-    return await book_lookup.inspect(data, file.filename or "book", existing, online=online)
+    existing, usage = await _tag_usage(library_path)
+    found = await book_sources.settings_for(user) if online else None
+    return await book_lookup.inspect(data, file.filename or "book", existing, online=online, usage=usage,
+                                     catalogues=found)
 
 
 @router.post("/books/add")
@@ -287,18 +494,180 @@ async def add_book(
     isbn: str = Form(default=""),
     language: str = Form(default=""),
     cover_url: str = Form(default=""),
+    # A string, not a bool: an absent bool form field reads as False, which turned
+    # the catalogue lookup off for every caller that did not send it.
+    online: str = Form(default="true"),
+    user: str = Form(default=""),
 ):
+    """Add a book, filled in the way Calibre's "Download metadata" does it.
+
+    What the person typed always wins. Every field left empty is filled from the
+    file itself (EPUB OPF, PDF info), then from the catalogues ``user`` has turned on
+    in Accounts & Integrations (only an answer that is the same book:
+    ``book_lookup.same_book``), and the tags from the library's most used tags that
+    the book's subjects name. The reply says what was filled in, or that the book
+    could not be identified, and which catalogues were asked or skipped and why.
+    """
     data = await file.read(MAX_BOOK_BYTES + 1)
-    cover = await book_lookup.fetch_cover(cover_url) if cover_url else None
+    filename = file.filename or "book"
+    given = {
+        "title": title, "authors": [a for a in re.split(r"\s*(?:&|;)\s*", authors) if a.strip()],
+        "tags": _list(tags), "series": series, "comments": comments, "publisher": publisher,
+        "published": published, "isbn": isbn, "language": language,
+    }
+    existing, usage = await _tag_usage(library_path)
+    is_online = online.strip().lower() not in ("false", "0", "no")
+    found = await book_lookup.lookup(
+        book_lookup.file_details(data, filename) if data and len(data) <= MAX_BOOK_BYTES else book_lookup._blank(),
+        filename, existing, online=is_online, usage=usage,
+        known={"title": title, "authors": given["authors"], "isbn": isbn},
+        catalogues=await book_sources.settings_for(user) if is_online else None,
+    )
+    merged, filled = book_lookup.merge(given, found)
+    cover = None
+    if cover_url:
+        cover = await book_lookup.fetch_cover(cover_url)
+    elif not found.get("cover") and found.get("cover_url"):
+        cover = await book_lookup.fetch_cover(found["cover_url"])
+        if cover:
+            filled["cover"] = str((found.get("sources") or {}).get("cover") or "a catalogue")
     async with _opened(library_path) as provider:
         writer = LibraryWriter(provider.client, library_path)
         try:
             result = await writer.add_book(
-                data, file.filename or "book", title=title, authors=[a for a in re.split(r"\s*(?:&|;)\s*", authors) if a.strip()],
-                tags=_list(tags), series=series, comments=comments, publisher=publisher, published=published,
-                isbn=isbn, language=language, cover=cover,
+                data, filename, title=merged["title"], authors=merged["authors"],
+                tags=merged["tags"], series=merged["series"], comments=merged["comments"],
+                publisher=merged["publisher"], published=merged["published"], isbn=merged["isbn"],
+                language=merged["language"], cover=cover, file_subjects_as_tags=False,
             )
         except LibraryWriteError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        finally:
+            forget_catalog_checks()
+    identified = bool(found.get("identified"))
+    result.update({
+        "identified": identified,
+        "filled": filled,
+        "catalogues": found.get("catalogues"),
+        "message": book_lookup.report(result.get("title") or merged["title"], identified, filled,
+                                      found.get("rejected") or [], found.get("catalogues")),
+    })
+    log.info("[library] added book %s (%s): identified=%s filled=%s", result.get("book_id"),
+             result.get("title"), identified, sorted(filled))
     background.add_task(_index_folder, library_path, result["path"])
     return {"status": "SUCCESS", **result}
+
+
+# --- Filling in books already on the shelf -----------------------------------------
+
+
+class EnrichRequest(BaseModel):
+    library_path: str
+    #: True (the default) only reports: nothing is written.
+    dry_run: bool = True
+    #: Books looked up (and, without dry_run, written) in this call.
+    limit: int = Field(default=10, ge=0, le=200)
+    online: bool = True
+    book_ids: list[int] = Field(default_factory=list, max_length=500)
+    #: The person asking: their catalogue integrations are used (empty: the household's).
+    user: str = ""
+
+
+def _missing(book: dict[str, Any]) -> list[str]:
+    """Which of title, authors and tags a catalogue row lacks."""
+    out = []
+    if not book_lookup._given(book.get("title")):
+        out.append("title")
+    if not book_lookup._given(book.get("authors")):
+        out.append("authors")
+    if not book.get("tags"):
+        out.append("tags")
+    return out
+
+
+def _known(book: dict[str, Any]) -> dict[str, Any]:
+    """What the library already holds for a book: never replaced by a lookup."""
+    pubdate = str(book.get("pubdate") or "")
+    return {
+        "title": book.get("title") or "", "authors": list(book.get("authors") or []),
+        "tags": list(book.get("tags") or []), "series": book.get("series") or "",
+        "publisher": book.get("publisher") or "", "comments": book.get("description") or "",
+        "published": "" if not pubdate or pubdate.startswith("0101") else pubdate[:10],
+    }
+
+
+async def _proposal(provider, book: dict[str, Any], existing: list[str], usage: dict[str, int],
+                    online: bool, catalogues: dict[str, Any] | None = None) -> dict[str, Any]:
+    known = _known(book)
+    base = book_lookup._blank()
+    if ("title" in _missing(book) or "authors" in _missing(book)) and book.get("text_path"):
+        # Without a title or author to search by, the file's own details come first.
+        data = await provider.client.get_file_bytes(book["text_path"], timeout=provider.download_timeout)
+        if data:
+            base = book_lookup.file_details(data, book["text_path"].rsplit("/", 1)[-1])
+    found = await book_lookup.lookup(base, str(book.get("text_path") or "book").rsplit("/", 1)[-1],
+                                     existing, online=online, usage=usage, known=known, catalogues=catalogues)
+    merged, filled = book_lookup.merge(known, found)
+    fields = {key: merged[key] for key in filled if key in merged}
+    return {"book_id": book["id"], "title": book.get("title"), "missing": _missing(book),
+            "identified": bool(found.get("identified")), "fill": fields,
+            "rejected": found.get("rejected") or [], "catalogues": found.get("catalogues")}
+
+
+def _catalogue_summary(settings: dict[str, Any] | None, proposals: list[dict[str, Any]], online: bool) -> dict[str, Any]:
+    """For the whole run: the catalogues used, the ones skipped and why, and every distinct error."""
+    used: list[str] = []
+    errors: list[dict[str, str]] = []
+    for p in proposals:
+        report = p.get("catalogues") or {}
+        used += [s for s in report.get("used") or [] if s not in used]
+        errors += [e for e in report.get("errors") or [] if e not in errors]
+    plan, skipped = book_lookup._plan(settings, online)
+    out = {"asked": [book_metadata.NAMES[n] for n, _ in plan], "used": used,
+           "skipped": skipped, "errors": errors}
+    out["message"] = book_lookup.catalogue_line(out)
+    return out
+
+
+@router.post("/books/enrich")
+async def enrich_books(req: EnrichRequest):
+    """Fill in books that lack a title, an author or tags, the way an added book is filled in.
+
+    ``dry_run`` (the default) writes nothing: it counts the books that lack each
+    field and shows what ``limit`` of them would get. Without it, up to ``limit``
+    books are filled in one version-checked write (``LibraryWriter.fill_missing``),
+    and only fields that are empty in the library at that moment are written.
+    """
+    catalog = await _catalog(req.library_path)
+    wanted = set(req.book_ids)
+    candidates = [b for b in sorted(catalog.values(), key=lambda b: b["id"])
+                  if _missing(b) and (not wanted or b["id"] in wanted)]
+    counts = {field: sum(1 for b in candidates if field in _missing(b)) for field in ("title", "authors", "tags")}
+    existing, usage = await _tag_usage(req.library_path)
+    settings = await book_sources.settings_for(req.user) if req.online else None
+    proposals = []
+    async with _opened(req.library_path) as provider:
+        for book in candidates[:req.limit]:
+            try:
+                proposals.append(await _proposal(provider, book, existing, usage, req.online, settings))
+            except Exception as exc:  # one unreadable book is reported, never stops the rest
+                proposals.append({"book_id": book["id"], "title": book.get("title"), "error": str(exc)})
+        out: dict[str, Any] = {"status": "SUCCESS", "dry_run": req.dry_run, "books_missing": len(candidates),
+                               "missing": counts, "looked_up": len(proposals),
+                               "identified": sum(1 for p in proposals if p.get("identified")),
+                               "catalogues": _catalogue_summary(settings, proposals, req.online),
+                               "proposals": proposals}
+        writes = {p["book_id"]: p["fill"] for p in proposals if p.get("fill")}
+        if req.dry_run or not writes:
+            return out
+        writer = LibraryWriter(provider.client, req.library_path)
+        try:
+            result = await writer.fill_missing(writes)
+        except LibraryWriteError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        finally:
+            forget_catalog_checks()
+    out["written"] = {str(k): v for k, v in result["written"].items() if v}
+    out["backup"] = result.get("backup")
+    log.info("[library] filled in %d of %d books missing title/author/tags", len(out["written"]), len(candidates))
+    return out

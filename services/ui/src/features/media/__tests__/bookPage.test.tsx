@@ -69,6 +69,28 @@ describe('BookPage (P5-T5)', () => {
     expect(web.state.play).toHaveBeenCalledTimes(1);
   });
 
+  it('uses explicit chapter.start offsets from Audiobookshelf even when duration is null and marks active chapter', async () => {
+    server.use(
+      http.get('/api/media/item', () => HttpResponse.json({
+        ...bookFixture,
+        children: [
+          { uri: 'abs://book-1#chapter-0', name: 'Intro', media_type: 'chapter', artist: '', artist_uri: '', album: '', album_uri: '', image: '', duration: null, start: 0, index: 0 },
+          { uri: 'abs://book-1#chapter-1', name: 'Chapter 1', media_type: 'chapter', artist: '', artist_uri: '', album: '', album_uri: '', image: '', duration: null, start: 615, index: 1 },
+          { uri: 'abs://book-1#chapter-2', name: 'Chapter 2', media_type: 'chapter', artist: '', artist_uri: '', album: '', album_uri: '', image: '', duration: null, start: 2400, index: 2 },
+        ],
+      })),
+    );
+    web.state = player({ isPlaying: true, position: 900, mediaTitle: 'Project Hail Mary' });
+    useMediaStore.getState().actions.setAbsSession({ itemId: 'book-1', title: 'Project Hail Mary', outputId: '', durationSec: 58320, startedAt: 1 });
+    renderAt('/media/book/book-1');
+    const chapters = within(await screen.findByRole('list', { name: 'Chapters' }));
+    expect(chapters.getByText('Starts at 10:15')).toBeInTheDocument();
+    expect(chapters.getByText('Starts at 40:00')).toBeInTheDocument();
+    expect(chapters.getByText('Playing')).toBeInTheDocument();
+    await userEvent.click(chapters.getByRole('button', { name: 'Play Chapter 2' }));
+    await waitFor(() => expect(web.state.seek).toHaveBeenCalledWith(2400));
+  });
+
   it('does not seek when the chapter fails to start', async () => {
     web.state = player({ play: vi.fn().mockRejectedValue(new Error('provider down')) });
     renderAt('/media/book/book-1');

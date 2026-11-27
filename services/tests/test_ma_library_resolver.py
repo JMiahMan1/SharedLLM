@@ -85,7 +85,7 @@ def _search_result(*, abs_id: str = NARNIA_ABS_ID, uri: str = "library://audiobo
                     {
                         "item_id": abs_id,
                         "provider_domain": "audiobookshelf",
-                        "provider_instance": "audiobookshelf--EpUcRzwM",
+                        "provider_instance": "audiobookshelf--testinst",
                         "available": available,
                         "in_library": True,
                     }
@@ -466,12 +466,12 @@ class TestPodcastLookup:
                 "auth": {"authenticated": True},
                 "music/search": self._podcast_payload(
                     abs_id=self.POD_ID, uri="library://podcast/24",
-                    available=True, name="Culture Apothecary",
+                    available=True, name="Field Notes Daily",
                 ),
             }
         )
         resolved = await ma_library.resolve_audiobook_uri(
-            MASS_URL, MASS_TOKEN, self.POD_ID, "Culture Apothecary"
+            MASS_URL, MASS_TOKEN, self.POD_ID, "Field Notes Daily"
         )
         assert resolved.ma_uri == "library://podcast/24"
 
@@ -482,7 +482,7 @@ class TestPodcastLookup:
                 "auth": {"authenticated": True},
                 "music/search": self._podcast_payload(
                     abs_id=self.POD_ID, uri="library://podcast/16",
-                    available=True, name="The King's Hall",
+                    available=True, name="The Pioneer's Journal",
                 ),
             }
         )
@@ -567,7 +567,7 @@ def _podcast_search(abs_id: str = NARNIA_ABS_ID) -> dict:
 def _episode(n: int, published: int) -> dict:
     return {
         "name": f"Episode {n}", "duration": 1800, "position": published,
-        "uri": f"audiobookshelf--EpUcRzwM://podcast_episode/{NARNIA_ABS_ID} ep-{n}",
+        "uri": f"audiobookshelf--testinst://podcast_episode/{NARNIA_ABS_ID} ep-{n}",
     }
 
 
@@ -596,14 +596,14 @@ async def test_episodes_of_a_book_are_refused(fake_connect):
 
 def _provider_item(*, abs_id: str = NARNIA_ABS_ID, media_type: str = "audiobook", available=True) -> dict:
     return {
-        "uri": f"audiobookshelf--EpUcRzwM://{media_type}/{abs_id}",
+        "uri": f"audiobookshelf--testinst://{media_type}/{abs_id}",
         "name": "A Book Added Today",
-        "provider": "audiobookshelf--EpUcRzwM",
+        "provider": "audiobookshelf--testinst",
         "provider_mappings": [
             {
                 "item_id": abs_id,
                 "provider_domain": "audiobookshelf",
-                "provider_instance": "audiobookshelf--EpUcRzwM",
+                "provider_instance": "audiobookshelf--testinst",
                 "available": available,
             }
         ],
@@ -630,7 +630,7 @@ class TestNotYetInMALibrary:
         assert resolved.ma_uri == "library://audiobook/200"
         sent = [(f["command"], f.get("args")) for f in opened[0].sent]
         assert ("music/item_by_uri", {"uri": f"audiobookshelf://audiobook/{NARNIA_ABS_ID}"}) in sent
-        assert ("music/library/add_item", {"item": f"audiobookshelf--EpUcRzwM://audiobook/{NARNIA_ABS_ID}"}) in sent
+        assert ("music/library/add_item", {"item": f"audiobookshelf--testinst://audiobook/{NARNIA_ABS_ID}"}) in sent
 
     async def test_plays_by_provider_uri_when_the_library_add_fails(self, fake_connect):
         fake_connect({
@@ -640,7 +640,7 @@ class TestNotYetInMALibrary:
             "music/library/add_item": MAError("read-only library"),
         })
         resolved = await _resolve()
-        assert resolved.ma_uri == f"audiobookshelf--EpUcRzwM://audiobook/{NARNIA_ABS_ID}"
+        assert resolved.ma_uri == f"audiobookshelf--testinst://audiobook/{NARNIA_ABS_ID}"
 
     async def test_a_provider_item_for_another_id_is_not_a_match(self, fake_connect):
         fake_connect({
@@ -674,4 +674,55 @@ class TestNotYetInMALibrary:
     async def test_a_library_hit_never_asks_the_provider(self, fake_connect):
         opened, _ = fake_connect({"auth": {"authenticated": True}, "music/search": _search_result()})
         await _resolve()
+        assert "music/item_by_uri" not in [f["command"] for f in opened[0].sent]
+
+
+class TestPerUserProviderFilterIsolation:
+    async def test_ignores_other_users_abs_instance_and_queries_own_instance(self, fake_connect):
+        # Search returns a library item only backed by another member's ABS instance,
+        # while Jordan's MA auth reply scopes them to audiobookshelf--jordan1.
+        jordan_provider_item = {
+            "uri": f"audiobookshelf--jordan1://audiobook/{NARNIA_ABS_ID}",
+            "name": "The Chronicles of Narnia",
+            "provider": "audiobookshelf--jordan1",
+            "provider_mappings": [
+                {
+                    "item_id": NARNIA_ABS_ID,
+                    "provider_domain": "audiobookshelf",
+                    "provider_instance": "audiobookshelf--jordan1",
+                    "available": True,
+                }
+            ],
+        }
+        opened, _ = fake_connect({
+            "auth": {
+                "authenticated": True,
+                "user": {
+                    "username": "jordan",
+                    "provider_filter": ["opensubsonic--m1", "audiobookshelf--jordan1"],
+                },
+            },
+            "music/search": _search_result(),  # provider_instance is audiobookshelf--testinst
+            "music/item_by_uri": jordan_provider_item,
+            "music/library/add_item": {"uri": "library://audiobook/260", "name": "The Chronicles of Narnia"},
+        })
+        resolved = await _resolve()
+        assert resolved.ma_uri == "library://audiobook/260"
+        sent = [(f["command"], f.get("args")) for f in opened[0].sent]
+        assert ("music/item_by_uri", {"uri": f"audiobookshelf--jordan1://audiobook/{NARNIA_ABS_ID}"}) in sent
+
+    async def test_user_with_shared_only_provider_filter_cannot_use_another_users_abs(self, fake_connect):
+        opened, _ = fake_connect({
+            "auth": {
+                "authenticated": True,
+                "user": {
+                    "username": "casey",
+                    "provider_filter": ["opensubsonic--m1", "radiobrowser--r1"],
+                },
+            },
+            "music/search": _search_result(),
+        })
+        with pytest.raises(MALibraryLookupError) as exc:
+            await _resolve()
+        assert exc.value.reason == "not_in_ma_library"
         assert "music/item_by_uri" not in [f["command"] for f in opened[0].sent]

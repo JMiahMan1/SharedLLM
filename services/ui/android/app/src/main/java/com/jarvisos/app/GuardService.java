@@ -386,7 +386,8 @@ public class GuardService extends AccessibilityService {
                 GuardApi.isProtected(this), GuardApi.isLocked(this), GuardApi.isUnlocked(this),
                 pkg, cls, text, GuardApi.alwaysAllowed(this), launcher, GuardApi.blockedApps(this),
                 awaitingApproval, GuardApi.webFilterWanted(this), bypassApps,
-                GuardApi.kioskMode(this), GuardApi.kioskApps(this), SelfUpdate.inProgress(this));
+                GuardApi.kioskMode(this), GuardApi.kioskApps(this), SelfUpdate.inProgress(this),
+                InstallGrace.inProgress(this));
     }
 
     /** The window in front just changed. */
@@ -404,7 +405,7 @@ public class GuardService extends AccessibilityService {
             checkVideoCall();
             return;
         }
-        block(action, pkg, text, GuardRules.clearFor(false, appWindows(visibleWindows())), null);
+        block(action, pkg, cls, text, GuardRules.clearFor(false, appWindows(visibleWindows())), null);
     }
 
     /**
@@ -427,13 +428,13 @@ public class GuardService extends AccessibilityService {
             GuardRules.Action action = decide(pkg, "", text.toString(), launcher);
             if (action == GuardRules.Action.ALLOW) continue;
             boolean pip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && w.isInPictureInPictureMode();
-            block(action, pkg, text.toString(), GuardRules.clearFor(pip, appWindows), root);
+            block(action, pkg, "", text.toString(), GuardRules.clearFor(pip, appWindows), root);
             return;
         }
     }
 
     /** Take a blocked window off the screen and show why. */
-    private void block(GuardRules.Action action, String pkg, String text, GuardRules.Clear clear,
+    private void block(GuardRules.Action action, String pkg, String cls, String text, GuardRules.Clear clear,
                        AccessibilityNodeInfo pipRoot) {
         if (action == GuardRules.Action.BLOCK_LOCKED) {
             // The lock covers the whole screen: the full-screen overlay on a
@@ -452,9 +453,12 @@ public class GuardService extends AccessibilityService {
         if (now - lastCoverAt < 700) return; // one cover per screen change, not one per event
         lastCoverAt = now;
         if (action == GuardRules.Action.BLOCK_TAMPER) {
-            GuardApi.reportTamper(this,
-                    FilterBypass.isPrivateDnsScreen(pkg, text.toLowerCase(java.util.Locale.ROOT))
-                            ? "private_dns_attempt" : "uninstall_attempt");
+            String lowerText = text == null ? "" : text.toLowerCase(java.util.Locale.ROOT);
+            String lowerCls = cls == null ? "" : cls.toLowerCase(java.util.Locale.ROOT);
+            GuardRules.TamperReason reason = GuardRules.tamperReason(pkg, lowerCls, lowerText);
+            String event = reason != null ? GuardRules.tamperEvent(reason) : "uninstall_attempt";
+            String detail = (pkg == null ? "" : pkg) + " " + (cls == null ? "" : cls);
+            GuardApi.reportTamper(this, event, detail.trim());
         }
         if (clear == GuardRules.Clear.EXIT_SPLIT) {
             // End the split first; going home straight away can leave the other half showing.
@@ -824,7 +828,10 @@ public class GuardService extends AccessibilityService {
                     GuardApi.installApprovalRequired(this), installed, baseline, approvals, GuardApi.installApps(this));
             awaitingApproval = waiting;
             for (String pkg : InstallApprovals.toAsk(waiting, approvals)) {
-                GuardApi.askParent(this, "app", pkg, UnifiedPushDistributor.label(this, pkg));
+                // The profile goes with the question: a parent deciding about an app
+                // should see its version, where it came from and what it can reach.
+                GuardApi.askParent(this, "app", pkg, UnifiedPushDistributor.label(this, pkg), null,
+                        AppInventory.profile(this, pkg));
             }
         } catch (Exception ignored) {
             // Tried again at the next refresh.

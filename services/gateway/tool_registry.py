@@ -18,6 +18,7 @@ Services targeted:
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -44,6 +45,9 @@ TOOL_GARDEN_LOG_HARVEST = "garden_log_harvest"
 TOOL_GARDEN_RECIPE_MATCHES = "garden_recipe_matches"
 TOOL_GARDEN_PRESERVATION_GUIDE = "garden_preservation_guide"
 TOOL_GARDEN_PLAN_SUGGEST = "garden_plan_suggest"
+# Mission discipline (R3): explicit objectives tracking and verified debrief.
+TOOL_MISSION_OBJECTIVES = "missionobjectivesrequest"
+TOOL_MISSION_COMPLETE = "missioncompleterequest"
 
 # Service identifiers used by the resolver / proxy layer.
 SVC_EXECUTION = "execution"
@@ -53,6 +57,32 @@ SVC_GATEWAY = "gateway"
 SVC_RAG = "rag"
 SVC_STORAGE = "storage"
 SVC_CONTROL_PLANE = "control_plane"
+
+
+def promote_tool_discriminator(
+    tool_data: dict[str, Any],
+    is_known: Callable[[str], bool],
+) -> bool:
+    """Promote a tool discriminator to the routing action when action is a verb.
+
+    When ``tool`` (or ``@type``/``type``) names a known tool and ``action`` is not
+    a known tool, the tool name becomes the routing action and the original action
+    is preserved as ``sub_action``/``device_action`` for payload dispatch. Returns
+    True when the routing action was changed.
+    """
+    for t_key in ("tool", "@type", "type"):
+        if t_key in tool_data and isinstance(tool_data[t_key], str) and tool_data[t_key] not in ("function",):
+            cand_tool = tool_data[t_key]
+            cand_tool_norm = re.sub(r"[\s_]+", "", cand_tool).lower()
+            if is_known(cand_tool_norm):
+                act_norm = re.sub(r"[\s_]+", "", str(tool_data.get("action", ""))).lower()
+                if not is_known(act_norm):
+                    if "action" in tool_data:
+                        tool_data["sub_action"] = tool_data["action"]
+                        tool_data["device_action"] = tool_data["action"]
+                    tool_data["action"] = cand_tool
+                    return True
+    return False
 
 
 _GH_TOOL = {
@@ -544,11 +574,17 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Control Home Assistant lights (on/off/brightness/color).",
      "payload fields: action, entity_id, brightness_pct, color_temp, rgb_color."),
     ("MediaPlayRequest", SVC_EXECUTION, "POST", "/execute/media/play", False,
-     "Play media via Music Assistant / HA (playlists, favorites, stream).",
-     "payload fields: entity_id, device_name, query, media_type, media_content_id, media_content_type, enqueue, volume."),
+     "Play media via Music Assistant / HA (playlists, favorites, stream). With search_everywhere=true the "
+     "query (a title, artist, audiobook, podcast or video) is searched in every source that is set up and the "
+     "best match plays, or a short question comes back naming two kinds that match equally.",
+     "payload fields: entity_id, device_name, query, media_type, media_content_id, media_content_type, enqueue, "
+     "volume, search_everywhere."),
     ("MediaTransportRequest", SVC_EXECUTION, "POST", "/execute/media/transport", False,
-     "Media transport controls: play, pause, stop, next, previous, volume.",
-     "payload fields: entity_id, command, volume_level, position, muted."),
+     "Media transport controls: play, pause, stop, next, previous, volume, and audiobook controls "
+     "(seek_relative, chapter_next, chapter_previous, chapter_goto, speed, sleep).",
+     "payload fields: entity_id, device_name, command, volume_level, position, seconds, chapter, rate, minutes, "
+     "end_of_chapter, muted. \"Set volume to N%\" is command=volume_set with volume_level N/100 (0..1); "
+     "volume_up/volume_down are one step."),
     ("MediaStatusRequest", SVC_EXECUTION, "POST", "/execute/media/status", False,
      "Query current media player status/state.",
      "payload fields: area, entity_id."),
@@ -565,8 +601,13 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Arm/disarm alarm panels and query security state.",
      "payload fields: action, entity_id."),
     ("AnnouncementRequest", SVC_EXECUTION, "POST", "/execute/announce", False,
-     "Broadcast a text announcement to speakers/displays.",
-     "payload fields: entity_id, device_name, entity_ids, rooms, group_id, message, volume, tts_engine, storybook, save_path."),
+     "Speak an announcement on the home's speakers, Echos and TVs. It always has a target: leave the device out "
+     "to announce where the person is (their voice satellite) or, from chat, in every room; everywhere=true for the "
+     "whole house; person=<family member> for their own speakers plus their phone; device_name or rooms for one "
+     "place. TVs that are off are turned on first, offline devices are skipped and named in the result, so call it "
+     "instead of deciding from a search that nothing is available.",
+     "payload fields: message, device_name, rooms, person, everywhere, entity_id, entity_ids, volume, tts_engine, "
+     "storybook, save_path."),
     ("HAServiceRequest", SVC_EXECUTION, "POST", "/execute/ha_service", False,
      "Call any Home Assistant service directly (domain.service + data).",
      "payload fields: domain, service, entity_id, service_data."),
@@ -597,6 +638,9 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("TimerRequest", SVC_EXECUTION, "POST", "/execute/timer", False,
      "Timers, alarms, and household reminders: create, list, pause, resume, reset, stop, cancel across one or multiple devices (speakers, ESPHome screens, mobile app).",
      "payload fields: action, type, id, query, title, duration_str, time_str, recurrence, target_device, target_devices, scope, emoji, sound, tts_enabled, esphome_script, flash_screen."),
+    ("DropInRequest", SVC_EXECUTION, "POST", "/execute/drop_in", False,
+     "Native Echo-to-Echo Drop In: drop in on a room or on the room a person is in, hang up, or list active Drop Ins.",
+     "payload fields: action, target_room, target_user_id, target_device, source_satellite. action is start, end or status; target_room may be 'room_of:<person>'."),
     ("TodoListRequest", SVC_EXECUTION, "POST", "/execute/todo", False,
      "The home's to-do lists (the hub's shopping list and reminder lists): add items (\"add milk to the shopping "
      "list\"), read what is on a list, tick an item off or back on, remove one, or name the lists. Every "
@@ -604,14 +648,18 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "payload fields: action, list_name, item, items, include_completed. action is add, list, complete, uncomplete, "
      "remove or lists; list_name is the list as the person said it (leave it out when they named none)."),
     ("TalkRequest", SVC_EXECUTION, "POST", "/execute/talk", False,
-     "Conversations/voice: list conversations, read messages, send.",
+     "The family chat (Nextcloud Talk): list conversations, read messages, send. To send a family member a "
+     "message, action=send with target_user=<their name> and message: it goes to their phone from the person "
+     "asking, in their one-to-one chat.",
      "payload fields: action, token, target_user, message, text_to_voice, limit."),
     ("WebSearchRequest", SVC_EXECUTION, "POST", "/execute/web_search", False,
      "Web search for current/external information.",
      "payload fields: query, max_results."),
     ("WebReadRequest", SVC_EXECUTION, "POST", "/execute/web_read", False,
-     "Fetch and extract readable text from a URL.",
-     "payload fields: url."),
+     "Read a URL: a web page's main text, a PDF's text page by page (says which pages, e.g. "
+     "'pages 1-6 of 23'; continue with start_page), or a text file. save: true also keeps the "
+     "downloaded file (PDF or other) in the user's Downloads folder.",
+     "payload fields: url, start_page, save."),
     ("CodeSearchRequest", SVC_EXECUTION, "POST", "/execute/code_search", False,
      "Semantic search over indexed workspace code.",
      "payload fields: query, workspace_id, max_results."),
@@ -644,7 +692,10 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "payload fields: path, linter, fix."),
     ("WorkspaceSearchRequest", SVC_EXECUTION, "POST", "/execute/workspace_search", True,
      "Grep/regex search across workspace files.",
-     "payload fields: query, path, include, exclude."),
+     "payload fields: query, path, include, exclude, glob, max_results."),
+    ("WorkspaceListRequest", SVC_EXECUTION, "POST", "/execute/workspace_list", True,
+     "List files under a path in the workspace.",
+     "payload fields: path, glob, max_entries."),
     ("WorkspaceShellRequest", SVC_EXECUTION, "POST", "/execute/workspace_shell", True,
      "Run a shell command (or command list) in the workspace sandbox.",
      "payload fields: command, commands, cwd, timeout."),
@@ -658,8 +709,9 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Clone/pull a workspace's git repo and prime its directory.",
      "payload fields: workspace_id, repo_url, branch."),
     ("StorageFileReadRequest", SVC_EXECUTION, "POST", "/execute/storage_file_read", False,
-     "Read a file from SharedLLM storage volumes.",
-     "payload fields: path."),
+     "Read a file from SharedLLM storage volumes; a PDF comes back as its text page by page "
+     "(says which pages, e.g. 'pages 1-6 of 23'; continue with start_page).",
+     "payload fields: path, start_page."),
     ("StorageFileWriteRequest", SVC_EXECUTION, "POST", "/execute/storage_file_write", False,
      "Write a file into SharedLLM storage volumes.",
      "payload fields: path, content."),
@@ -691,8 +743,15 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("CalibreRequest", SVC_EXECUTION, "POST", "/execute/calibre", False,
      "Calibre library, as its librarian: list or search the shelf, fetch one "
      "book's metadata or text, list tags, books by tag, audit for copies and "
-     "gaps; add/remove tags (admins). No delete action exists.",
-     "payload fields: action, query, book_id, path, limit, max_chars, tag, untagged, add_tags, remove_tags."),
+     "gaps; add/remove tags (admins). action=chapters lists a book's chapters "
+     "(the author's numbering; front matter is not counted). action=fetch_text "
+     "with query (title and/or author, e.g. 'Wild at Heart John Eldredge') and "
+     "chapter (4, 'four' or a title) finds the book AND returns that one "
+     "chapter in a single call, no search first: use it to read a chapter "
+     "aloud, summarise it, or make discussion or study questions. A long "
+     "chapter comes in parts ('part 1 of 3'); ask for the next with part=2. "
+     "If two books match, it names both: ask which. No delete action exists.",
+     "payload fields: action, query, book_id, path, chapter, part, limit, max_chars, tag, untagged, add_tags, remove_tags."),
     ("LLMInfoRequest", SVC_EXECUTION, "POST", "/execute/llm/info", False,
      "LLM backend info: loaded models, VRAM, Ollama state.",
      "payload fields: (none required)."),
@@ -706,7 +765,8 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Read Home Assistant configuration snapshot.",
      "payload fields: action, domain, entity_domain, keyword."),
     ("EntitySearchRequest", SVC_EXECUTION, "POST", "/execute/entity_search", False,
-     "Search known HA entities by name/domain.",
+     "Search the home's devices by name/domain/area: reachable ones first, duplicates folded, at most 25. "
+     "Not needed before an announcement (AnnouncementRequest finds its own speakers).",
      "payload fields: query, domain, area, state, limit, controllable_only."),
     ("LogbookRequest", SVC_EXECUTION, "POST", "/execute/ha_logbook", False,
      "Query the Home Assistant logbook.",
@@ -774,8 +834,9 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     # from hand-copied rows of their own; listing them here makes this table
     # the one place a tool's route is written down.
     ("OcrRequest", SVC_EXECUTION, "POST", "/execute/ocr", True,
-     "Read the text in a workspace image or scanned page with the vision model.",
-     "payload fields: image_path, task. task is general, document or price_scrape."),
+     "Read the text in a workspace image, scanned page or PDF with the vision model "
+     "(a PDF with a text layer is read from it; a scanned PDF a few pages per call).",
+     "payload fields: image_path, task, start_page. start_page continues a PDF; task is general, document or price_scrape."),
     ("GhRequest", SVC_EXECUTION, "POST", "/execute/gh", True,
      "Run a GitHub CLI (gh) command in the workspace.",
      "payload fields: args, cwd, timeout. args omits the leading 'gh'."),
@@ -788,6 +849,15 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("BrowserAutomationRequest", SVC_EXECUTION, "POST", "/execute/browser", False,
      "Open a real page, click/type through it, and return visible text plus a screenshot.",
      "payload fields: url, actions, screenshot, full_page, timeout_ms."),
+    # Mission discipline (R3): gateway-local. No execution endpoint.
+    ("MissionObjectivesRequest", SVC_GATEWAY, "POST", "/gateway/local", False,
+     "Set the mission's objective checklist at the start of a multi-step mission and update it as you go. "
+     "Replaces the whole list (at most 12). A dropped objective needs a note saying why.",
+     "payload fields: objectives (list of {id, text, status: pending|in_progress|done|dropped, note})."),
+    ("MissionCompleteRequest", SVC_GATEWAY, "POST", "/gateway/local", False,
+     "Finish the mission with a debrief. Accepted only when every objective is done or dropped with a note and "
+     "every file you wrote has been linted or tested; a refusal says what is missing. The summary is the answer.",
+     "payload fields: summary (what was done), verification (how you checked it, e.g. the test command and result)."),
 )
 
 
@@ -827,6 +897,8 @@ SINGLE_TURN_EXCLUDED: dict[str, str] = {
     "WorkspaceSettingsUpdateRequest": "a PATCH to a templated path; the single-turn executor only POSTs",
     "ControlPlaneRequest": "the single-turn executor has a dedicated branch for it",
     "StorageListRequest": "no service serves /execute/storage_list; it would always 404",
+    "MissionObjectivesRequest": "a Raven mission's own checklist, handled inside the agent loop",
+    "MissionCompleteRequest": "ends a Raven mission; handled inside the agent loop",
 }
 
 
@@ -851,6 +923,7 @@ HUB_TOOLS: frozenset[str] = frozenset({
     "LogbookRequest",
     "DocumentBroadcastRequest",
     "NightModeRequest",
+    "DropInRequest",
 })
 
 #: Said in the tool guide in place of the hub tools while no hub is set up.
@@ -1235,7 +1308,7 @@ FRESHNESS: dict[str, Freshness] = {
         household_public=True, tags=("bible",),
     ),
     "CalibreRequest": Freshness(
-        reads={"list": DAILY, "search": DAILY, "get_book": STATIC, "fetch_text": STATIC,
+        reads={"list": DAILY, "search": DAILY, "get_book": STATIC, "chapters": STATIC, "fetch_text": STATIC,
                "tags": DAILY, "by_tag": DAILY, "audit": DAILY},
         tags=("library",),
     ),

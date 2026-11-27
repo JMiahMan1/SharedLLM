@@ -328,6 +328,18 @@ turns the pipeline off (`PATCH /hub/voice/{entry_id}` `{"enabled": false}` sets 
 (outcome, what ended it, per-stage timings) and last error. Transcripts and replies are logged at debug
 level only and never kept.
 
+**Hold music** (`hold_music.py`): while a slow answer is made, a satellite says a playful line and plays music
+until the first sentence is ready. Which music is a hub setting, not an environment variable: Devices > Setup >
+Voice hold music (`GET`/`PUT /hub/voice/hold-music`, through the gateway's `/api/homehub/voice/hold-music`).
+`gameshow` (the default) is `data/hold_music_gameshow.wav`, an original thinking loop composed once by MusicGen
+on the alpaca audio server (`scripts/compose_hold_music.py`; the prompt and seed are in the `.json` beside it);
+`builtin` is the soft chord loop made in code; `upload` is a clip an admin uploaded
+(`POST /hub/voice/hold-music/clip`: wav, mp3, ogg or m4a, at most 5 MB and 60 s, decoded once with ffmpeg and
+kept as a mono WAV beside the database, never served back). Every clip is made the stream's rate, brought to
+-24 dBFS RMS and crossfaded into a seamless loop, once per rate; one that is missing or cannot be decoded plays
+the built-in tune instead and is logged once. The same setting can replace the hold lines (empty: the defaults,
+or `HOMEHUB_VOICE_HOLD_LINES`). Each run records `music_source`.
+
 ### Sentence triggers and conversation services (`conversation.py`)
 
 An automation with `trigger: conversation` owns its sentences (HA template syntax: `[optional]`, `(a|b)`,
@@ -346,6 +358,59 @@ No match, or only failed conditions, answers `{"matched": false}` and Jarvis ans
 `sensor.time`, `sensor.date`, `sensor.date_time`, `sensor.date_time_utc`, `sensor.date_time_iso`,
 `sensor.time_date` and `sensor.time_utc` are published on every hub at the start of each minute, in the
 household time zone, with HA's state text. HA's `time_date` entries load as replaced.
+
+## Managing Echo satellites (`hassmic.py`)
+
+An ESPHome node whose firmware says it is echo-dot-assist (hassmic) in its `project_name` is set up by the
+hub from its device page alone: no adb, no Echo settings page, no button press. Every other ESPHome node is
+left alone. After the keyed (Noise) connection is up the hub, in the background (it never holds up the
+connection or the voice pipeline):
+
+1. **Network key.** The hub is the authority of the household's Echo network. It makes the network key K
+   (32 random bytes) and the network id N (`00000000ffffffff`; a rotation goes one lower, because an Echo
+   only moves to an older, lower id) once. It sends one probe beacon on UDP 28930 (the hub runs on the host
+   network), hears each Echo's beacon with its arbitration public key, and, unless the Echo already beacons
+   in network N with a tag made with K, seals K to that key and hands it over with the node's
+   `arbitration_key` action over the keyed connection. A beacon in network N is the confirmation.
+2. **Login.** From K the hub makes its own voucher and logs in to the Echo's settings API
+   (`http://<echo>:28931`, `/api/vouch/login`, labelled "HomeHub"). The Echo checks only the voucher's MAC.
+   The approval is remembered (the Echo keeps it across restarts); a 401 later logs in again.
+3. **Signed calls.** Every request carries HomeHub's web key, a strictly increasing microsecond counter and a
+   MAC with the per-Echo session key; every answer's MAC is checked, and an unsigned or wrongly signed answer
+   is an error, never used.
+
+Entities on the Echo's device (HA-style `{MAC}-{key}` unique ids):
+
+| Entity | What |
+|---|---|
+| select "Wake word engine" (config) | Amazon or microWakeWord (`wake_engine`). microWakeWord first installs the missing `echo_wake_models`, then switches; the satellite's wake word selects are read again afterwards |
+| select "Online updates" (config) | Off, Beta, Release (`online_updates`). `echo_ota.py` finds it by its `_online_updates` id and sets Release once on adoption. hassmic moved this setting from its own ESPHome select to its settings page, which is why adopted Echos stayed at Off and were left out of the update rollout before |
+| sensor "Wake word models" (diagnostic) | The models installed on the Echo; attributes `wanted`, `missing`, `active`, `second`, and `reason` when one could not be installed |
+| binary_sensor "Microphone" (diagnostic, problem) | Every minute the hub reads the newest lines of the Echo's log (`/api/log/0`). Repeated `audio: micAsr delivers nothing` lines logged since the last look mean the processed mic stream is dead (the Echo hears no wake word). The hub then reboots the Echo fully (the settings API's reboot, else the node's Restart button: both are a power-cycle style reboot, not a satellite restart), at most once an hour, and sends the admins one notice per episode when the microphone is still dead after the reboot |
+| sensor "Management" (diagnostic) | `starting`, `ready` or `error`, with `reason`, `in_network`, `logged_in`, `network` and `web_url` |
+
+Every failure is shown on the device with its reason (the Management sensor, and `reason` on the entity
+concerned): no beacon heard, an Echo in an older network, a refused voucher, a setting the Echo refused (its
+own words, for example GitHub not reachable for online updates), a model that could not be downloaded.
+
+**Options** (`PATCH /hub/entries/{id}/options`): `echo_wake_models`, the ids of ESPHome's official
+microWakeWord models to install (default `hey_jarvis`, `okay_nabu`, `hey_mycroft`, `alexa`). Each is
+downloaded once from `esphome/micro-wake-word-models` (`models/v2/<id>.json` and `.tflite`), checked (a
+`micro` manifest with a wake word, a cutoff between 0 and 1, step size 10, at most 1 MiB of model) and kept
+in the hub's data dir under `hassmic_wake_models/`.
+
+**The one limitation.** An Echo whose arbitration does not run (wake word engine Home Assistant's at start,
+or `-a 0` / `-w remote` in its hassmic.conf) offers no `arbitration_key` action and refuses every voucher, so
+the hub cannot bring it in; the Management sensor says so plainly. An Echo that approved the hub earlier
+keeps that approval, so its selects keep working and picking Amazon or microWakeWord turns arbitration back
+on.
+
+**Security.** K is the master key of the Echo network: with it anyone can log in to every Echo's settings
+and forge arbitration claims. It lives only in the hub's store as a sealed blob (`hassmic_authority`,
+Fernet with `FERNET_KEY`, like device credentials), with the hub's two X25519 secret keys; it is never
+written to a config file, an option or a log, and leaves the hub only sealed to one Echo's own key over the
+encrypted ESPHome connection. Without `FERNET_KEY` nothing is made. A forged beacon can only make the hub
+seal K to the wrong key, which the real Echo then cannot open.
 
 ## ESPHome restarts (`esphome_restarts.py`, `restarts_api.py`)
 
@@ -464,6 +529,24 @@ through the gateway (`/api/homehub/...`).
 | `POST /hub/discovered/{id}/ignore` | `{"ignored": false}` takes it back |
 | `POST /hub/matter/commission` | `{"code", "name"?, "area_id"?}` |
 
+### Device identity over mDNS
+
+Alongside the discovery browser, HomeHub also browses identity-only mDNS service
+types (`_device-info._tcp`, `_companion-link._tcp`, `_airplay._tcp`,
+`_raop._tcp`, `_ipp._tcp`, `_printer._tcp`, `_spotify-connect._tcp`,
+`_sonos._tcp`, `_smb._tcp`, `_workstation._tcp`, `_amzn-wplay._tcp`, and
+`md`/`fn` from `_googlecast._tcp`) and keeps a small in-memory table keyed by
+IPv4 address. Each entry records the instance names seen, the host name, the
+service types, and only these TXT keys when present: `model`, `manufacturer`,
+`am`, `md`, `fn`, `ty`, `usb_MFG`, `usb_MDL`. Values are decoded as text and
+capped at 120 characters; entries expire after 24 hours and the table is capped
+at 1000 addresses (oldest dropped). Nothing is written to disk, and
+identity-only services never create findings or notices.
+
+`GET /api/network/mdns` (admins only, same auth as `/hub/discovered`) returns
+`{"devices": {"<ipv4>": entry}, "count": N}`. HomeHub only hears the LAN
+segment it is on, unless the router reflects mDNS across VLANs.
+
 Discovery also reads the kernel's neighbour table after each sweep (DHCP/ARP: HA's
 manifest MAC prefixes and host names find Reolink, Roborock and Tasmota, and every
 finding gets its MAC), browses `_hap._udp` (HomeKit over Thread, paired over
@@ -525,6 +608,34 @@ mireds, 2000-6536 K), 3 RGB (`hs`), 4 RGBW (`hs`, `white`), 5 RGB with cold/warm
 `color_temp`). State comes from `Dimmer`, `CT`, `HSBColor` and `Channel` (white-only channels
 lit means `color_temp`/`white` mode). `light.turn_on` sends `HsbColor1`/`HsbColor2` or `CT`,
 then `White`, then `Dimmer`, each reply carrying the new state; brightness 0 is `Power<n> Off`.
+
+**Templates, the pin finder and measured templates** (`tasmota_templates.py`, `tasmota_pin_finder.py`,
+`tasmota_measured.py`, routes in `tasmota_templates_api.py`). A reflashed bulb needs its template (GPIO map)
+before it drives its LEDs. The bundled catalog holds only templates copied from templates.blakadder.com.
+When the device says nothing about itself (the Generic module, no light or relays, names that match no maker
+or model), `GET /hub/tasmota/{entry}/template` returns `identified: false` with an `identify_note`, and the
+kind-only matches as `guesses` instead of `suggestions`, so the page offers the pin finder first.
+
+The pin finder (lights only) saves the device's template, module, `SetOption68` and `SetOption92` in
+`entry.data["pin_finder_backup"]` before sending anything, loads a test template with five candidate pins as
+PWM1-5 and `SetOption68 1`, then asks the person what the light looks like with each pin alone (dark, cool,
+warm, white, red, green, blue). Red/green/blue pins make RGB (plus whites: RGBW, RGBCW); two whites are cold
+and warm (shown one after the other if the answers did not say which is cooler); one white is a dimmable
+white or the brightness pin of a brightness + CT bulb, found by showing it alone and then adding each dark pin
+(`Delay 20`) and asking whether it got cooler or warmer. Tasmota's CT mode (`SO92 1`) drives the CT pin harder
+the warmer it is set, so a pin that cools the light is written inverted (PWMi2). The template is then loaded
+and checked by eye (CT 153 cool, CT 500 warm; each colour); one swapped answer is corrected and checked
+again. A cancel, a failure, a run nobody answers for 15 minutes, or a cancel after a hub restart puts the saved
+template back; a template load is refused while a run is open. Plugs and switches are not covered: probing a
+relay means driving pins that may be inputs (a button to ground, a power meter's pulse output).
+
+Measured templates live in the hub's database (`tasmota_measured` table), never in the bundled JSON: maker and
+model as the person typed them, kind, chip, template, commands, how it was found (`pin_finder`,
+`saved_from_device`, `by_hand`), date, and the device it was measured on. They are suggested beside catalog
+entries (`source: "measured"`, `measured_on`), first when the device's names match their model. `POST
+/hub/tasmota/{entry}/measured` saves the template a working device runs (it only reads the device); `POST
+/hub/tasmota/measured` records one worked out by hand without contacting the device (`entry_id` or
+`device_name`, `manufacturer`, `model`, `kind`, `template`, `commands`).
 
 **Web passwords.** Tasmota's `/cm` takes its password only as `user=admin&password=...`
 arguments (its documented form), so that is how the driver sends it; no log line or error text

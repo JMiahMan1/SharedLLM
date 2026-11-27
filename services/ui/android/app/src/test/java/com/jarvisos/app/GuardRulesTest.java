@@ -308,4 +308,52 @@ public class GuardRulesTest {
         // A clock set back never blocks the read.
         assertTrue(GuardRules.wakeRefreshDue(t - 60_000L, t));
     }
+
+
+    @Test
+    public void anotherAppsUninstallDialogIsNotTamper() {
+        assertEquals(Action.ALLOW, decide(true, false, false,
+                "com.google.android.packageinstaller", "com.android.packageinstaller.UninstallerActivity",
+                "Do you want to uninstall Chrome?"));
+    }
+
+    @Test
+    public void jarvisUninstallDialogIsUninstallJarvis() {
+        assertEquals(GuardRules.TamperReason.UNINSTALL_JARVIS, GuardRules.tamperReason(
+                "com.google.android.packageinstaller",
+                "com.android.packageinstaller.uninstalleractivity",
+                "do you want to uninstall jarvis os?"));
+    }
+
+    @Test
+    public void appInfoPageNamingJarvisIsJarvisSettingsPage() {
+        assertEquals(GuardRules.TamperReason.JARVIS_SETTINGS_PAGE, GuardRules.tamperReason(
+                "com.android.settings", "com.android.settings.subsettings",
+                "app info jarvis os uninstall force stop"));
+    }
+
+    private static Action duringGrace(boolean installGrace, String pkg, String cls, String text) {
+        return GuardRules.decide(true, false, false, pkg, cls, text, ALLOWED, LAUNCHER, BLOCKED,
+                null, false, null, false, null, false, installGrace);
+    }
+
+    @Test
+    public void installUnknownAppsNamingJarvisDuringGraceIsNotReportedButDeviceAdminStillIs() {
+        String installer = "com.google.android.packageinstaller";
+        // GuardRules allows the install-source screen during the grace window.
+        assertEquals(Action.ALLOW, duringGrace(true, "com.android.settings", "com.android.settings.SubSettings",
+                "Install unknown apps Jarvis OS allow from this source"));
+        assertEquals(Action.BLOCK_TAMPER, duringGrace(true, "com.android.settings",
+                "com.android.settings.DeviceAdminAdd", "Deactivate this device admin app"));
+        // Outside the grace window it is still a tamper screen.
+        assertEquals(Action.BLOCK_TAMPER, duringGrace(false, "com.android.settings",
+                "com.android.settings.SubSettings", "Install unknown apps Jarvis OS allow from this source"));
+    }
+
+    @Test
+    public void selfUpdatingInstallScreenAllowed() {
+        assertEquals(Action.ALLOW, duringUpdate(true, "com.google.android.packageinstaller",
+                "com.android.packageinstaller.PackageInstallerActivity", "Jarvis OS Do you want to update this app? Cancel Update"));
+    }
+
 }

@@ -1,10 +1,20 @@
-// The private chat's encrypted gallery, built from the chat's own sealed
-// messages (every picture ever sent, and the comments on each) plus the
+// The private chat's encrypted gallery: the pictures and clips sent in the
+// chat that were put in it (galleryMembership), the comments on each, and the
 // pictures added straight to the gallery (sealed gallery entries, never chat
 // messages). Newest first, by day. Kept free of React so it can be tested
 // directly. Nothing here is stored: it is rebuilt from what was decrypted, and
 // dropped on lock.
-import type { AddedPicture, PrivatePayload, VideoPayload } from '../../lib/privateChatCrypto';
+import { mayAnimate } from '../../lib/animatedImage';
+import type { EditRecipe } from '../../lib/photoEdit/recipe';
+import {
+  MAX_GALLERY_MARK_BLOBS,
+  type AddedPicture,
+  type GalleryEdit,
+  type GalleryMark,
+  type GalleryStart,
+  type PrivatePayload,
+  type VideoPayload,
+} from '../../lib/privateChatCrypto';
 import { dayLabel, isMine, type TalkMessage } from './chatModel';
 
 export type Opened = PrivatePayload | 'unreadable';
@@ -41,6 +51,31 @@ export interface GalleryItem {
   /** What the original file said, for an added picture. */
   details?: Pick<AddedPicture, 'path' | 'taken_from' | 'camera' | 'gps' | 'width' | 'height' | 'source' | 'size'>;
   sha256?: string;
+  /** The edit shown in place of the original (the newest edit record, unless it went back to the original). */
+  edit?: ShownEdit;
+}
+
+/** What a gallery picture shows when it has been edited: the edited blob (the original `blob` is kept as it is). */
+export interface ShownEdit {
+  /** The edit record. */
+  entryId: string;
+  blob: string;
+  mime: string;
+  width?: number;
+  height?: number;
+  animated?: boolean;
+  /** The recipe, when it is in the record; else `recipeBlob` names the encrypted blob it is in. */
+  recipe?: EditRecipe;
+  recipeBlob?: string;
+  /** Server time of the record (seconds). */
+  at: number;
+  own: boolean;
+  byName: string;
+}
+
+/** The picture a gallery item shows: the current edit, or the original. */
+export function shownPicture(item: Pick<GalleryItem, 'blob' | 'mime' | 'edit'>): { blob: string; mime: string } {
+  return item.edit ? { blob: item.edit.blob, mime: item.edit.mime } : { blob: item.blob, mime: item.mime };
 }
 
 /** A gallery entry from the server, opened. */
@@ -63,7 +98,7 @@ const seconds = (value: unknown): number | undefined =>
 
 /**
  * Every picture in the chat and every picture added to the gallery, with their
- * comments. A deleted picture (or comment) is left out; a comment on a picture
+ * comments (the gallery itself is `inGallery` of this: what was put in it). A deleted picture (or comment) is left out; a comment on a picture
  * that is gone is left out too. The same picture twice (same blob) is kept once.
  */
 export function buildGallery(
@@ -201,6 +236,11 @@ export function clampAspect(aspect: number): number {
 
 /** Width over height of a picture when it is known before decrypting (an added picture's details). */
 export function knownAspect(item: GalleryItem): number | undefined {
+  if (item.edit) {
+    const ew = Number(item.edit.width);
+    const eh = Number(item.edit.height);
+    return ew > 0 && eh > 0 ? clampAspect(ew / eh) : undefined;
+  }
   const w = Number(item.details?.width);
   const h = Number(item.details?.height);
   return w > 0 && h > 0 ? clampAspect(w / h) : undefined;
@@ -302,4 +342,175 @@ export function kenBurns(key: string): { fromX: number; fromY: number; toX: numb
   const pick = () => Math.round((random() * 2 - 1) * 4 * 10) / 10;
   const zoomIn = random() < 0.5;
   return { fromX: pick(), fromY: pick(), toX: pick(), toY: pick(), fromScale: zoomIn ? 1.04 : 1.16, toScale: zoomIn ? 1.16 : 1.04 };
+}
+
+// --- Membership: what of the chat is in the gallery ------------------------------
+
+/**
+ * The gallery's own pictures: everything added straight to it, and of the
+ * pictures and clips sent in the chat only the ones put in it.
+ */
+export function inGallery(items: GalleryItem[], members: ReadonlySet<string>): GalleryItem[] {
+  return items.filter((item) => item.entryId || members.has(item.blob));
+}
+
+/** Who may take a picture out of the gallery without deleting it: one sent in the chat (an added one is deleted instead). */
+export function removable(item: GalleryItem): boolean {
+  return !item.entryId;
+}
+
+const OBJECT = String.raw`(?:\s+(?:this|that|it|these|them|those)(?:\s+(?:one|ones|picture|pictures|photo|photos|pic|pics|video|videos|clip|clips|gif|gifs))?)?`;
+const PLACE = String.raw`\s+(?:the\s+|our\s+|my\s+)?gallery`;
+const ASK = String.raw`^(?:(?:please|pls|can\s+you|could\s+you|jarvis,?)\s+)?`;
+const THANKS = String.raw`(?:\s*,?\s*(?:please|pls|thanks|thank\s+you))?$`;
+const ADD_COMMAND = new RegExp(`${ASK}(?:save|add|put|move|keep)${OBJECT}\\s+(?:to|in|into|on)${PLACE}${THANKS}`);
+const REMOVE_COMMAND = new RegExp(`${ASK}(?:remove|take)${OBJECT}\\s+(?:out\\s+of|from|off(?:\\s+of)?)${PLACE}${THANKS}`);
+
+/**
+ * Whether a message is, as a whole, a request to put the picture it answers
+ * in the gallery ("save to gallery", "Add this to the gallery!") or take it
+ * out ("remove from gallery"). Only the whole message counts: a sentence that
+ * merely mentions the gallery ("we should save to gallery later?") is talk.
+ */
+export function galleryCommand(text: string): 'add' | 'remove' | null {
+  const said = text
+    .toLowerCase()
+    .replace(/[\u2019']/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[\s.!?\u2026]+$/, '');
+  if (!said || said.length > 80) return null;
+  if (ADD_COMMAND.test(said)) return 'add';
+  if (REMOVE_COMMAND.test(said)) return 'remove';
+  return null;
+}
+
+/** A sent message that is a gallery command answering a picture: what it does and to which picture (by blob). */
+export function commandOf(payload: Opened | undefined): { op: 'add' | 'remove'; blob: string } | null {
+  if (!payload || payload === 'unreadable' || payload.t !== 'text' || !payload.quote) return null;
+  const op = galleryCommand(payload.text);
+  return op ? { op, blob: payload.quote.blob } : null;
+}
+
+/** A picture or clip sent in the chat, as membership sees it. */
+interface Sent {
+  blob: string;
+  /** When the server got it (seconds); undefined for one not stored yet. */
+  at?: number;
+  /** A clip, or a picture that can never animate (JPEG, HEIC). */
+  still: boolean;
+}
+
+function sentPictures(messages: TalkMessage[], opened: Record<string, Opened>): Map<string, Sent> {
+  const sent = new Map<string, Sent>();
+  for (const message of messages) {
+    if (message.deleted || typeof message.id !== 'number') continue;
+    const payload = opened[String(message.id)];
+    if (!payload || payload === 'unreadable') continue;
+    if (payload.t === 'image') sent.set(payload.blob, { blob: payload.blob, at: seconds(message.timestamp), still: !mayAnimate(payload.mime) });
+    else if (payload.t === 'video') sent.set(payload.poster, { blob: payload.poster, at: seconds(message.timestamp), still: true });
+  }
+  return sent;
+}
+
+export interface GalleryMembership {
+  /** Sent pictures (by blob) and clips (by poster) that are in the gallery. */
+  members: Set<string>;
+  /** The opt-in start has been written (until it is, sent stills count as if it were written now). */
+  started: boolean;
+  /** When it started (the server's time of the earliest start record), in seconds. */
+  since?: number;
+}
+
+/**
+ * Which pictures and clips sent in the chat are in the gallery. Both phones
+ * work this out from the same sealed records, so they always agree:
+ *
+ * 1. Before the opt-in start (the server's time of the earliest
+ *    `gallery_start` entry), a sent clip or still picture counts as added: a
+ *    JPEG or HEIC always, a GIF, WebP or PNG only if a start record lists it
+ *    as read and found still. Animated pictures from before start out.
+ * 2. Then every add and remove, oldest first by the server's time: sealed
+ *    `gallery` entries (Add to gallery, Remove from gallery) and messages that
+ *    answer a picture with "save to gallery" / "remove from gallery".
+ *
+ * A picture deleted from the chat is gone whatever was recorded about it.
+ */
+export function galleryMembership(messages: TalkMessage[], opened: Record<string, Opened>, entries: OpenedEntry[]): GalleryMembership {
+  const sent = sentPictures(messages, opened);
+  const starts = entries.filter((e) => e.payload !== 'unreadable' && e.payload.t === 'gallery_start');
+  const started = starts.length > 0;
+  const since = started ? Math.min(...starts.map((e) => seconds(e.at) ?? 0)) : undefined;
+  const kept = new Set(starts.flatMap((e) => (e.payload !== 'unreadable' && e.payload.t === 'gallery_start' ? e.payload.kept : [])));
+  const members = new Set<string>();
+  for (const picture of sent.values()) {
+    // Not started yet: as if it started now (what the first phone to open the gallery will write).
+    const before = since === undefined ? true : picture.at !== undefined && picture.at <= since;
+    if (before && (picture.still || kept.has(picture.blob))) members.add(picture.blob);
+  }
+  const ops: Array<{ at: number; order: string; op: 'add' | 'remove'; blobs: string[] }> = [];
+  for (const entry of entries) {
+    if (entry.payload === 'unreadable' || entry.payload.t !== 'gallery') continue;
+    ops.push({ at: seconds(entry.at) ?? 0, order: `e:${entry.id}`, op: entry.payload.op, blobs: entry.payload.blobs });
+  }
+  for (const message of messages) {
+    if (message.deleted || typeof message.id !== 'number') continue;
+    const command = commandOf(opened[String(message.id)]);
+    if (command) ops.push({ at: seconds(message.timestamp) ?? Number.MAX_SAFE_INTEGER, order: `m:${String(message.id).padStart(16, '0')}`, op: command.op, blobs: [command.blob] });
+  }
+  ops.sort((a, b) => a.at - b.at || (a.order < b.order ? -1 : a.order > b.order ? 1 : 0));
+  for (const { op, blobs } of ops) {
+    for (const blob of blobs) {
+      if (!sent.has(blob)) continue;
+      if (op === 'add') members.add(blob);
+      else members.delete(blob);
+    }
+  }
+  return { members, started, ...(since !== undefined ? { since } : {}) };
+}
+
+/** The sent pictures the opt-in start has to read (ones that might animate), by blob with their type. */
+export function startCandidates(messages: TalkMessage[], opened: Record<string, Opened>): Array<{ blob: string; mime: string }> {
+  const out = new Map<string, string>();
+  for (const message of messages) {
+    if (message.deleted || typeof message.id !== 'number') continue;
+    const payload = opened[String(message.id)];
+    if (payload && payload !== 'unreadable' && payload.t === 'image' && mayAnimate(payload.mime)) out.set(payload.blob, payload.mime);
+  }
+  return [...out].map(([blob, mime]) => ({ blob, mime }));
+}
+
+/** Every gallery record is padded to this many bytes before sealing, so the server sees one size for all of them. */
+export const GALLERY_RECORD_BYTES = 8192;
+
+/** UTF-8 bytes of a record's JSON with an empty pad: what sealing encrypts, before padding. */
+export function bareRecordBytes(record: object): number {
+  return new TextEncoder().encode(JSON.stringify({ ...record, p: '' })).length;
+}
+
+/**
+ * A record padded (with `p`) to GALLERY_RECORD_BYTES bytes of JSON. Counted
+ * in UTF-8 bytes, not characters, so a record with words in it (an edit's
+ * text overlay) seals to the same size as every other.
+ */
+export function padded<T extends GalleryMark | GalleryStart | GalleryEdit>(record: T): T & { p: string } {
+  return { ...record, p: ' '.repeat(Math.max(0, GALLERY_RECORD_BYTES - bareRecordBytes(record))) };
+}
+
+function chunks(blobs: string[]): string[][] {
+  const unique = [...new Set(blobs)];
+  const out: string[][] = [];
+  for (let i = 0; i < unique.length; i += MAX_GALLERY_MARK_BLOBS) out.push(unique.slice(i, i + MAX_GALLERY_MARK_BLOBS));
+  return out;
+}
+
+/** The sealed-to-be records that add or remove these pictures (as few as fit). */
+export function markRecords(op: 'add' | 'remove', blobs: string[]): Array<GalleryMark & { p: string }> {
+  return chunks(blobs).map((part) => padded({ t: 'gallery', op, blobs: part }));
+}
+
+/** The opt-in start's records: at least one, the still pictures it kept split over as many as needed. */
+export function startRecords(kept: string[]): Array<GalleryStart & { p: string }> {
+  const parts = chunks(kept);
+  return (parts.length ? parts : [[]]).map((part) => padded({ t: 'gallery_start', kept: part }));
 }

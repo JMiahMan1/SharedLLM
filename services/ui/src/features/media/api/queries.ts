@@ -3,7 +3,8 @@ import { api } from '../../../services/api';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { mediaKeys } from './keys';
 import {
-  getMediaFavorites, getMediaHome, getMediaItem, getMediaLibrary, LIBRARY_PAGE_SIZE, searchMedia, type LibraryTab,
+  getAbsPodcasts, getMediaFavorites, getMediaHome, getMediaItem, getMediaLibrary, LIBRARY_PAGE_SIZE, searchMedia,
+  type LibraryTab,
 } from './client';
 
 /**
@@ -58,6 +59,21 @@ export function useMediaItem(uri: string | null) {
     queryFn: () => getMediaItem(uri!),
     enabled: !!uri,
     ...MEDIA_QUERY_DEFAULTS,
+  });
+}
+
+/**
+ * Every podcast show in Audiobookshelf with the reason it may be quiet. Read on
+ * the Podcasts tab, which is where someone goes when a show has stopped moving.
+ */
+export function useAbsPodcasts(enabled = true) {
+  return useQuery({
+    queryKey: mediaKeys.absPodcasts(),
+    queryFn: getAbsPodcasts,
+    enabled,
+    staleTime: 5 * 60_000,
+    retry: 0,
+    refetchOnWindowFocus: false,
   });
 }
 

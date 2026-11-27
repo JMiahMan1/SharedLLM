@@ -27,9 +27,12 @@ from services.homehub import (
     builtin,
     camera_recording,
     conversation,
+    echo_ota,
+    echo_ring,
     light_cluster_move,
     recorder_statistics,
     registries,
+    sound_guard,
     time_date,
     tts,
 )
@@ -103,6 +106,7 @@ class Service:
         self.runtime.loop_monitor = LoopMonitor()
         self._lock = asyncio.Lock()
         self._bg: list[asyncio.Task] = []
+        self._unsub_sound_guard: Any = None
 
     async def start(self) -> None:
         self._bg.append(asyncio.create_task(self.runtime.loop_monitor.run(), name="loop-monitor"))
@@ -118,6 +122,10 @@ class Service:
         self.runtime.start_recording()
         builtin.register(self.hub)
         tts.register(self.hub)
+        echo_ring.register_services(self.hub)
+        if self._unsub_sound_guard is not None:
+            self._unsub_sound_guard()
+        self._unsub_sound_guard = sound_guard.attach_to_hub(self.hub)
         await self._start_helpers()  # before the automations: they name the helpers
         conversation.register(self.hub)  # conversation.process and ai_task.generate_data, answered by Jarvis
         # HA's time_date sensors on every hub, imported or not (services/homehub/time_date.py).
@@ -139,6 +147,12 @@ class Service:
         self._bg.append(asyncio.create_task(self.runtime.housekeeping()))
         self._bg.append(asyncio.create_task(self.runtime.archive.run(), name="device-archive"))
         self._bg.append(asyncio.create_task(recorder_statistics.start(self.runtime)))  # recorder statistics
+        self._bg.append(asyncio.create_task(echo_ota.run_loop(self.hub), name="echo-ota"))
+        # Music Assistant pairs Sendspin satellites with the tokens this hands out (api.py).
+        from services.homehub.sendspin_clients import SendspinClients
+
+        self.runtime.sendspin_clients = SendspinClients(self.hub, self.runtime)
+        await self.runtime.sendspin_clients.start()
         await self._start_discovery()
 
     def _start_login_providers(self) -> None:
@@ -227,6 +241,9 @@ class Service:
                 helpers.release_events()  # the timer events held since startup, now that triggers listen
 
     async def stop(self) -> None:
+        if self._unsub_sound_guard is not None:
+            self._unsub_sound_guard()
+            self._unsub_sound_guard = None
         helpers = getattr(self.runtime, "helpers", None)
         if helpers is not None:
             self.runtime.helpers = None
@@ -235,6 +252,10 @@ class Service:
         if bluetooth is not None:
             self.runtime.bluetooth = None
             await bluetooth.stop()
+        sendspin = getattr(self.runtime, "sendspin_clients", None)
+        if sendspin is not None:
+            self.runtime.sendspin_clients = None
+            await sendspin.stop()
         for t in self._bg:
             t.cancel()
         self._bg.clear()
@@ -284,10 +305,17 @@ async def lifespan(_app):
         await service.stop()
 
 
+#: uvicorn's HTTP parser. httptools (its default when installed) answers a streamed response with
+#: chunked transfer encoding even to an HTTP/1.0 client, which cannot read it: an Echo running
+#: echo-dot-assist fetches a reply's audio with HTTP/1.0, read the chunk size as the start of the WAV
+#: and played nothing (2026-11-23; every streamed reply silent, finished clips with a length fine).
+#: h11 ends such a response by closing the connection, as HTTP/1.0 expects.
+HTTP_PROTOCOL = "h11"
+
 app = build_app(service.runtime, service.auth, admin_hooks={"import": service.do_import})
 app.router.lifespan_context = lifespan
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=os.getenv("HOMEHUB_HOST", "0.0.0.0"), port=PORT,
+    uvicorn.run(app, host=os.getenv("HOMEHUB_HOST", "0.0.0.0"), port=PORT, http=HTTP_PROTOCOL,
                 log_level=os.getenv("LOG_LEVEL", "info").lower(), ws_ping_interval=30)

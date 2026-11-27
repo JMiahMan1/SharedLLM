@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Phone, RefreshCw, Users, Video } from 'lucide-react';
+import { AlertTriangle, Loader2, Mic, MicOff, Phone, RefreshCw, Users, Video } from 'lucide-react';
 import { api } from '../../services/api';
+import { EchoDropInClient } from '../../lib/echoDropInClient';
+import { extractEchoFleet, type EchoDeviceSummary } from '../../lib/echoFleet';
 import type { ExecutionResponse, TalkConversation } from '../../types/api';
 import { useCall } from '../../context/CallContext';
 import { detailList } from '../chat/chatModel';
@@ -77,6 +79,136 @@ export default function FamilyCalls() {
       setStarting(null);
     }
   };
+
+  // ---- Echo rooms (Home Hub Drop-In) ----
+
+  const {
+    data: entities = [],
+    isLoading: entitiesLoading,
+    error: entitiesError,
+  } = useQuery<Record<string, unknown>[], Error>({
+    queryKey: ['echo-rooms', 'entities'],
+    queryFn: async () => {
+      // api.getEntities() returns the entity array directly.
+      return (await api.getEntities()) as Record<string, unknown>[];
+    },
+    retry: false,
+  });
+
+  const fleet = useMemo(() => extractEchoFleet(entities as Array<{ entity_id: string; state: string; friendly_name?: string; attributes?: Record<string, unknown> }>), [entities]);
+  // Only Echo satellites (a published assist_satellite or drop-in sensor) are
+  // real Echo rooms; households without any Echo render nothing extra.
+  const echoRooms = fleet.filter((device) => Boolean(device.satelliteEntityId || device.dropInEntityId));
+
+  const clientRef = useRef<EchoDropInClient | null>(null);
+  const [activeNode, setActiveNode] = useState<string | null>(null);
+  const [dropInError, setDropInError] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [dropInMuted, setDropInMuted] = useState(false);
+
+  const activeRoom = echoRooms.find((device) => device.node === activeNode);
+
+  const dropInActive = (device: EchoDeviceSummary): boolean =>
+    device.dropInState === 'connected' || device.dropInState === 'calling' || device.dropInState === 'ringing';
+
+  const roomStatus = (device: EchoDeviceSummary): 'Ready' | 'DND' | 'Drop-In active' | 'Offline' => {
+    if (!device.online) return 'Offline';
+    if (device.dndOn) return 'DND';
+    if (dropInActive(device)) return 'Drop-In active';
+    return 'Ready';
+  };
+
+  const statusBadge = (status: 'Ready' | 'DND' | 'Drop-In active' | 'Offline'): React.ReactNode => {
+    switch (status) {
+      case 'Ready':
+        return <span className="shrink-0 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-300">Ready</span>;
+      case 'DND':
+        return <span className="shrink-0 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-amber-300">DND</span>;
+      case 'Drop-In active':
+        return <span className="shrink-0 rounded-full bg-indigo-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-300">Drop-In active</span>;
+      case 'Offline':
+        return <span className="shrink-0 rounded-full bg-red-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-red-300">Offline</span>;
+    }
+  };
+
+  const tearDownClient = (): void => {
+    clientRef.current?.disconnect();
+    clientRef.current = null;
+    setActiveNode(null);
+    setConnecting(false);
+    setDropInMuted(false);
+  };
+
+  const startDropIn = async (device: EchoDeviceSummary) => {
+    if (activeNode && activeNode !== device.node) {
+      setDropInError(`A Drop-In to ${activeRoom?.name || activeNode} is already active. End it first.`);
+      return;
+    }
+    if (!device.online) {
+      setDropInError(`${device.name} is offline.`);
+      return;
+    }
+    if (device.dndOn) {
+      setDropInError(`${device.name} has Do Not Disturb on.`);
+      return;
+    }
+    if (dropInActive(device)) {
+      setDropInError(`${device.name} already has an active Drop-In.`);
+      return;
+    }
+
+    setDropInError(null);
+    setConnecting(true);
+
+    const token = localStorage.getItem('jarvis_api_key');
+    if (!token) {
+      setConnecting(false);
+      setDropInError('No API key found. Sign in again to use Drop-In.');
+      return;
+    }
+
+    const client = new EchoDropInClient({
+      node: device.node,
+      token,
+      onStateChange: (state) => {
+        if (state === 'connected') {
+          setConnecting(false);
+          setActiveNode(device.node);
+          setDropInMuted(client.isMuted());
+          clientRef.current = client;
+        } else if (state === 'error') {
+          setConnecting(false);
+          clientRef.current = null;
+          setActiveNode(null);
+          setDropInMuted(false);
+        }
+      },
+      onError: (error) => {
+        setConnecting(false);
+        clientRef.current = null;
+        setActiveNode(null);
+        setDropInMuted(false);
+        setDropInError(error.message || 'Drop-In failed.');
+      },
+    });
+
+    try {
+      await client.connect();
+    } catch (error) {
+      setConnecting(false);
+      clientRef.current = null;
+      setActiveNode(null);
+      setDropInMuted(false);
+      setDropInError(error instanceof Error ? error.message : 'Drop-In failed.');
+    }
+  };
+
+  const endDropIn = () => {
+    tearDownClient();
+    setDropInError(null);
+  };
+
+  // ---- render ----
 
   return (
     <section className="w-full min-w-0 max-w-full space-y-3 overflow-x-hidden" data-testid="family-calls">
@@ -196,6 +328,120 @@ export default function FamilyCalls() {
           );
         })}
       </div>
+
+      {/* Echo rooms Drop-In section. Renders nothing when there are no Echo satellites. */}
+      {echoRooms.length > 0 && (
+        <section className="space-y-3" aria-label="Echo rooms">
+          <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-300">
+                <Phone size={18} />
+              </span>
+              <div className="min-w-0">
+                <h2 className="font-semibold text-slate-100">Echo rooms</h2>
+                <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                  Drop in on Echo Dots and Echo Shows adopted through Home Hub. Microphone access is
+                  required; nothing is recorded.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {entitiesLoading && echoRooms.length === 0 && (
+            <p className="flex items-center gap-2 px-1 text-sm text-slate-400">Loading Echo rooms…</p>
+          )}
+
+          {entitiesError && (
+            <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
+              <p>Could not load Echo rooms from Home Hub.</p>
+            </div>
+          )}
+
+          <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+            {echoRooms.map((device) => {
+              const inThisCall = activeNode === device.node;
+              const busy = connecting && activeNode === device.node;
+              const status = roomStatus(device);
+              const canDropIn = !inThisCall && status !== 'Offline' && status !== 'DND' && !dropInActive(device);
+              const disabled = !canDropIn || busy || connecting;
+              return (
+                <div
+                  key={device.node}
+                  className="flex min-w-0 max-w-full items-center gap-3 overflow-hidden rounded-2xl border border-white/5 bg-slate-900/60 p-3"
+                  data-testid={`echo-room-${device.node}`}
+                >
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-indigo-500/10 text-indigo-300">
+                    <Phone size={18} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold text-slate-100">{device.name}</p>
+                    <p className="truncate text-[11px] text-slate-400">node: {device.node}</p>
+                    <div className="mt-1 flex items-center gap-2">
+                      {statusBadge(status)}
+                      {device.dropInWith && <span className="text-[10px] text-slate-500">with {device.dropInWith}</span>}
+                    </div>
+                  </div>
+
+                  {inThisCall ? (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        aria-label={`Mute microphone for ${device.name}`}
+                        disabled={busy}
+                        onClick={() => {
+                          const client = clientRef.current;
+                          if (!client) return;
+                          const next = !dropInMuted;
+                          client.setMuted(next);
+                          setDropInMuted(next);
+                        }}
+                        className={`flex min-h-11 min-w-11 items-center justify-center rounded-xl px-2 text-sm transition disabled:opacity-50 ${
+                          dropInMuted
+                            ? 'bg-amber-500/20 text-amber-300'
+                            : 'bg-white/[0.08] text-slate-100 hover:bg-white/[0.14]'
+                        }`}
+                      >
+                        {dropInMuted ? <MicOff size={15} className="text-amber-300" /> : <Mic size={15} />}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`End Drop-In on ${device.name}`}
+                        disabled={busy}
+                        onClick={endDropIn}
+                        className={`flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-red-500/20 px-3 text-sm font-semibold text-red-200 hover:bg-red-500/30 disabled:opacity-50`}
+                      >
+                        <Phone size={14} className="text-red-200" /> End Call
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      aria-label={status === 'DND' ? `Do Not Disturb is on for ${device.name}` : status === 'Offline' ? `${device.name} is offline` : `Drop In on ${device.name}`}
+                      disabled={disabled}
+                      onClick={() => void startDropIn(device)}
+                      className={`flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                        canDropIn
+                          ? 'bg-indigo-500 text-white hover:bg-indigo-400'
+                          : 'bg-white/[0.08] text-slate-500'
+                      }`}
+                    >
+                      {busy ? <Loader2 size={15} className="animate-spin" /> : <Phone size={15} />}
+                      {busy ? 'Calling…' : status === 'DND' ? 'DND' : status === 'Offline' ? 'Offline' : 'Drop In'}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {dropInError && (
+            <div className="rounded-xl border border-red-500/40 bg-red-950/50 p-3 text-sm text-red-100">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden />
+              {dropInError}
+            </div>
+          )}
+        </section>
+      )}
 
       <p className="px-1 text-xs leading-relaxed text-slate-500">
         Calls use your microphone and optional camera, and nothing is recorded. Anyone in the

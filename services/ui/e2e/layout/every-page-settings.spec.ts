@@ -149,6 +149,23 @@ test.describe('settings, admin, identity and remote on every form factor', () =>
       await page.waitForTimeout(500);
       await check(page, info, run, main, `admin ${label.toLowerCase()}`);
     }
+    // The device list's editor is a sheet on phones and a panel on larger screens.
+    await expect(main.getByRole('button', { name: 'Edit Desk lamp' })).toBeVisible();
+    await checkDialog(page, info, run, main.getByRole('button', { name: 'Edit Desk lamp' }), 'admin network device editor', 'Edit device');
+    finish(run);
+  });
+
+  test('admin: firmware', async ({ page }, info) => {
+    const run = await open(page, '/admin/firmware');
+    const main = page.locator('main');
+    await expect(main.getByTestId('firmware-panel')).toBeVisible();
+    const row = main.getByTestId('firmware-row-update.office_jarvis_firmware');
+    await expect(row).toContainText('2026.10.2 to 2026.11.18');
+    // A board that fetches its own image offers its own button, not an install.
+    await expect(main.getByTestId('firmware-upgrade-dev-attic-sensor')).toBeVisible();
+    await expect(main.getByTestId('firmware-update-all')).toBeVisible();
+    await page.waitForTimeout(500);
+    await check(page, info, run, main, 'admin firmware');
     finish(run);
   });
 

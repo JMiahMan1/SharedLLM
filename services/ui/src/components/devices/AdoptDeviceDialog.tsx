@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Loader2, MonitorCheck } from 'lucide-react';
 import Modal from '../ui/Modal';
+import PasswordField from '../ui/PasswordField';
 import { failureText } from '../../lib/discoveredDevices';
 import { MATTER_BLE_STEPS } from '../../lib/matterCommissioning';
 import type { AdoptResult, DiscoveryInput, HubArea } from '../../lib/discoveredDevices';
@@ -160,8 +161,9 @@ export default function AdoptDeviceDialog({ title, intro, needs: initialNeeds, s
               </label>
             )}
             {needs.map((n) => (
-              <label key={n.key} htmlFor={`${fieldId}-${n.key}`} className="block text-xs text-slate-400">
-                {n.label}{n.optional ? ' (optional)' : ''}
+              // A div, not a wrapping label: a password field's eye is a button, which must not join the label.
+              <div key={n.key} className="block text-xs text-slate-400">
+                <label htmlFor={`${fieldId}-${n.key}`}>{n.label}{n.optional ? ' (optional)' : ''}</label>
                 {n.type === 'select' ? (
                   <select
                     id={`${fieldId}-${n.key}`}
@@ -172,11 +174,21 @@ export default function AdoptDeviceDialog({ title, intro, needs: initialNeeds, s
                     {!n.optional && <option value="">Choose</option>}
                     {(n.options || []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
+                ) : n.type === 'password' ? (
+                  <PasswordField
+                    id={`${fieldId}-${n.key}`}
+                    wrapperClassName="mt-1"
+                    className="min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-sm text-white"
+                    value={values[n.key] || ''}
+                    onChange={(e) => setValues((v) => ({ ...v, [n.key]: e.target.value }))}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
                 ) : (
                   <input
                     id={`${fieldId}-${n.key}`}
                     className="mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-sm text-white"
-                    type={n.type === 'password' ? 'password' : 'text'}
+                    type="text"
                     value={values[n.key] || ''}
                     onChange={(e) => setValues((v) => ({ ...v, [n.key]: e.target.value }))}
                     autoComplete="off"
@@ -184,7 +196,7 @@ export default function AdoptDeviceDialog({ title, intro, needs: initialNeeds, s
                   />
                 )}
                 {n.help && <span className="mt-1 block text-[11px] text-slate-500">{n.help}</span>}
-              </label>
+              </div>
             ))}
           </>
         )}

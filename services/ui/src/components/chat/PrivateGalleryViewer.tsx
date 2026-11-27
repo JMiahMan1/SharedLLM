@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
-import { ChevronLeft, ChevronRight, Loader2, MapPin, MessageSquare, Play, SendHorizontal, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ImageMinus, Loader2, MapPin, MessageSquare, Pencil, Play, SendHorizontal, Trash2, Undo2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { PrivateVault } from '../../lib/privateChatCrypto';
 import { formatDuration } from '../../lib/privateVideoMedia';
 import { timeLabel } from './chatModel';
-import { itemBlobs, stampLabel, type GalleryItem } from './privateGalleryModel';
+import { itemBlobs, shownPicture, stampLabel, type GalleryItem } from './privateGalleryModel';
 import { errorText } from './privateChatModel';
 import { usePrivateVideo } from './usePrivateVideo';
 import { noSave, usePrivatePicture } from './usePrivatePicture';
@@ -15,7 +15,8 @@ const SWIPE_PX = 60;
 
 /** Decrypt a neighbour ahead of time (shared with its tile), so swiping to it is instant. */
 function Preload({ token, vault, item }: { token: string; vault: PrivateVault; item?: GalleryItem }) {
-  usePrivatePicture(token, item?.blob ?? '', item?.mime ?? 'image/jpeg', vault, Boolean(item));
+  const shown = item ? shownPicture(item) : { blob: '', mime: 'image/jpeg' };
+  usePrivatePicture(token, shown.blob, shown.mime, vault, Boolean(item));
   return null;
 }
 
@@ -161,7 +162,12 @@ export default function PrivateGalleryViewer({
   onChanged,
   onDelete,
   onRemoveEntry,
+  onRemoveFromGallery,
   onSlideshow,
+  onEdit,
+  onRevert,
+  editing = '',
+  editorOpen = false,
 }: {
   token: string;
   vault: PrivateVault;
@@ -173,7 +179,17 @@ export default function PrivateGalleryViewer({
   onChanged: () => void;
   onDelete: (messageId: number, blobs?: string[]) => Promise<void>;
   onRemoveEntry: (item: GalleryItem) => void;
+  /** Take a picture sent in the chat out of the gallery (it stays in the chat). */
+  onRemoveFromGallery?: (item: GalleryItem) => void;
   onSlideshow: (item: GalleryItem) => void;
+  /** Edit a photo (always from its original): the edit is saved beside it, the original kept. */
+  onEdit?: (item: GalleryItem) => void;
+  /** Show an edited photo's original again. */
+  onRevert?: (item: GalleryItem) => void;
+  /** The blob of the photo whose edit is being opened or saved. */
+  editing?: string;
+  /** The editor is open over the viewer: its keys are its own. */
+  editorOpen?: boolean;
 }) {
   const item = items[index];
   const prev = index > 0 ? items[index - 1] : undefined;
@@ -189,7 +205,8 @@ export default function PrivateGalleryViewer({
     [index, items.length, onIndex],
   );
   const zoom = useZoomSwipe(go, item?.blob ?? '');
-  const { url, failed } = usePrivatePicture(token, item?.blob ?? '', item?.mime ?? 'image/jpeg', vault, Boolean(item));
+  const shown = item ? shownPicture(item) : { blob: '', mime: 'image/jpeg' };
+  const { url, failed } = usePrivatePicture(token, shown.blob, shown.mime, vault, Boolean(item));
   // A clip is decrypted only once its play button is pressed, and dropped when the viewer leaves it.
   const [playingBlob, setPlayingBlob] = useState('');
   const playing = Boolean(item?.video) && playingBlob === item?.blob;
@@ -201,6 +218,7 @@ export default function PrivateGalleryViewer({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (editorOpen) return;
       const target = event.target as HTMLElement | null;
       const inField = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA';
       if (event.key === 'Escape') onClose();
@@ -210,7 +228,7 @@ export default function PrivateGalleryViewer({
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose, go]);
+  }, [onClose, go, editorOpen]);
 
   if (!item) return null;
 
@@ -297,6 +315,31 @@ export default function PrivateGalleryViewer({
         >
           <Play size={17} className="ml-0.5" />
         </button>
+        {!item.video && onEdit && (
+          <button
+            type="button"
+            onClick={() => onEdit(item)}
+            disabled={Boolean(editing)}
+            aria-label={item.edit ? 'Edit again, from the original' : 'Edit this photo'}
+            title={item.edit ? 'Edit again' : 'Edit'}
+            data-testid="private-gallery-edit"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 disabled:opacity-50"
+          >
+            {editing === item.blob ? <Loader2 size={17} className="animate-spin" /> : <Pencil size={17} />}
+          </button>
+        )}
+        {!item.entryId && onRemoveFromGallery && (
+          <button
+            type="button"
+            onClick={() => onRemoveFromGallery(item)}
+            aria-label={`Remove this ${kind} from the gallery (it stays in the chat)`}
+            title="Remove from gallery"
+            data-testid="private-gallery-remove"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
+          >
+            <ImageMinus size={17} />
+          </button>
+        )}
         {item.own && (
           <button
             type="button"
@@ -316,7 +359,7 @@ export default function PrivateGalleryViewer({
         {...(item.video && playing ? {} : zoom.handlers)}
       >
         <div
-          key={item.blob}
+          key={`${item.blob}:${shown.blob}`}
           className={`flex h-full w-full items-center justify-center ${
             entering === 1 ? 'motion-safe:animate-[pg-in-right_220ms_ease-out]' : entering === -1 ? 'motion-safe:animate-[pg-in-left_220ms_ease-out]' : 'motion-safe:animate-[pg-fade_200ms_ease-out]'
           }`}
@@ -404,6 +447,35 @@ export default function PrivateGalleryViewer({
       </div>
 
       <div className="shrink-0 border-t border-white/10 bg-slate-950/95">
+        {item.edit && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-white/10 px-3 py-1.5" data-testid="private-gallery-edited">
+            <p className="min-w-0 flex-1 text-xs text-slate-300">
+              Edited{item.edit.own ? ' by you' : item.edit.byName ? ` by ${item.edit.byName}` : ''}. The original is kept.
+            </p>
+            {onEdit && (
+              <button
+                type="button"
+                onClick={() => onEdit(item)}
+                disabled={Boolean(editing)}
+                data-testid="private-gallery-edit-again"
+                className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold text-rose-100 hover:bg-white/10 disabled:opacity-50"
+              >
+                <Pencil size={13} aria-hidden /> Edit again
+              </button>
+            )}
+            {onRevert && (
+              <button
+                type="button"
+                onClick={() => onRevert(item)}
+                disabled={Boolean(editing)}
+                data-testid="private-gallery-revert"
+                className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold text-rose-100 hover:bg-white/10 disabled:opacity-50"
+              >
+                <Undo2 size={13} aria-hidden /> Revert to original
+              </button>
+            )}
+          </div>
+        )}
         <button
           type="button"
           onClick={() => setShowComments((v) => !v)}

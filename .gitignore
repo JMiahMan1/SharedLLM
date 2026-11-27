@@ -58,3 +58,7 @@ HANDOVER.md
 
 # IDE (Eclipse Buildship) settings carry local paths
 services/ui/android/.settings/
+
+# The face detector's WebAssembly, copied in by scripts/copy-lens-assets.mjs at build time
+services/ui/public/lens/vision_wasm_internal.js
+services/ui/public/lens/vision_wasm_internal.wasm

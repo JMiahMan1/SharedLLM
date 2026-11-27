@@ -24,12 +24,20 @@ Entities map by unique_id: a media_player's unique_id is the MA player_id
 What each player is and can do comes from MA: its ``device_info`` (maker,
 model, software version, MAC) is confirmed onto its device, and the feature
 flags from its ``supported_features`` and control types.
+
+A player MA lists gets its media_player as soon as MA reports it (at setup, on
+``player_added``, or on the next poll), except a ``protocol`` player, the hidden
+Sendspin/AirPlay/Cast leg of a universal player. A player that is the same
+hardware as another integration's device joins that device (by MAC, by IP
+against an ESPHome node's host, else by a name only one ESPHome node carries),
+so a voice satellite's ESPHome speaker and its MA player share one device.
 """
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import json
+import re
 import time
 import urllib.parse
 import uuid
@@ -47,7 +55,8 @@ from services.homehub.core import (
     ServiceCall,
     ServiceNotFound,
 )
-from services.homehub.drivers.media_common import F, as_list, clamp01, clean, utc_iso
+from services.homehub.drivers.media_common import F, as_list, clamp01, clean, normalize_mac, utc_iso
+from services.homehub.drivers.music_assistant_hass_link import HassLinkWatch
 
 COMMAND_TIMEOUT_S = 30.0
 FAVORITE_SUFFIX = "_favorite_now_playing"
@@ -194,6 +203,11 @@ class MAConnection:
         self._ws = self._session = self._reader = None
 
 
+def _slug(name: Any) -> str:
+    """``"Echo Dot 3 abc123"`` and ``"echo-dot-3-abc123"`` alike: lower case, each non-alphanumeric run one dash."""
+    return re.sub(r"[^a-z0-9]+", "-", str(name or "").lower()).strip("-")
+
+
 def _image_url(image: Any, base_url: str) -> str | None:
     """MA's own rule (music_assistant_client.get_image_url, size 0)."""
     if isinstance(image, str):
@@ -230,6 +244,10 @@ class MusicAssistantDriver(Driver):
         self._pressed: dict[str, str] = {}
         #: True once ``players/all`` answered: only then does a missing player mean MA dropped it.
         self._listed = False
+        #: player_id -> what its registry work was last done for (``_player_signature``).
+        self._seen: dict[str, tuple[Any, ...]] = {}
+        #: Reloads MA's ``hass`` provider (its link back to this hub) when it failed during a HomeHub restart.
+        self.hass_link = HassLinkWatch(self.cmd, self.log)
 
     # -- lifecycle ------------------------------------------------------------------
     async def async_setup(self) -> None:
@@ -247,6 +265,7 @@ class MusicAssistantDriver(Driver):
         await conn.connect()
         self.conn = conn
         await self.refresh()
+        self.hass_link.kick(reconnected=True)
 
     def _on_close(self) -> None:
         self.log.warning("Music Assistant connection to %s closed", self.url)
@@ -261,8 +280,10 @@ class MusicAssistantDriver(Driver):
                 raise DeviceUnavailable(f"Music Assistant reconnect failed: {exc}") from exc
             return
         await self.refresh()
+        self.hass_link.kick()
 
     async def async_unload(self) -> None:
+        await self.hass_link.stop()
         if self.conn is not None:
             await self.conn.close()
 
@@ -276,6 +297,7 @@ class MusicAssistantDriver(Driver):
         self.players = {p["player_id"]: p for p in players if isinstance(p, dict) and p.get("player_id")}
         self.queues = {q["queue_id"]: q for q in queues if isinstance(q, dict) and q.get("queue_id")}
         self._listed = True
+        self._ensure_player_entities()
         self.publish_all()
 
     async def cmd(self, command: str, **args: Any) -> Any:
@@ -283,14 +305,115 @@ class MusicAssistantDriver(Driver):
             raise DeviceUnavailable("Music Assistant is not connected")
         return await self.conn.command(command, **args)
 
+    # -- registry ---------------------------------------------------------------------
+    def _ensure_player_entities(self) -> None:
+        for player_id, p in self.players.items():
+            self._ensure_player_entity(player_id, p)
+
+    @staticmethod
+    def _player_signature(p: dict[str, Any]) -> tuple[Any, ...]:
+        """What the registry work depends on: a player whose type, names and device_info are unchanged needs none."""
+        info = p.get("device_info") if isinstance(p.get("device_info"), dict) else {}
+        return (p.get("type"), p.get("name"), p.get("display_name"), json.dumps(info, sort_keys=True, default=str))
+
+    def _ensure_player_entity(self, player_id: str, p: dict[str, Any], *, force: bool = False) -> EntityEntry | None:
+        """Register the player's media_player, on the device that already owns the same hardware.
+
+        Music Assistant may only learn about a player after the integration set up (a satellite that
+        came online later and connected itself over Sendspin), so entities are made here as well as by
+        the manual "Sync devices" flow. A ``protocol`` player is the hidden sub-player of a universal
+        player (the Sendspin, AirPlay or Chromecast leg of one speaker) and gets no entity: the
+        universal player is the one to play on. MA sends ``player_updated`` constantly (volume,
+        progress), so the work runs only when the player has no entity yet or its names or device_info
+        changed since they were last seen (``force`` for ``player_added``).
+        """
+        if p.get("type") == "protocol":
+            return None
+        sig = self._player_signature(p)
+        ent = self.registry_entity("media_player", player_id)
+        if ent is not None and not force and self._seen.get(player_id) == sig:
+            return ent
+        dev = self._player_device(player_id, p, ent)
+        self._seen[player_id] = sig
+        return ent if ent is not None else self.ensure_entity("media_player", player_id, None, device=dev)
+
+    def _player_device(self, player_id: str, p: dict[str, Any], ent: EntityEntry | None) -> Any:
+        """The device a player's entity belongs on: the same hardware's device when one is found, else its own.
+
+        An entity already on a device another integration shares (HA merged a TV's integrations) stays
+        there; one on a device of Music Assistant's own moves to the hardware's device once it is found.
+        """
+        info = p.get("device_info") if isinstance(p.get("device_info"), dict) else {}
+        mac = normalize_mac(info.get("mac_address"))
+        connections = [["mac", mac]] if mac else []
+        current = self.hub.devices.get(ent.device_id) if ent is not None and ent.device_id else None
+        linked = self._linked_device(p, mac, str(info.get("ip_address") or "").strip())
+        if current is not None and (linked is None or linked.id == current.id or self._shared(current)):
+            return current
+        if linked is None:
+            name = str(p.get("display_name") or p.get("name") or player_id)
+            return self.ensure_device(name, identifiers=[["music_assistant", player_id]],
+                                      connections=connections, reuse_single=False,
+                                      manufacturer=info.get("manufacturer") or None,
+                                      model=info.get("model") or None,
+                                      model_id=info.get("model_id") or None,
+                                      sw_version=info.get("software_version") or None)
+        if self.entry.entry_id not in linked.config_entries:
+            linked.config_entries.append(self.entry.entry_id)
+            self.hub._save("device", linked)
+            self.hub.bus.fire("device_registry_updated", {"action": "update", "device_id": linked.id})
+        if connections:
+            # Only the MAC: the maker and model are the hardware's own integration's to report.
+            self.confirm_device(linked.id, connections=connections)
+        if ent is not None:
+            self.log.info("%s: %s joins device %s", self.entry.title, ent.entity_id, linked.display_name)
+            ent.device_id = linked.id
+            self.hub._save("entity", ent)
+            self.hub.bus.fire("entity_registry_updated", {"action": "update", "entity_id": ent.entity_id})
+        return linked
+
+    def _shared(self, dev: Any) -> bool:
+        """True when another integration's entry also owns ``dev``."""
+        return any(e != self.entry.entry_id for e in dev.config_entries)
+
+    def _linked_device(self, p: dict[str, Any], mac: str | None, ip: str) -> Any:
+        """Another integration's device that is the same hardware as player ``p``, or None.
+
+        By the player's MAC, then its IP against an ESPHome node's address, then its name: MA names a
+        satellite that connects itself over Sendspin after the node ("Echo Dot 3 abc123" for the node
+        "echo-dot-3-abc123") and reports neither its MAC nor its IP. A name links only when exactly one
+        ESPHome device carries it; several (or none) link nothing.
+        """
+        others = [d for d in self.hub.devices.values() if self._shared(d) or self.entry.entry_id not in d.config_entries]
+        if mac:
+            dev = next((d for d in others if ("mac", mac) in {tuple(map(str, c)) for c in d.connections}), None)
+            if dev is not None:
+                return dev
+        esphome = [(d, entry) for d in others for e in d.config_entries
+                   if (entry := self.hub.config_entries.get(e)) is not None and entry.domain == "esphome"]
+        if ip:
+            dev = next((d for d, entry in esphome if str((entry.data or {}).get("host") or "").strip() == ip), None)
+            if dev is not None:
+                return dev
+        if p.get("type") not in (None, "player"):
+            return None
+        names = {_slug(p.get("name")), _slug(p.get("display_name"))} - {""}
+        if not names:
+            return None
+        hits = {d.id: d for d, entry in esphome
+                if names & {_slug(d.name), _slug(d.name_by_user), _slug((entry.data or {}).get("device_name"))}}
+        return next(iter(hits.values())) if len(hits) == 1 else None
+
     # -- events -----------------------------------------------------------------------
     def _on_event(self, msg: dict[str, Any]) -> None:
         event, oid, data = msg.get("event"), msg.get("object_id"), msg.get("data")
         if event in ("player_added", "player_updated") and isinstance(data, dict) and data.get("player_id"):
             self.players[data["player_id"]] = data
+            self._ensure_player_entity(data["player_id"], data, force=event == "player_added")
             self.publish_player(data["player_id"])
         elif event == "player_removed" and oid:
             self.players.pop(str(oid), None)
+            self._seen.pop(str(oid), None)
             self.publish_player(str(oid))
         elif event in ("queue_added", "queue_updated") and isinstance(data, dict) and data.get("queue_id"):
             self.queues[data["queue_id"]] = data
@@ -457,12 +580,17 @@ class MusicAssistantDriver(Driver):
             self.publish(ent, state, attrs)
 
     def _confirm_info(self, ent: EntityEntry, p: dict[str, Any]) -> None:
-        from services.homehub.drivers.media_common import normalize_mac
-
         info = p.get("device_info") if isinstance(p.get("device_info"), dict) else {}
         if not ent.device_id or not info:
             return
         mac = normalize_mac(info.get("mac_address"))
+        dev = self.hub.devices.get(ent.device_id)
+        if dev is not None and self._shared(dev):
+            # Another integration's device (an ESPHome satellite, a TV): its maker, model and firmware
+            # are that integration's to report. MA's guess ("Echo Dot 3 (hassmic)") must not replace them.
+            if mac:
+                self.confirm_device(ent, connections=[["mac", mac]])
+            return
         self.confirm_device(ent, manufacturer=info.get("manufacturer") or None, model=info.get("model") or None,
                             model_id=info.get("model_id") or None,
                             sw_version=info.get("software_version") or None,

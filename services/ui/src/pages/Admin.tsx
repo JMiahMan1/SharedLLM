@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import PasswordField from '../components/ui/PasswordField';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -33,6 +34,7 @@ import {
   PowerOff,
   RefreshCw,
   Users,
+  UsersRound,
   Sparkles,
   BookMarked,
   Wifi,
@@ -59,6 +61,9 @@ import Modal from '../components/ui/Modal';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
 import { EntityProtectionPanel } from '../components/admin/EntityProtectionPanel';
 import { RolesPanel } from '../components/admin/RolesPanel';
+import { HubDevicesPanel } from '../components/admin/HubDevicesPanel';
+import { VoiceRecognitionPanel } from '../components/admin/VoiceRecognitionPanel';
+import { WhisperModePanel } from '../components/admin/WhisperModePanel';
 import FamilyPanel from '../components/settings/FamilyPanel';
 import { HomeAlertsPanel } from '../components/admin/HomeAlertsPanel';
 import { WeatherRemindersPanel } from '../components/admin/WeatherRemindersPanel';
@@ -68,6 +73,7 @@ import ServiceAccessSetup from '../components/admin/ServiceAccessSetup';
 import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
 import EntityMultiSelect from '../components/ui/EntityMultiSelect';
 import LLMSettings from '../components/settings/LLMSettings';
+import BluetoothDiagnostics from '../components/wander/BluetoothDiagnostics';
 import HardwarePanel from '../components/settings/HardwarePanel';
 import HubNotConnected from '../components/admin/HubNotConnected';
 import LightGroupsPanel from '../components/devices/LightGroupsPanel';
@@ -79,17 +85,21 @@ import DnsManagementPanel from '../components/settings/DnsManagementPanel';
 import TelemetryAdminPanel from '../components/settings/TelemetryAdminPanel';
 import StarBalance from '../components/wander/StarBalance';
 import BibleAdminPanel from '../components/admin/BibleAdminPanel';
+import AdminPeople from '../components/admin/AdminPeople';
 import NetworkPanel from '../components/admin/NetworkPanel';
+import { FirmwarePanel } from '../components/admin/FirmwarePanel';
 import SystemStoragePanel from '../components/admin/SystemStoragePanel';
 import { confirmDialog } from '../components/ui/confirmDialog';
 import SignInResetPanel, { TestAccountBadge, UserSignInResetButton } from '../components/admin/SignInResetPanel';
 
-type AdminTab = 'users' | 'groups' | 'hardware' | 'telemetry' | 'storage' | 'network' | 'intercom' | 'raven' | 'settings' | 'database' | 'services' | 'bible';
+type AdminTab = 'people' | 'users' | 'groups' | 'hardware' | 'firmware' | 'telemetry' | 'storage' | 'network' | 'intercom' | 'raven' | 'settings' | 'database' | 'services' | 'bible';
 
 const tabs: { id: AdminTab; label: string; icon: React.ElementType; path: string }[] = [
   { id: 'users', label: 'Users & Devices', icon: Shield, path: '/admin/users' },
+  { id: 'people', label: 'People', icon: UsersRound, path: '/admin/people' },
   { id: 'groups', label: 'Device Groups', icon: Layers, path: '/admin/groups' },
   { id: 'hardware', label: 'Hardware', icon: Cpu, path: '/admin/hardware' },
+  { id: 'firmware', label: 'Firmware', icon: ArrowUpCircle, path: '/admin/firmware' },
   { id: 'telemetry', label: 'Telemetry', icon: Activity, path: '/admin/monitor' },
   { id: 'storage', label: 'Storage', icon: HardDrive, path: '/admin/storage' },
   { id: 'network', label: 'Network', icon: Wifi, path: '/admin/network' },
@@ -110,6 +120,7 @@ const adminTabFromPathname = (pathname: string): AdminTab => {
   if (pathname.startsWith('/admin/ops')) return 'raven';
   if (pathname.startsWith('/admin/groups')) return 'groups';
   if (pathname.startsWith('/admin/hardware')) return 'hardware';
+  if (pathname.startsWith('/admin/firmware')) return 'firmware';
   if (pathname.startsWith('/admin/monitor')) return 'telemetry';
   if (pathname.startsWith('/admin/storage')) return 'storage';
   if (pathname.startsWith('/admin/network')) return 'network';
@@ -120,6 +131,7 @@ const adminTabFromPathname = (pathname: string): AdminTab => {
   if (pathname.startsWith('/admin/users')) return 'users';
   if (pathname.startsWith('/admin/services')) return 'services';
   if (pathname.startsWith('/admin/bible')) return 'bible';
+  if (pathname.startsWith('/admin/people')) return 'people';
   return 'users';
 };
 
@@ -146,6 +158,7 @@ type UserFormState = {
   mass_url: string;
   mass_token: string;
   malwarebazaar_key: string;
+  google_books_key: string;
 };
 
 const emptyUserForm: UserFormState = {
@@ -171,6 +184,7 @@ const emptyUserForm: UserFormState = {
   mass_url: '',
   mass_token: '',
   malwarebazaar_key: '',
+  google_books_key: '',
 };
 
 const toUserForm = (user?: UserProfile | null): UserFormState => ({
@@ -196,6 +210,7 @@ const toUserForm = (user?: UserProfile | null): UserFormState => ({
   mass_url: String(user?.mass_url ?? ''),
   mass_token: '',
   malwarebazaar_key: '',
+  google_books_key: '',
 });
 
 const NO_SERVICE_DEFAULTS = { urls: {} as Record<string, string | null>, source: {} as Record<string, string> };
@@ -204,7 +219,7 @@ const NO_SERVICE_DEFAULTS = { urls: {} as Record<string, string | null>, source:
 const CREDENTIAL_KEYS = INTEGRATIONS.flatMap((i) => i.fields.map((f) => f.key));
 
 const normalizeServiceKey = (name: string): string =>
-  name.replace(/^sharedllm_/, '').replace(/_1$/, '');
+  name.replace(/^sharedllm_/, '').replace(/_1$/, '').replace(/-/g, '_');
 
 const Admin = () => {
   const queryClient = useQueryClient();
@@ -254,7 +269,33 @@ const Admin = () => {
   const [intercomSessionTarget, setIntercomSessionTarget] = useState('');
   const [intercomSessionType, setIntercomSessionType] = useState<'twoway' | 'broadcast' | 'announcement'>('twoway');
   const [activePullService, setActivePullService] = useState<string | null>(null);
+  const [updatingService, setUpdatingService] = useState<string | null>(null);
+  const [restartingService, setRestartingService] = useState<string | null>(null);
+  const [downloadedUpdates, setDownloadedUpdates] = useState<Record<string, boolean>>({});
+  const refreshTimersRef = useRef<number[]>([]);
   const [starUser, setStarUser] = useState('');
+
+  useEffect(() => {
+    const timers = refreshTimersRef.current;
+    return () => {
+      for (const id of timers) {
+        window.clearTimeout(id);
+      }
+      timers.length = 0;
+    };
+  }, []);
+
+  const scheduleHealthRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['system-health'] });
+    queryClient.invalidateQueries({ queryKey: ['service-updates'] });
+    for (const delayMs of [3500, 9000]) {
+      const id = window.setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['system-health'] });
+        queryClient.invalidateQueries({ queryKey: ['service-updates'] });
+      }, delayMs);
+      refreshTimersRef.current.push(id);
+    }
+  };
 
   // A failed read used to render a header with nothing under it, which reads
   // the same as a household with no accounts.
@@ -352,7 +393,8 @@ const Admin = () => {
         queryClient.invalidateQueries({ queryKey: ['system-health'] });
         if (pullStatusData.status === 'completed') {
           if (pullStatusData.updated) {
-            toast.success(`${wasActive}: new image downloaded. Restart to run it.`);
+            setDownloadedUpdates((prev) => ({ ...prev, [wasActive]: true }));
+            toast.success(`${wasActive}: new image downloaded. Click Apply Update to restart.`);
           } else {
             toast.success(`${wasActive}: Image is up to date.`);
           }
@@ -380,21 +422,44 @@ const Admin = () => {
 
   const pullAndRestartMutation = useMutation({
     mutationFn: (serviceName: string) => api.pullAndRestart(serviceName),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['system-health'] });
-      queryClient.invalidateQueries({ queryKey: ['service-updates'] });
+    onMutate: (serviceName) => {
+      setUpdatingService(serviceName);
+    },
+    onSuccess: (data, serviceName) => {
+      setDownloadedUpdates((prev) => {
+        if (!prev[serviceName]) return prev;
+        const next = { ...prev };
+        delete next[serviceName];
+        return next;
+      });
+      scheduleHealthRefresh();
       toast.success(data.message);
     },
     onError: (error: unknown) => toast.error(errorText(error, 'Pull and restart failed')),
+    onSettled: () => {
+      setUpdatingService(null);
+    },
   });
 
   const restartServiceMutation = useMutation({
     mutationFn: (serviceName: string) => api.restartService(serviceName),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['system-health'] });
-      toast.success('Service restart initiated');
+    onMutate: (serviceName) => {
+      setRestartingService(serviceName);
+    },
+    onSuccess: (data, serviceName) => {
+      setDownloadedUpdates((prev) => {
+        if (!prev[serviceName]) return prev;
+        const next = { ...prev };
+        delete next[serviceName];
+        return next;
+      });
+      scheduleHealthRefresh();
+      toast.success(data?.message || 'Service restart initiated');
     },
     onError: (error: unknown) => toast.error(errorText(error, 'Restart failed')),
+    onSettled: () => {
+      setRestartingService(null);
+    },
   });
 
   const saveUserMutation = useMutation({
@@ -1020,6 +1085,13 @@ const Admin = () => {
             <CompanionDevicesPanel scope="all" />
           </section>
 
+          <HubDevicesPanel users={users} />
+
+          <VoiceRecognitionPanel />
+
+          {/* Whisper mode is HomeHub's own setting: shown only with HomeHub connected. */}
+          {homehub && <WhisperModePanel />}
+
           {/* Device assignments, Entity Protection and Home alerts work on the home
               hub's devices: with no hub they say so instead of failing. */}
           {anyHub ? (
@@ -1107,6 +1179,9 @@ const Admin = () => {
           <WeatherRemindersPanel users={users} />
 
           <WeatherIntegrationsPanel />
+
+          {/* This phone's Bluetooth (car detection, Nearby & offline), for checking a real device: the Android app only. */}
+          <BluetoothDiagnostics />
         </div>
       )}
 
@@ -1594,6 +1669,8 @@ const Admin = () => {
         </section>
       )}
 
+      {activeTab === 'firmware' && <FirmwarePanel />}
+
       {activeTab === 'hardware' && (
         <section className="glass-panel p-4 sm:p-8 border-emerald-500/20 space-y-6">
           <div className="flex items-center gap-3">
@@ -1608,6 +1685,8 @@ const Admin = () => {
           <HardwarePanel />
         </section>
       )}
+
+      {activeTab === 'people' && <AdminPeople />}
 
       {activeTab === 'bible' && (
         <section className="space-y-6">
@@ -1872,7 +1951,7 @@ const Admin = () => {
                    {systemHealth.services.map((service) => {
                    const serviceKey = normalizeServiceKey(service.name);
                    const updateInfo = updatesData?.services.find(
-                     s => normalizeServiceKey(s.service) === serviceKey
+                     s => s.container_name === service.name || normalizeServiceKey(s.service) === serviceKey
                    );
                    const hasUpdate = !!updateInfo?.has_update;
                    const checkError = updateInfo?.check_error;
@@ -1880,11 +1959,14 @@ const Admin = () => {
                    // still offer one-click pull & restart after a CI push.
                    const canForceUpdate = !hasUpdate && !!checkError && checkError !== 'no_image_tag';
                    const isPulling = activePullService === service.name || activePullService === serviceKey;
+                   const isUpdating = updatingService === service.name;
+                   const isRestarting = restartingService === service.name;
+                   const hasDownloadedUpdate = !!downloadedUpdates[service.name];
                    const showPullAndRestart = (hasUpdate || canForceUpdate) && !isPulling;
                    const pullStatus = isPulling ? pullStatusData : null;
 
                    return (
-                     <div key={service.name} className={`glass-card p-4 min-w-0 ${hasUpdate ? 'border-orange-500/30' : ''}`}>
+                     <div key={service.name} className={`glass-card p-4 min-w-0 ${hasUpdate || hasDownloadedUpdate ? 'border-orange-500/30' : ''}`}>
                        <div className="flex items-start justify-between gap-3">
                          <div className="flex items-center gap-3 min-w-0">
                            <div className={`rounded-full p-2 ${
@@ -1903,17 +1985,22 @@ const Admin = () => {
                            <div className="min-w-0">
                              <div className="flex flex-wrap items-center gap-2">
                                <p className="min-w-0 break-all font-semibold text-white capitalize">{serviceKey.replace(/_/g, ' ')}</p>
-                               {hasUpdate && !isPulling && (
+                               {hasDownloadedUpdate && !isUpdating && !isRestarting && (
+                                 <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-emerald-400">
+                                   <ArrowUpCircle size={10} /> Ready to Apply
+                                 </span>
+                               )}
+                               {hasUpdate && !hasDownloadedUpdate && !isPulling && !isUpdating && (
                                  <span className="flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-orange-400">
                                    <ArrowUpCircle size={10} /> Update Available
                                  </span>
                                )}
-                               {isPulling && (
+                               {(isPulling || isUpdating) && (
                                  <span className="flex items-center gap-1 rounded-full bg-cyan-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-cyan-400">
-                                   <RefreshCw size={10} className="animate-spin" /> Pulling
+                                   <RefreshCw size={10} className="animate-spin" /> {isUpdating ? 'Updating' : 'Pulling'}
                                  </span>
                                )}
-                               {!hasUpdate && !isPulling && checkError && checkError !== 'no_image_tag' && (
+                               {!hasUpdate && !hasDownloadedUpdate && !isPulling && checkError && checkError !== 'no_image_tag' && (
                                  <span
                                    className="flex items-center gap-1 rounded-full bg-slate-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-slate-500"
                                    title={checkError === 'registry_unreachable' ? 'The image registry could not be reached.' : `Update check failed: ${checkError}`}
@@ -1959,20 +2046,34 @@ const Admin = () => {
                            )}
                          </div>
                          <div className="flex flex-wrap gap-2 sm:shrink-0">
-                           {service.status === 'running' && (
-                             <>
+                           <>
+                             <button
+                               onClick={async () => {
+                                 const verb = hasDownloadedUpdate ? 'Apply update and restart' : 'Restart';
+                                 if (await confirmDialog({ title: `${verb} this service?`, body: `${verb} ${serviceKey}? It is unavailable for a few seconds${serviceKey === 'gateway' || serviceKey === 'caddy' ? ', and this app with it' : ''}.`, confirmLabel: hasDownloadedUpdate ? 'Apply Update' : 'Restart', danger: true })) {
+                                   restartServiceMutation.mutate(service.name);
+                                 }
+                               }}
+                               disabled={isRestarting || isUpdating}
+                               className={`glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest ${hasDownloadedUpdate ? 'border-emerald-500/50 text-emerald-400' : ''}`}
+                             >
+                               <RefreshCw size={12} className={isRestarting ? 'animate-spin' : ''} /> {isRestarting ? 'Restarting…' : hasDownloadedUpdate ? 'Apply Update' : 'Restart'}
+                             </button>
+                             {showPullAndRestart && (
                                <button
                                  onClick={async () => {
-                                   if (await confirmDialog({ title: 'Restart this service?', body: `Restart ${serviceKey}? It is unavailable for a few seconds${serviceKey === 'gateway' || serviceKey === 'caddy' ? ', and this app with it' : ''}.`, confirmLabel: 'Restart', danger: true })) {
-                                     restartServiceMutation.mutate(service.name);
+                                   if (await confirmDialog({ title: 'Update and restart?', body: `Download the latest ${serviceKey} image and recreate it?`, confirmLabel: 'Update & Restart', danger: true })) {
+                                     pullAndRestartMutation.mutate(service.name);
                                    }
                                  }}
-                                 disabled={restartServiceMutation.isPending}
-                                 className="glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest"
+                                 disabled={isUpdating || isRestarting || pullAndRestartMutation.isPending}
+                                 className={`glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest ${hasUpdate ? 'border-orange-500/50 text-orange-400' : 'border-indigo-500/50 text-indigo-400'}`}
                                >
-                                 <RefreshCw size={12} /> Restart
+                                 <ArrowUpCircle size={12} className={isUpdating ? 'animate-spin' : ''} /> {isUpdating ? 'Updating…' : 'Update & Restart'}
                                </button>
-                               {isPulling ? (
+                             )}
+                             {!showPullAndRestart && (
+                               isPulling ? (
                                  <button
                                    disabled
                                    className="glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest text-cyan-400"
@@ -1982,28 +2083,15 @@ const Admin = () => {
                                ) : (
                                  <button
                                    onClick={() => pullImageMutation.mutate(service.name)}
-                                   disabled={pullImageMutation.isPending || pullImageMutation.isPaused || checkError === 'no_image_tag'}
-                                   className={`glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest ${hasUpdate ? 'border-orange-500/50 text-orange-400' : ''} ${checkError === 'no_image_tag' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                   disabled={pullImageMutation.isPending || pullImageMutation.isPaused || isUpdating || checkError === 'no_image_tag'}
+                                   className={`glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest ${checkError === 'no_image_tag' ? 'opacity-50 cursor-not-allowed' : ''}`}
                                    title={checkError === 'no_image_tag' ? 'Cannot pull: container image has no tag. Rebuild with a tag and recreate.' : undefined}
                                  >
-                                   <Cloud size={12} /> {hasUpdate ? 'Update' : 'Pull'}
+                                   <Cloud size={12} /> Pull
                                  </button>
-                               )}
-                                {showPullAndRestart && (
-                                  <button
-                                    onClick={async () => {
-                                      if (await confirmDialog({ title: 'Update and restart?', body: `Download the latest ${serviceKey} image and restart it?`, confirmLabel: 'Update', danger: true })) {
-                                        pullAndRestartMutation.mutate(service.name);
-                                      }
-                                    }}
-                                    disabled={pullAndRestartMutation.isPending}
-                                    className="glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest border-indigo-500/50 text-indigo-400"
-                                  >
-                                    <ArrowUpCircle size={12} /> {pullAndRestartMutation.isPending ? 'Updating…' : 'Pull & Restart'}
-                                  </button>
-                                )}
-                             </>
-                           )}
+                               )
+                             )}
+                           </>
                          </div>
                        </div>
                      </div>
@@ -2055,20 +2143,20 @@ const Admin = () => {
           </div>
 
           {!editingUser && (
-            <label className="space-y-2">
-              <span className="text-xs font-black uppercase tracking-widest text-slate-500">
+            <div className="space-y-2">
+              <label htmlFor="admin-create-user-password" className="block text-xs font-black uppercase tracking-widest text-slate-500">
                 Password <span className="text-red-400">*</span>
-              </span>
-              <input
-                type="password"
+              </label>
+              <PasswordField
+                id="admin-create-user-password"
                 value={userForm.password}
                 aria-label="Password"
                 onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))}
-                className="glass-input w-full"
+                className="glass-input min-h-11 w-full"
                 placeholder="Required for new users"
               />
               <p className="text-[10px] text-slate-500">New users must have a password to log in.</p>
-            </label>
+            </div>
           )}
 
           <label className="flex items-center gap-3 rounded-2xl border border-white/5 bg-white/5 p-4">
@@ -2216,17 +2304,17 @@ const Admin = () => {
           <p className="text-sm text-slate-400">
             Enter a new password for this user. They will be able to log in with this immediately.
           </p>
-          <label className="block space-y-2">
-            <span className="text-xs font-black uppercase tracking-widest text-slate-500">New Password</span>
-            <input
-              type="password"
+          <div className="block space-y-2">
+            <label htmlFor="admin-new-password" className="block text-xs font-black uppercase tracking-widest text-slate-500">New Password</label>
+            <PasswordField
+              id="admin-new-password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              className="glass-input w-full"
+              className="glass-input min-h-11 w-full"
               placeholder="••••••••"
               autoFocus
             />
-          </label>
+          </div>
           <div className="flex gap-3">
              <button
               onClick={() => setPasswordModalUser(null)}

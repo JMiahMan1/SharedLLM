@@ -456,6 +456,20 @@ async def put_energy_prefs(request: Request):
     return await _hub_admin("PUT", "/hub/energy/prefs", json=await _json(request))
 
 
+@router.get("/voice/settings")
+async def voice_settings(request: Request):
+    """HomeHub's voice settings (whisper mode: on/off, the reply volume, how much quieter counts)."""
+    await _admin(request)
+    return await _hub_admin("GET", "/hub/voice/settings")
+
+
+@router.put("/voice/settings")
+async def put_voice_settings(request: Request):
+    """``{"whisper": {"enabled"?, "volume"?, "level_drop_db"?}}``; the hub validates and keeps it."""
+    await _admin(request)
+    return await _hub_admin("PUT", "/hub/voice/settings", json=await _json(request))
+
+
 @router.get("/energy/candidates")
 async def energy_candidates(request: Request):
     await _admin(request)

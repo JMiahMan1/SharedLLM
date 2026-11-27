@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, Loader2, RefreshCw, RotateCcw, SendHorizontal, Video, X } from 'lucide-react';
+import { Camera, Loader2, RefreshCw, RotateCcw, SendHorizontal, SlidersHorizontal, Video, X } from 'lucide-react';
+import LazyPhotoEditor from '../photoEditor/LazyPhotoEditor';
+import type { EditRecipe } from '../../lib/photoEdit/recipe';
+import { MAX_ATTACHMENT_BYTES } from './chatModel';
 
 type Facing = 'environment' | 'user';
+
+/** What an edited picture was made from: the recipe and the untouched original, for whoever keeps them. */
+export interface CapturedEdit {
+  recipe: EditRecipe;
+  original: Blob;
+}
 
 /**
  * The private chat's own camera. It never opens the phone's camera app and
@@ -15,8 +24,11 @@ export default function PrivateCamera({
   onClose,
   onVideo,
 }: {
-  /** The JPEG bytes and when they were taken (seconds); the caller encrypts and zeroes them. */
-  onCapture: (jpeg: Uint8Array<ArrayBuffer>, takenAt: number) => Promise<void>;
+  /**
+   * The JPEG bytes and when they were taken (seconds); the caller encrypts and zeroes them.
+   * After an edit, `edit` carries the recipe and the original picture (still in memory only).
+   */
+  onCapture: (jpeg: Uint8Array<ArrayBuffer>, takenAt: number, edit?: CapturedEdit) => Promise<void>;
   onClose: () => void;
   /** Switch to recording a video clip (PrivateVideoRecorder), when the chat offers it. */
   onVideo?: () => void;
@@ -30,6 +42,8 @@ export default function PrivateCamera({
   const [captured, setCaptured] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  /** The taken picture, while it is open in the editor. */
+  const [editing, setEditing] = useState<Blob | null>(null);
 
   const stop = useCallback(() => {
     for (const track of streamRef.current?.getTracks() ?? []) track.stop();
@@ -84,11 +98,12 @@ export default function PrivateCamera({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      // The editor answers Escape itself (back to this screen).
+      if (event.key === 'Escape' && !editing) onClose();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, editing]);
 
   const take = () => {
     const video = videoRef.current;
@@ -107,21 +122,39 @@ export default function PrivateCamera({
     setCaptured(false);
   };
 
-  const send = async () => {
+  const still = async (): Promise<Blob> => {
     const canvas = canvasRef.current;
-    if (!canvas || sending) return;
+    const blob = canvas ? await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9)) : null;
+    if (!blob) throw new Error('Could not take the picture.');
+    return blob;
+  };
+
+  const takenAt = () => takenAtRef.current || Math.floor(Date.now() / 1000);
+
+  const send = async () => {
+    if (!canvasRef.current || sending) return;
     setSending(true);
     setError('');
     try {
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
-      if (!blob) throw new Error('Could not take the picture.');
-      await onCapture(new Uint8Array(await blob.arrayBuffer()), takenAtRef.current || Math.floor(Date.now() / 1000));
+      const blob = await still();
+      await onCapture(new Uint8Array(await blob.arrayBuffer()), takenAt());
       wipe();
       onClose();
     } catch (e) {
       setError(e instanceof Error && e.message ? e.message : 'Could not send the picture.');
     } finally {
       setSending(false);
+    }
+  };
+
+  /** Open the taken picture in the editor; the still stays here, so closing the editor comes back to it. */
+  const edit = async () => {
+    if (sending) return;
+    setError('');
+    try {
+      setEditing(await still());
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : 'Could not open the editor.');
     }
   };
 
@@ -160,13 +193,16 @@ export default function PrivateCamera({
           </button>
         </div>
       )}
-      <div className="flex shrink-0 items-center justify-around gap-3 px-4 pb-[max(1rem,var(--safe-bottom))] pt-3">
+      <div className={`flex shrink-0 items-center gap-2 px-3 pb-[max(1rem,var(--safe-bottom))] pt-3 ${captured ? 'flex-wrap justify-center' : 'justify-around'}`}>
         {captured ? (
           <>
-            <button type="button" onClick={retake} disabled={sending} className="flex min-h-12 items-center gap-2 rounded-full bg-white/10 px-5 text-sm font-semibold text-white disabled:opacity-50" data-testid="private-camera-retake">
+            <button type="button" onClick={retake} disabled={sending} className="flex min-h-12 items-center gap-1.5 rounded-full bg-white/10 px-4 text-sm font-semibold text-white disabled:opacity-50" data-testid="private-camera-retake">
               <RotateCcw size={16} aria-hidden /> Retake
             </button>
-            <button type="button" onClick={() => void send()} disabled={sending} className="flex min-h-12 items-center gap-2 rounded-full bg-rose-600 px-5 text-sm font-semibold text-white disabled:opacity-50" data-testid="private-camera-send">
+            <button type="button" onClick={() => void edit()} disabled={sending} className="flex min-h-12 items-center gap-1.5 rounded-full bg-white/10 px-4 text-sm font-semibold text-white disabled:opacity-50" data-testid="private-camera-edit">
+              <SlidersHorizontal size={16} aria-hidden /> Edit
+            </button>
+            <button type="button" onClick={() => void send()} disabled={sending} className="flex min-h-12 items-center gap-1.5 rounded-full bg-rose-600 px-4 text-sm font-semibold text-white disabled:opacity-50" data-testid="private-camera-send">
               {sending ? <Loader2 size={16} className="animate-spin" /> : <SendHorizontal size={16} aria-hidden />} Send
             </button>
           </>
@@ -196,6 +232,28 @@ export default function PrivateCamera({
           </>
         )}
       </div>
+      {editing && (
+        <LazyPhotoEditor
+          source={editing}
+          maxBytes={MAX_ATTACHMENT_BYTES}
+          doneLabel="Send"
+          onCancel={() => setEditing(null)}
+          onAsIs={async () => {
+            await onCapture(new Uint8Array(await editing.arrayBuffer()), takenAt());
+            setEditing(null);
+            wipe();
+            onClose();
+          }}
+          onDone={async (result) => {
+            // A still from the camera comes back as a JPEG; anything else would not be what the chat expects.
+            if (result.mime !== 'image/jpeg') throw new Error('Could not make the edited picture.');
+            await onCapture(new Uint8Array(await result.blob.arrayBuffer()), takenAt(), { recipe: result.recipe, original: result.original });
+            setEditing(null);
+            wipe();
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 }

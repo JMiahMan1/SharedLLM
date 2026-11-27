@@ -78,22 +78,43 @@ def group_members(entity_id: str | None, entities: list[dict[str, Any]] | None) 
                     _names(members, seen))
 
 
-def light_set_for(engine: Any, query: str, intent: str, entities: list[dict[str, Any]] | None) -> LightSet | None:
+def light_set_for(engine: Any, query: str, intent: str, entities: list[dict[str, Any]] | None,
+                  voice_context: Any = None) -> LightSet | None:
     """The lights a plural or room phrase names together, limited to those this person can see."""
     found = engine.extract_device_set(query, intent)
-    if found is None:
-        return None
-    if found.group:
-        return group_members(found.group, entities)
+    if found is not None:
+        if found.group:
+            return group_members(found.group, entities)
+        seen = _visible(entities)
+        ids = [e for e in found.entity_ids if e in seen]
+        if not ids:
+            return None
+        return LightSet(ids, found.label, _names(ids, seen))
+
+    # No room named in the query: fall back to the satellite's area when available.
     seen = _visible(entities)
-    ids = [e for e in found.entity_ids if e in seen]
-    if not ids:
-        return None
-    return LightSet(ids, found.label, _names(ids, seen))
+    area_id = None
+    area_name = None
+    if isinstance(voice_context, dict):
+        area_id = voice_context.get("area_id")
+        area_name = voice_context.get("area")
+    if not area_id and isinstance(voice_context, dict):
+        area_id = voice_context.get("area")
+    if area_id:
+        ids = []
+        for eid, e in seen.items():
+            if not str(eid).startswith(("light.", "switch.")):
+                continue
+            attrs = e.get("attributes") or {}
+            if str(attrs.get("area_id") or "") == str(area_id):
+                ids.append(eid)
+        if ids:
+            return LightSet(ids, area_name or str(area_id), _names(ids, seen))
+    return None
 
 
 def choose(engine: Any, query: str, intent: str, resolved: str | None,
-           entities: list[dict[str, Any]] | None) -> LightSet | None:
+           entities: list[dict[str, Any]] | None, voice_context: Any = None) -> LightSet | None:
     """What a turn on/off command switches together, or None for the usual single device.
 
     A resolved light group switches as its members (so the answer names any that did not
@@ -105,7 +126,7 @@ def choose(engine: Any, query: str, intent: str, resolved: str | None,
         members = group_members(resolved, entities)
         if members is not None:
             return members
-    found = light_set_for(engine, query, intent, entities)
+    found = light_set_for(engine, query, intent, entities, voice_context)
     if found is None:
         return None
     if resolved is None or (len(found.entity_ids) > 1 and resolved in found.entity_ids):

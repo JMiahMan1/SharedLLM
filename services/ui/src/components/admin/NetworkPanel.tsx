@@ -1,4 +1,5 @@
 import { useState, type FC, type FormEvent } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowDown, ArrowUp, Globe, RefreshCw, Router, ScrollText, Wifi, WifiOff } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -14,6 +15,7 @@ import {
   type NetworkUsage,
 } from '../../lib/network';
 import SitesSection from './SitesSection';
+import NetworkDevices from './NetworkDevices';
 
 /**
  * Admin > Network: the home router as Jarvis sees it (docs/NETWORK.md).
@@ -138,6 +140,8 @@ export const NetworkPanel: FC = () => {
           else toast.error(next.error || "Saved, but Jarvis can't reach the router yet");
         }} />}
       </section>
+
+      <NetworkDevices />
 
       {(s.events?.length ?? 0) > 0 && (
         <section className="glass-panel p-4 sm:p-5">
@@ -276,10 +280,9 @@ const RouterLoginForm: FC<{ status: NetworkStatus; onSaved: (s: NetworkStatus) =
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <input className="glass-input min-h-11 px-3 text-sm" aria-label="Router address" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://router.lan" />
         <input className="glass-input min-h-11 px-3 text-sm" aria-label="Router username" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
-        <input
-          className="glass-input min-h-11 px-3 text-sm"
+        <PasswordField
+          className="glass-input min-h-11 w-full px-3 text-sm"
           aria-label="Router password"
-          type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder={status.configured ? 'Unchanged' : 'Password'}

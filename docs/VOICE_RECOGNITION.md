@@ -30,12 +30,96 @@ audiobook, Nextcloud and Skylight credentials but no administrator powers and
 no personal accounts. An unrecognised speaker therefore cannot administer the
 system, even though they can still ask the house to do ordinary things.
 
+## Who a spoken request is from
+
+The order is fixed, and every request logs one line saying which applied:
+
+1. **The identified speaker**, when their voice clears the calibrated threshold
+   and leads the next person by the calibrated margin.
+2. **Else the person the satellite is assigned to** (Admin > Users & Devices >
+   Voice satellites, speakers & TVs). The request is answered as them, but never
+   with administrator powers, and like a voice it cannot unlock, open or disarm
+   anything (`identified_by: "device"`).
+3. **Else the default user**: a shared or unassigned satellite.
+
+Every voice satellite, speaker and TV HomeHub knows appears in identity as a
+device by itself (`GET /hub/voice/devices`, copied every ten minutes and on
+"Refresh from HomeHub"; `services/identity/hub_devices.py`). Each is keyed by
+its hardware (its MAC, else an integration identifier, else HomeHub's device
+id), so renaming it or its entity keeps the assignment. New devices arrive
+shared. The gateway sends the satellite's entity as `voice_device` only when no
+voice was recognised; identity looks it up (cached 30 seconds, cleared on every
+change). `DeviceAssignment` is something else: who may *control* an entity.
+Every discovered entity is granted to the default user there, so it says
+nothing about whose satellite it is and is no longer read for that.
+
+```
+[VoiceDecision] decision=device-assigned user=kit satellite=assist_satellite.kids_room top=kit 0.66 second=- threshold=0.8 margin=None speech=1.9s
+```
+
+`docker logs sharedllm_gateway 2>&1 | grep VoiceDecision` measures accuracy;
+Admin > People shows the same counts per person ("Recognised by voice", "By
+their satellite", "As the default user").
+
 ## Enrolling
 
-Each person records three short samples in Settings (Vocal Signature). A match
-needs a score of 0.80 and a clear lead over the next person
-(`services/identity/voice.py`); short commands score lower, so a one-word
-command is often "not sure" and answered as the household.
+Each person records three short samples in Settings (Vocal Signature), on their
+own phone, somewhere quiet. A take with too little speech, too much background
+noise (speech under 12 dB above it) or clipping is refused with what to change
+(`services/execution/voiceprint.py` `check_quality`). More takes can be added
+any time; the newest six are kept.
+
+## The threshold is calibrated on the household
+
+Identity scores every enrolled sample against the rest of its own person's
+samples (same speaker) and against every other person's profile (other
+speakers), and sets the threshold just above the highest other-speaker score,
+between 0.72 and 0.90, and the margin to half the typical lead
+(`voice.calibrate`). It is redone whenever a profile changes and stored in the
+`voice_calibration` setting; Admin > Users & Devices > Voice recognition shows
+it and the two score spreads. With only one person enrolled there is no one to
+separate them from, so the threshold only stays just under their own scores.
+
+When the two best candidates are a child and an adult the bar is higher (twice
+the margin and 0.03 more score): a weak score says nothing rather than name a
+child as a parent or a parent as a child.
+
+## Candidate samples from assigned satellites
+
+A command heard at a satellite assigned to one person that was not recognised,
+but scored at least 0.55 against that person's profile (and nobody else
+scored higher, with at least 1.5 s of speech), is kept as a candidate sample
+(`POST /api/voice/candidate`, the `VoiceCandidate` table, at most twelve per
+person). It is never used until an admin approves it in Voice recognition;
+approved ones join the profile as `source: auto`, have their own cap of six and
+never push out a sample the person recorded. "Remove auto-added" takes them all
+out again. This is how a phone-enrolled profile learns how its owner sounds at
+the far-field satellite they use.
+
+## A voice nobody enrolled
+
+A command whose voice is far from every enrolled one is answered as usual (the satellite's person, else
+the default user) and, at most once a day per voice and satellite, Jarvis adds one line after the
+answer: "By the way, I don't think I know your voice yet. Want me to learn it? Just say 'learn my
+voice'." That wording is only used where "learn my voice" works (a satellite assigned to one person
+with no voice profile yet); anywhere else it suggests asking a grown-up to set it up in the Jarvis app.
+A whispered command, or one already asking to be learned, is never invited.
+
+"Far from every enrolled one" is stricter than "not recognised": the best score must be under 0.55
+(the candidate-sample floor, so nothing that could be a sample of someone is called new) and at least
+0.15 under the threshold, with 2 s of speech at least 12 dB over the room. Unsure between two enrolled
+people, or a little under the threshold, is never a new voice. On the live satellites (one profile,
+2026-11) unrecognised commands scored in two groups, 0.45 to 0.55 and 0.58 to 0.70; 0.55 sits between.
+
+Execution keeps such a command's signature for 20 seconds under its transcript
+(`voice_speaker.looks_new`); the gateway hands it to identity (`POST /api/voice/new_voice`), which
+checks it again and counts it in an anonymous cluster per satellite in Redis (`new_voices.py`: commands
+at least 0.70 alike join one voice, a week's visits, when it was last asked; expires a week after it
+was last heard). A cluster has no name, is never used to answer as anyone and never becomes a
+profile: only "learn my voice" (the teaching session above, held for the owner's approval) or an admin
+approving samples makes one. Admin > Users & Devices > Voice recognition lists a voice heard three
+times or more this week, as counts only ("A new voice talked to the Office Echo 5 times this week"),
+with Dismiss. Gateway logs `[VoiceNewVoice] satellite=... visits_week=N invited=yes|no`.
 
 ## Refreshing a voice by talking
 
@@ -123,6 +207,43 @@ A voice can be imitated or replayed, so a request recognised by voice never
 unlocks or opens a lock, opens a cover such as the garage, or disarms the
 alarm, even for an admin (`authorize_action` in
 `services/execution/ha_client.py`).
+
+## The household's words
+
+Whisper hears a name it has never seen as ordinary words ("plate random late"
+for an artist, "so fast" for a playlist, "Wilder Hart" for a book). Its
+`initial_prompt` biases it towards the words it is shown, and the Wyoming
+Whisper image (rhasspy/wyoming-whisper 3.8.1) has no per-request prompt: it
+builds one on every utterance from a Home Assistant names API (`--hass-api`,
+`--hass-token`), fetched while the person is still talking and awaited at most
+a second at the end, so it adds no wait. Jarvis serves that API itself:
+
+* execution builds the vocabulary from the integrations every 30 minutes
+  (`services/execution/stt_vocabulary.py`, `GET /execute/voice/vocabulary`):
+  what was played most recently first, then the family's first names, Music
+  Assistant's artists, playlists and stations (most played first),
+  Audiobookshelf's titles, series and authors (newest first) and the book
+  library's newest 40 titles, taken in turns, then the rooms and the players'
+  names. Nothing is written down anywhere: a new artist is in the next build.
+* the gateway answers the Whisper server's names commands from it
+  (`services/gateway/stt_vocabulary_routes.py`, `ws://<server>:11435/stt-vocabulary/websocket`),
+  read-only, for a caller inside the home network presenting a Jarvis API key.
+* the Whisper server keeps as many names as fit its 200-token budget
+  (`--hass-prompt-max-tokens`), in that order.
+
+Setting it up: make an API key (any account; an admin can make one for the
+household) and put it in `.env` as `WHISPER_VOCABULARY_KEY`; the `whisper`
+service then reads the names from this host's gateway. Any other Wyoming
+Whisper on the LAN (for example a faster machine first in
+`VOICE_STT_UPSTREAM`) takes the same two settings:
+
+```text
+WYO_WHISPER_HASS_API=http://<jarvis-server>:11435/stt-vocabulary
+WYO_WHISPER_HASS_TOKEN=<the key>
+WYO_WHISPER_HASS_REFRESH_SECONDS=60
+```
+
+Its log says "Biasing toward names from ..." at start.
 
 ## Setting it up
 

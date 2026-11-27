@@ -60,6 +60,8 @@ class ResolvedCredentials(BaseModel):
     mass_user_id: str | None = None
     mass_error: str | None = None
     is_admin: bool = False
+    #: A child or teen (Identity family_role): execution searches and screens web video strictly for them.
+    is_minor: bool = False
     #: Branch patterns the workspace runtime must never push to (from identity).
     forbidden_branches: list[str] | None = None
     #: "voice" when the chat request's speaker was recognised by voice alone.
@@ -127,6 +129,9 @@ class StorageStatusRequest(BaseModel):
 
 class WorkspaceFileReadRequest(BaseModel):
     path: str
+    offset_lines: int = 0
+    limit_lines: int = 300
+    summary_only: bool = False
 
 class WorkspaceFileWriteRequest(BaseModel):
     path: str
@@ -135,6 +140,7 @@ class WorkspaceFileWriteRequest(BaseModel):
 class PatchChunk(BaseModel):
     old_text: str = Field(..., alias="target_content", description="The exact text to find and replace")
     new_text: str = Field(..., alias="replacement_content", description="The new text to replace it with")
+    replace_all: bool = False
 
     model_config = {"populate_by_name": True}
 
@@ -148,6 +154,19 @@ class WorkspaceFilePatchRequest(BaseModel):
 
 class WorkspaceShellRequest(BaseModel):
     command: str
+
+class WorkspaceSearchRequest(BaseModel):
+    query: str
+    path: str = "."
+    include: str | None = None
+    exclude: str | None = None
+    glob: str | None = None
+    max_results: int = 100
+
+class WorkspaceListRequest(BaseModel):
+    path: str = "."
+    glob: str | None = None
+    max_entries: int = 300
 
 class GitOperationRequest(BaseModel):
     workspace_id: str | None = Field(None, description="Workspace ID (uses default if not specified)")
@@ -173,7 +192,10 @@ class SystemLearningRequest(BaseModel):
     category: str = "general"
 
 class AnnouncementRequest(BaseModel):
-    entity_id: str
+    entity_id: str | None = None
+    device_name: str | None = None
+    person: str | None = None
+    everywhere: bool = False
     message: str
     volume: float | None = 0.6
     tts_engine: Literal["kokoro", "piper"] | None = "kokoro"

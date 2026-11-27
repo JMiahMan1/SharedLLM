@@ -29,6 +29,8 @@ final class GuardApi {
 
     static final String KEY_STATUS = "guard_status";
     static final String KEY_UNLOCKED_UNTIL = "guard_unlocked_until";
+    /** When the server's status was last read: a parent's offline command newer than it wins (OfflineMode). */
+    static final String KEY_STATUS_AT = "guard_status_at";
     static final String KEY_LAST_PAUSED_AT = "guard_last_paused_at";
     static final String KEY_SERVER_THEME_ID = "guard_server_theme_id";
     /** The parents' offline-code verifiers, from the last status refresh (or approval) that carried them. */
@@ -77,7 +79,8 @@ final class GuardApi {
             String pausedAt = rules != null ? rules.optString("paused_at", "") : "";
             String lastPausedAt = p.getString(KEY_LAST_PAUSED_AT, "");
             boolean freshPause = nowPaused && (!wasPaused || (!pausedAt.isEmpty() && !pausedAt.equals(lastPausedAt)));
-            SharedPreferences.Editor ed = p.edit().putString(KEY_STATUS, body);
+            SharedPreferences.Editor ed = p.edit().putString(KEY_STATUS, body)
+                    .putLong(KEY_STATUS_AT, System.currentTimeMillis());
             String codes = offlineCodesToKeep(next);
             if (codes != null) ed.putString(KEY_OFFLINE_CODES, codes);
             if (!pausedAt.isEmpty()) {
@@ -94,6 +97,17 @@ final class GuardApi {
             }
             ed.apply();
             showQueuedNotices(context);
+            // A child's Nearby & offline parts, as their parents set them (and the
+            // parent link, always on now that the phone knows it is protected).
+            try {
+                if (next.optBoolean("protected", false)) {
+                    JSONObject nearby = next.optJSONObject("nearby");
+                    if (nearby != null) NearbyParts.applyFromServer(context, nearby);
+                    if (!prev.optBoolean("protected", false)) NearbyParts.ensure(context);
+                }
+            } catch (RuntimeException e) {
+                Log.w("JarvisGuard", "nearby parts not applied: " + e.getMessage());
+            }
             return true;
         } catch (Exception e) {
             return false;
@@ -225,6 +239,12 @@ final class GuardApi {
      */
     static boolean isLocked(Context context) {
         JSONObject s = lastStatus(context);
+        // A parent's command that reached this phone over Bluetooth, newer than the server's last word.
+        Boolean offline = OfflineMode.overlayLock(context, prefs(context).getLong(KEY_STATUS_AT, 0L), s.optString("reason", ""));
+        if (Boolean.TRUE.equals(offline)) return true;
+        if (Boolean.FALSE.equals(offline)) {
+            return LockWarning.lockedByClock(System.currentTimeMillis(), nextLockAt(context), nextLockReason(context));
+        }
         if (!s.optBoolean("locked", false)) {
             return LockWarning.lockedByClock(System.currentTimeMillis(), nextLockAt(context), nextLockReason(context));
         }
@@ -270,7 +290,10 @@ final class GuardApi {
 
     /** New apps wait for a parent's OK (the server's word; off until it has spoken). */
     static boolean installApprovalRequired(Context context) {
-        return lastStatus(context).optBoolean("install_approval", false);
+        // On until the server says otherwise: an app installed before this phone
+        // has ever reached the server is held, not let through. A parent who
+        // switches the rule off is believed on the next status.
+        return lastStatus(context).optBoolean("install_approval", true);
     }
 
     /**
@@ -329,12 +352,24 @@ final class GuardApi {
     }
 
     static String askParent(Context context, String kind, String target, String label, String note) {
+        return askParent(context, kind, target, label, note, null);
+    }
+
+    /**
+     * The same, with the app's own profile (name, version, where it came from,
+     * what it can reach, who signed it) so the parent is looking at the app
+     * rather than at its package name. A profile the package manager could not
+     * give is left out, never filled in with a guess.
+     */
+    static String askParent(Context context, String kind, String target, String label, String note,
+                            JSONObject profile) {
         try {
             JSONObject body = new JSONObject();
             body.put("kind", kind);
             body.put("target", target);
             if (label != null && !label.isEmpty()) body.put("label", label);
             if (note != null && !note.trim().isEmpty()) body.put("note", note.trim());
+            if (profile != null) body.put("profile", profile);
             HttpResult r = send(context, "POST", "/api/guard/requests", body.toString());
             if (r == null) return "No connection to Jarvis. Try again when the " + DeviceNoun.of(context) + " is online.";
             if (r.status == 200) return null;

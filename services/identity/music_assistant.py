@@ -42,6 +42,8 @@ from urllib.parse import urlsplit
 log = logging.getLogger("identity.music_assistant")
 
 HUB_TIMEOUT_S = 8.0
+#: Provider setup/reconfigure logs into Audiobookshelf and loads the provider, so give it more time.
+HUB_SYNC_TIMEOUT_S = 30.0
 #: How long a household-server answer is reused; a failure is retried sooner.
 SERVER_TTL_S = 30.0
 SERVER_ERROR_TTL_S = 10.0
@@ -77,14 +79,21 @@ class Resolution:
 
 # -- the hub ------------------------------------------------------------------------------
 
-def _hub_request(hub_url: str, secret: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+def _hub_request(
+    hub_url: str,
+    secret: str,
+    path: str,
+    body: dict[str, Any] | None = None,
+    *,
+    timeout: float = HUB_TIMEOUT_S,
+) -> dict[str, Any]:
     if not hub_url:
         raise HubUnavailable("HomeHub is not set up (homehub_url)")
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(f"{hub_url.rstrip('/')}{path}", data=data, method="POST" if body is not None else "GET",
                                  headers={"Content-Type": "application/json", "X-Internal-Secret": secret})
     try:
-        with urllib.request.urlopen(req, timeout=HUB_TIMEOUT_S) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read() or b"{}")
     except urllib.error.HTTPError as exc:
         try:
@@ -137,6 +146,38 @@ def provision_account(username: str, display_name: str | None = None) -> dict[st
     hub_url, secret = _hub_login()
     return _hub_request(hub_url, secret, "/hub/music_assistant/accounts",
                         {"username": username, "display_name": display_name or username, "token_name": TOKEN_NAME})
+
+
+def sync_audiobookshelf_provider(
+    *,
+    username: str,
+    display_name: str | None = None,
+    abs_url: str | None = None,
+    abs_api_key: str | None = None,
+    abs_username: str | None = None,
+    abs_password: str | None = None,
+    existing_instance_id: str | None = None,
+    remove_if_unconfigured: bool = False,
+) -> dict[str, Any]:
+    """Ask the hub to sync ``username``'s dedicated MA Audiobookshelf provider and provider_filter."""
+    hub_url, secret = _hub_login()
+    payload: dict[str, Any] = {
+        "username": username,
+        "display_name": display_name or username,
+        "abs_url": abs_url,
+        "abs_api_key": abs_api_key,
+        "abs_username": abs_username,
+        "abs_password": abs_password,
+        "existing_instance_id": existing_instance_id,
+        "remove_if_unconfigured": bool(remove_if_unconfigured),
+    }
+    return _hub_request(
+        hub_url,
+        secret,
+        "/hub/music_assistant/audiobookshelf",
+        payload,
+        timeout=HUB_SYNC_TIMEOUT_S,
+    )
 
 
 # -- the rules ----------------------------------------------------------------------------

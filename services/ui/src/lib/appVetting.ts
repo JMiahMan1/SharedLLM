@@ -1,5 +1,5 @@
 // App vetting in plain words: the Apps card, request cards and the device's app report.
-import type { AppVerdict, ConcernLevel, RequestVetting, UnusedApp } from '../types/api';
+import type { AppVerdict, ConcernLevel, GuardAppProfile, RequestVetting, UnusedApp } from '../types/api';
 
 export const LEVEL_WORDS: Record<ConcernLevel, string> = { severe: 'Severe', high: 'High', medium: 'Worth a look' };
 
@@ -66,6 +66,69 @@ export function sizeWords(bytes: number | null | undefined): string {
   if (mb < 1) return '<1 MB';
   if (mb < 1024) return `${Math.round(mb)} MB`;
   return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/** Where an app came from, in words a parent can act on. */
+const STORES: Record<string, string> = {
+  'com.android.vending': 'Google Play',
+  'com.sec.android.app.samsungapps': 'the Galaxy Store',
+  'com.amazon.venezia': 'the Amazon Appstore',
+};
+
+/** The risky things an app can reach, in words; an unknown token is still readable. */
+const REACH: Record<string, string> = {
+  accessibility: 'read everything on the screen',
+  device_admin: 'act as a device administrator',
+  notification_listener: 'read notifications',
+  vpn: 'route all its traffic through a VPN',
+  sms_read: 'read texts',
+  sms_send: 'send texts',
+  call_log: 'read the call log',
+  background_location: 'know where the phone is in the background',
+  overlay: 'draw over other apps',
+  install_apps: 'install other apps',
+  camera: 'use the camera',
+  microphone: 'use the microphone',
+  location: 'know where the phone is',
+  contacts: 'read contacts',
+  calendar: 'read the calendar',
+  phone: 'make calls',
+  storage: 'read its files',
+  photos: 'read photos',
+};
+
+function reachWords(token: string): string {
+  return REACH[token] || token.replace(/_/g, ' ');
+}
+
+/**
+ * What the phone said about the app it is asking about: its version, where it
+ * came from, how big it is, what it can reach and who signed it. Empty lines
+ * are dropped, so a phone that could not read a field never shows a guess.
+ */
+export function profileLines(profile: GuardAppProfile | null | undefined): string[] {
+  if (!profile) return [];
+  const out: string[] = [];
+  const version = profile.version_name ? `Version ${profile.version_name}` : '';
+  const code = profile.version_code ? `(${profile.version_code})` : '';
+  if (version) out.push(`${version}${code ? ` ${code}` : ''}`.trim());
+  const installer = profile.installer;
+  if (installer === null) out.push('Installed directly, not from a store (sideloaded)');
+  else if (installer) out.push(`Installed by ${STORES[installer] || installer}`);
+  const size = sizeWords(profile.size_bytes);
+  if (size) out.push(size);
+  const reach = [...(profile.special_access || []), ...(profile.capabilities || []), ...(profile.permissions || [])];
+  const unique = [...new Set(reach)].filter(Boolean);
+  if (unique.length > 0) {
+    const words = unique.slice(0, 3).map(reachWords);
+    const more = unique.length - words.length;
+    out.push(`Can ${words.join(', ')}${more > 0 ? ` and ${more} more` : ''}`);
+  }
+  const signer = (profile.cert_sha1 || [])[0];
+  if (signer) out.push(`Signed by ${signer.slice(0, 12)}`);
+  if (profile.apk_sha256) out.push('Its file was read and checked against known bad apps');
+  else if (profile.apk_hash_state && profile.apk_hash_state !== 'ok') out.push('Its file was not read yet');
+  return out;
 }
 
 /** One line for a removal suggestion: when it was last opened, and how big it is. */

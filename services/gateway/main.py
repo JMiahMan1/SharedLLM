@@ -88,14 +88,23 @@ from services.gateway import (
     calls,
     camera_live_routes,
     camera_routes,
+    collector_health_routes,
     cookbook,
     dashboard_routes,
     discovery_routes,
     drawing,
+    echo_dropin_routes,
+    echo_ota_routes,
+    echo_tunnel_routes,
     email_routes,
+    family_mesh,
     family_safety,
     fast_garden,
     fast_lights,
+    fast_media,
+    fast_read,
+    fast_volume,
+    firmware_routes,
     garden_routes,
     helper_routes,
     hub_registry_routes,
@@ -103,6 +112,9 @@ from services.gateway import (
     mdm,
     network_routes,
     notices,
+    offline_cache,
+    offline_guard,
+    offline_relay,
     phone_routes,
     private_chat,
     private_chat_export,
@@ -110,10 +122,14 @@ from services.gateway import (
     private_chat_messages,
     private_chat_preview,
     private_chat_reminders,
+    profile_stats,
     push_routes,
     recipe_images,
     room_presence,
     todo_routes,
+    voice_hold_music_routes,
+    voice_outcomes,
+    voice_transcript,
     weather_routes,
 )
 from services.gateway import beloved as beloved_routes
@@ -209,7 +225,8 @@ from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WOR
 from services.health import challenges as _challenges
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
-from services.shared.media_token import sign, verify
+from services.shared.media_token import DEVICE_TOKEN_TTL_SECONDS, sign, verify
+from services.shared.media_token import why_invalid as media_token_why_invalid
 
 START_TIME = time.time()
 
@@ -258,10 +275,78 @@ def _split_reasoning(message: str, thinking: str | None) -> tuple[str, str | Non
 #: chosen in their settings, set by the chat handler for the request in hand
 #: and added to the response by the two builders below.
 _REPLY_VOICE: ContextVar[str | None] = ContextVar("reply_voice", default=None)
+#: The friendly names of the devices this spoken request may name, by entity id; None when the
+#: reply is not spoken. A spoken reply never says an entity id (services/common/spoken_names.py).
+_SPOKEN_NAMES: ContextVar[dict[str, str] | None] = ContextVar("spoken_names", default=None)
+
+
+def _spoken(message: str) -> str:
+    """``message`` as a satellite may say it: every entity id replaced by the device's name."""
+    names = _SPOKEN_NAMES.get()
+    if names is None or not message:
+        return message
+    from services.common.spoken_names import has_entity_id, speakable
+
+    if not has_entity_id(message):
+        return message
+    said = speakable(message, names)
+    log.warning(f"[Reply] a spoken reply named an entity id; said instead: {said!r}")
+    return said
+
+
+def _note_spoken_names(entities: list[dict] | None) -> None:
+    """Remember the friendly names of ``entities`` for this spoken request's reply."""
+    names = _SPOKEN_NAMES.get()
+    if names is None:
+        return
+    for e in entities or []:
+        eid = e.get("entity_id") if isinstance(e, dict) else None
+        friendly = ((e.get("attributes") or {}).get("friendly_name") if isinstance(e, dict) else None)
+        if eid and friendly:
+            names[str(eid)] = str(friendly)
+
+
+#: A voice satellite's answer may say the speaker sounded like nobody enrolled (``new_voice``) and
+#: carry one line for the satellite to say after the answer (``voice_note``, the invitation to be
+#: learned, at most once a day per voice). Set by the chat handler (``_new_voice_check``).
+_VOICE_NEW: ContextVar[dict[str, Any] | None] = ContextVar("voice_new", default=None)
+
+
+def _voice_new_fields() -> dict[str, Any]:
+    """``new_voice`` and ``voice_note`` for the response in hand (empty when there is nothing to say)."""
+    found = _VOICE_NEW.get()
+    if not found:
+        return {}
+    out: dict[str, Any] = {"new_voice": True}
+    if found.get("note"):
+        out["voice_note"] = found["note"]
+    return out
+
+
+#: Fast answers whose words are logged (one line, ``REPLY_LOG_CHARS``), so a voice test can be
+#: graded from the gateway log: what was played, read, or done. Only these: other answers can
+#: be personal (a recap, a location, a private chat) and stay out of the log.
+LOGGED_REPLY_INTENTS = frozenset({
+    "play_media", "pause_media", "media_transport", "read_aloud", "turn_on", "turn_off", "timer_stop",
+    "device_state",
+})
+REPLY_LOG_CHARS = 200
+
+
+def _log_reply(message: str, intent: str | None) -> None:
+    """``[Reply] <intent>: <what is said>`` for a fast answer in ``LOGGED_REPLY_INTENTS``."""
+    if intent not in LOGGED_REPLY_INTENTS:
+        return
+    text = " ".join(str(message or "").split())
+    if len(text) > REPLY_LOG_CHARS:
+        text = text[:REPLY_LOG_CHARS] + f"... ({len(text)} characters)"
+    log.info(f"[Reply] {intent}: {text}")
 
 
 def _make_ollama_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False, thinking: str | None = None):
     """Helper to create an Ollama-compatible response (streaming or non-streaming)."""
+    message = _spoken(message)
+    _log_reply(message, intent)
     if not stream:
         message, thinking = _split_reasoning(message, thinking)
         msg: dict[str, Any] = {"role": "assistant", "content": message}
@@ -276,6 +361,7 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
         }
         if _REPLY_VOICE.get():
             res["voice"] = _REPLY_VOICE.get()
+        res.update(_voice_new_fields())
         if intent:
             res["intent"] = intent
         if debug_context:
@@ -283,6 +369,7 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
         return JSONResponse(res)
 
     reply_voice = _REPLY_VOICE.get()
+    new_fields = _voice_new_fields()
 
     async def gen():
         msg: dict[str, Any] = {"role": "assistant", "content": message}
@@ -297,7 +384,7 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
         if reply_voice:
             chunk["voice"] = reply_voice
         yield json.dumps(chunk) + "\n"
-        yield json.dumps({"model": model, "done": True}) + "\n"
+        yield json.dumps({"model": model, "done": True, **new_fields}) + "\n"
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
@@ -316,6 +403,8 @@ def _make_ollama_chunk(content: str, model: str, done: bool = False, thinking: s
 
 def _make_openai_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False, thinking: str | None = None):
     """Helper to create an OpenAI-compatible response (streaming or non-streaming)."""
+    message = _spoken(message)
+    _log_reply(message, intent)
     if not stream:
         message, thinking = _split_reasoning(message, thinking)
         msg: dict[str, Any] = {"role": "assistant", "content": message}
@@ -331,6 +420,7 @@ def _make_openai_response(message: str, model: str, intent: str | None = None, d
         }
         if _REPLY_VOICE.get():
             res["voice"] = _REPLY_VOICE.get()
+        res.update(_voice_new_fields())
         if intent:
             res["intent"] = intent
         if debug_context:
@@ -466,6 +556,7 @@ def _offline_chat_reply(model: str, is_openai: bool, *, voice: bool, user: str |
     """The answer to a question that needs the local AI while it is known to be offline:
     at once, in plain words, 503. Typed chat is promised a notice when it is back."""
     exc = local_ai.LLM.unavailable()
+    voice_outcomes.note_outcome("offline")
     body = local_ai.offline_body(exc, voice=voice)
     if not voice:
         local_ai.remember_waiting(user)
@@ -940,7 +1031,13 @@ app.add_middleware(
 
 app.include_router(info_router)
 app.include_router(family_safety.router)
+app.include_router(family_mesh.router)
+app.include_router(offline_relay.router)
+app.include_router(offline_cache.router)
+app.include_router(offline_guard.router)
 app.include_router(app_vetting_routes.router)
+app.include_router(collector_health_routes.router)
+app.include_router(profile_stats.router)  # Profile stats pages: each person's, and the admin's (docs/PROFILE_STATS.md)
 app.include_router(push_routes.router)
 app.include_router(network_routes.router)
 app.include_router(weather_routes.router)
@@ -956,8 +1053,16 @@ app.include_router(camera_routes.router)
 from services.gateway import image_routes  # noqa: E402  (image entities: a vacuum's map)
 
 app.include_router(image_routes.router)
+from services.gateway import stt_vocabulary_routes  # noqa: E402
+
+app.include_router(stt_vocabulary_routes.router)  # The household's names for the Whisper servers' prompt
 app.include_router(camera_live_routes.router)  # Real-time camera video (go2rtc)
 app.include_router(discovery_routes.router)  # New devices
+app.include_router(echo_dropin_routes.router)  # Echo Drop-In status, hangup, and WebSocket audio proxy
+app.include_router(echo_ota_routes.router)  # Echo OTA status and update-all
+app.include_router(firmware_routes.router)  # Firmware page: versions, updates, install
+app.include_router(voice_hold_music_routes.router)  # Voice satellites' hold music (HomeHub setting)
+app.include_router(echo_tunnel_routes.router)  # Echo Reverse WSS Tunnel
 app.include_router(hub_registry_routes.router)  # Areas, floors, labels, zones, persons
 app.include_router(light_group_routes.router)  # Light groups (parents and admins)
 app.include_router(phone_routes.router)  # Phones: companion app and Jarvis sensors
@@ -1356,6 +1461,14 @@ async def select_model_for_query(query: str) -> str:
     return await get_assistant_model()
 
 
+def _is_assistant_instruction(system: str) -> bool:
+    """Whether ``system`` is the assistant instruction, the one the household persona rides on."""
+    try:
+        return system == load_prompt_sync("assistant_system_instruction")
+    except ValueError:
+        return False
+
+
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
     q = (query or "").lower()
     if any(token in q for token in TTS_SIGNALS):
@@ -1387,14 +1500,16 @@ def extract_media_request(query: str) -> tuple[str | None, str | None]:
     Pull a likely media search string and target device name from commands like:
     - Play Brandon Lake on Den TV
     - Listen to jazz on the kitchen speaker
+    - Can you play some music, please? (the filler is not part of the search)
     """
-    cleaned = (query or "").strip().strip("?.!")
+    cleaned = fast_media.strip_request_filler(query or "")
     if not cleaned:
       return None, None
 
     # Capture common "play/listen/resume <content> on <device>" phrasing.
+    # The verb as speech recognition writes it too: "Playin' music", "Put on some hymns".
     match = re.match(
-      r"^(?:play|listen to|listen|resume)\s+(.+?)(?:\s+on\s+(.+))?$",
+      rf"^(?:{fast_media.PLAY_VERB}|listen|resume)[\s,]+(.+?)(?:\s+on\s+(.+))?$",
       cleaned,
       flags=re.IGNORECASE,
     )
@@ -1405,7 +1520,128 @@ def extract_media_request(query: str) -> tuple[str | None, str | None]:
     device_name = match.group(2).strip(" \"'") if match.group(2) else None
     if device_name:
       device_name = re.sub(r"^(?:the)\s+", "", device_name, flags=re.IGNORECASE)
+    # "on YouTube" says where to look, not where to play (fast_media.split_youtube_source).
+    media_query, device_name = fast_media.split_youtube_source(media_query or None, device_name or None)
     return (media_query or None, device_name or None)
+
+
+#: What is said when execution's answer is not one it can read (an HTTP error, a bare string).
+EXECUTION_TROUBLE_REPLY = "Sorry, that didn't work. Something went wrong on my side."
+#: An HTTP 403 from execution: the device (or what it guards) is not this person's to use.
+EXECUTION_DENIED_REPLY = "Sorry, I'm not allowed to use that device for you."
+
+
+async def read_execution_reply(resp: Any, path: str) -> dict:
+    """execution's answer as an object with a ``message``, whatever came back.
+
+    An ExecutionResult comes back as is. Anything else (an HTTP error such as a 403 or a 422,
+    whose ``detail`` is a string or a list, a bare JSON string, or no JSON at all) is logged
+    and becomes a FAILURE with a plain sentence: a voice request must always get an answer,
+    never a 500 (on 2026-11-24 "Play X on YouTube" crashed on a 403's string ``detail``).
+    """
+    status = resp.status if isinstance(getattr(resp, "status", None), int) else 200
+    data: Any = None
+    try:
+        try:
+            data = await resp.json(content_type=None)  # aiohttp: read JSON whatever the content type says
+        except TypeError:
+            data = await resp.json()
+    except Exception:
+        data = None
+    if status == 200 and isinstance(data, dict):
+        return data
+    try:
+        body = data if data is not None else (await resp.text())[:300]
+    except Exception:
+        body = "(no body)"
+    log.warning(f"[execution] {path} answered HTTP {status} with something that is not a result: {str(body)[:300]}")
+    return {"status": "FAILURE", "message": EXECUTION_DENIED_REPLY if status == 403 else EXECUTION_TROUBLE_REPLY,
+            "detail": {"http_status": status}}
+
+
+async def _execution_post(path: str, payload: dict, timeout: float = 120.0) -> dict:
+    """POST to the execution service as the gateway; the JSON answer (an error answer is a FAILURE)."""
+    async with shared_http_client() as client:
+        resp = await client.post(f"{EXECUTION_SVC}{path}", json=payload,
+                                 headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                 timeout=aiohttp.ClientTimeout(total=timeout))
+        return await read_execution_reply(resp, path)
+
+
+async def _misheard_play(query: str, creds: Any) -> str | None:
+    """ "Play <title>" when ``query`` is a misheard play whose rest the libraries clearly have, else None."""
+    for guess in fast_media.misheard_play(query):
+        try:
+            data = await _execution_post("/execute/media/find", {
+                "user_context": creds.model_dump(), "query": guess}, timeout=20.0)
+        except Exception as exc:
+            log.warning(f"[FastPath] could not check {guess!r} as a misheard play: {exc}")
+            return None
+        detail = data.get("detail") if isinstance(data.get("detail"), dict) else {}
+        if detail.get("action") == "play" and float(detail.get("score") or 0) >= fast_media.MISHEARD_PLAY_MIN_SCORE:
+            best = detail.get("best") or {}
+            log.info(f"[FastPath] heard {query!r} as 'Play {guess}' (the library has {best.get('title')!r}, "
+                     f"{detail.get('score')})")
+            return f"Play {guess}"
+    return None
+
+
+async def _answer_media_choice(query: str, user_id: str, creds: Any) -> str | None:
+    """The reply to a pending media question, or None when there is none or this is a new request.
+
+    The option named is played (or read) on the device that asked the question, never another
+    one; "no" calls it off; a reply that names nothing is asked about once more, briefly, and
+    then the question is dropped. The model never answers a pending question.
+    """
+    pending = fast_media.pending_choice(user_id)
+    if not pending:
+        return None
+    answer = fast_media.read_choice_answer(query, pending)
+    if answer.kind == "new_request":
+        log.info(f"[FastPath] {query!r} is a new request, not an answer to the media question; dropping it")
+        fast_media.clear_choice(user_id)
+        return None
+    if answer.kind == "cancel":
+        fast_media.clear_choice(user_id)
+        return "Okay."
+    if answer.kind == "unclear":
+        if pending.get("reasked"):
+            fast_media.clear_choice(user_id)
+            log.info(f"[FastPath] {query!r} still names no option of the media question; dropping it")
+            return "Sorry, I still didn't catch that. Ask me again when you're ready."
+        fast_media.mark_reasked(user_id, pending)
+        log.info(f"[FastPath] {query!r} names no option of the media question; asking again")
+        return fast_media.choice_reask(pending)
+    option = answer.option or {}
+    fast_media.clear_choice(user_id)
+    log.info(f"[FastPath] answer to the media question: {option.get('label')} on {pending.get('entity_id')}")
+    if option.get("read"):
+        book = option["read"]
+        return await fast_read.read_book_chapter(
+            _execution_post, creds.model_dump(), user_id, chapter=1, book_id=book.get("book_id"),
+            title=str(book.get("title") or ""), author=str(book.get("author") or ""))
+    data = await _execution_post("/execute/media/play", {
+        # "Which TV should I put it on?": the TV named is where it plays.
+        "user_context": creds.model_dump(), "entity_id": option.get("entity_id") or pending.get("entity_id"),
+        "query": pending.get("query"), "pick": option.get("pick"), "search_everywhere": True,
+    })
+    return str(data.get("message") or "Done.")
+
+
+def extract_media_place(query: str, entities: list[dict]) -> tuple[str | None, str | None]:
+    """(what to play, where) from "play X on <device>" or "play X in the <room>".
+
+    A room counts only when the household has it (an area, or a player's name), so a title
+    with "in" in it keeps its words.
+    """
+    media_query, device = extract_media_request(query)
+    if device or not media_query:
+        return media_query, device
+
+    def is_place(name: str) -> bool:
+        return engine.is_area(name) or resolve_media_target(query, entities, requested_device=name) is not None
+
+    return fast_media.split_room(media_query, is_place)
 
 
 def is_likely_video_request(query: str) -> bool:
@@ -1428,10 +1664,88 @@ def is_likely_video_request(query: str) -> bool:
     return any(signal in q for signal in video_signals)
 
 
-def extract_media_transport_command(query: str) -> str | None:
+def extract_volume_level(query: str) -> float | None:
+    """Parse a spoken volume level into 0..1, or None when the query sets no number."""
     q = (query or "").strip().lower()
     if not q:
-      return None
+        return None
+    m = re.search(r"\b(?:volume|set\s+(?:the\s+)?volume\s+to|volume\s+to)\s*(\d{1,3})\s*(?:%|percent)?\b", q)
+    if not m:
+        # "volume to N percent" / "volume N percent" already covered; also handle "volume to N"
+        m = re.search(r"\bvolume\b[^\d]*(\d{1,3})", q)
+    if not m:
+        return None
+    try:
+        n = int(m.group(1))
+    except ValueError:
+        return None
+    if n <= 10:
+        return n / 10.0
+    return n / 100.0
+
+
+# Audiobook transport phrases handled entirely by FastPath. Their payload
+# (seconds / chapter / rate / minutes) is passed on to the execution service.
+_ENHANCED_FASTPATH_COMMANDS = frozenset({
+    "seek_relative", "chapter_next", "chapter_previous", "chapter_goto", "speed", "sleep",
+})
+
+
+def _media_transport_match(query: str) -> tuple[str | None, dict]:
+    q = (query or "").strip().lower()
+    if not q:
+        return None, {}
+
+    # Specific audiobook phrases first: they must not be swallowed by the
+    # generic "skip" / "back" / "stop" patterns below.
+    skip_back = re.search(
+        r"\b(?:skip|go|jump)\s+(?:back|backward|backwards)\s+(?:by\s+)?(\d+(?:\.\d+)?)\s*(?:seconds?|secs?)?\b",
+        q,
+    )
+    if skip_back:
+        return "seek_relative", {"seconds": -float(skip_back.group(1))}
+    skip_forward = re.search(
+        r"\b(?:skip|go|jump)\s+(?:ahead|forward|forwards)\s+(?:by\s+)?(\d+(?:\.\d+)?)\s*(?:seconds?|secs?)?\b",
+        q,
+    )
+    if skip_forward:
+        return "seek_relative", {"seconds": float(skip_forward.group(1))}
+    if re.search(r"\bnext\s+chapter\b", q):
+        return "chapter_next", {}
+    if re.search(r"\b(?:previous|prev|prior)\s+chapter\b", q):
+        return "chapter_previous", {}
+    goto_chapter = re.search(r"\b(?:go\s+to|jump\s+to)\s+chapter\s+(\d+)\b", q)
+    if goto_chapter:
+        return "chapter_goto", {"chapter": int(goto_chapter.group(1))}
+    set_speed = re.search(r"\b(?:set\s+(?:the\s+)?speed\s+(?:to\s+)?|speed\s+)(\d+(?:\.\d+)?)\b", q)
+    if set_speed:
+        return "speed", {"rate": float(set_speed.group(1))}
+    if re.search(r"\bplay\s+faster\b", q):
+        return "speed", {"rate": 1.5}
+    if re.search(r"\bplay\s+slower\b", q):
+        return "speed", {"rate": 0.5}
+    if re.search(r"\bstop\s+at\s+the\s+end\s+of\s+the\s+chapter\b", q):
+        return "sleep", {"end_of_chapter": True}
+    # Only real sleep phrasing ("sleep timer", "stop playing in 30 minutes"): a plain "set a
+    # timer for 10 minutes" is a kitchen timer and must not pause the book.
+    if re.search(r"\bsleep\b", q) or re.search(r"\bstop\s+(?:playing\s+|reading\s+|the\s+book\s+)?in\s+\d", q):
+        minutes = re.search(r"(\d+(?:\.\d+)?)\s*(?:minutes?|mins?)\b", q)
+        if minutes:
+            return "sleep", {"minutes": float(minutes.group(1))}
+        if "end of the chapter" in q:
+            return "sleep", {"end_of_chapter": True}
+
+    # Volume commands must never be misclassified as pause/stop/etc.
+    if re.search(r"\b(?:volume\s+up|louder|turn\s+(?:it\s+)?up|turn\s+up\s+the\s+volume)\b", q):
+        return "volume_up", {}
+    if re.search(r"\b(?:volume\s+down|quieter|softer|turn\s+(?:it\s+)?down|turn\s+down\s+the\s+volume)\b", q):
+        return "volume_down", {}
+    if re.search(r"\bmute\b", q) and not re.search(r"\bunmute\b", q):
+        return "volume_mute", {}
+    if re.search(r"\bunmute\b", q):
+        return "volume_unmute", {}
+    if re.search(r"\bvolume\b.*\d", q) or re.search(r"\bset\s+(?:the\s+)?volume\s+to\b", q):
+        return "volume_set", {}
 
     command_patterns = (
       (r"\b(?:pause|hold)\b", "pause"),
@@ -1442,8 +1756,19 @@ def extract_media_transport_command(query: str) -> str | None:
     )
     for pattern, command in command_patterns:
       if re.search(pattern, q, flags=re.IGNORECASE):
-          return command
-    return None
+          return command, {}
+    return None, {}
+
+
+def extract_media_transport_command(query: str) -> str | None:
+    command, _ = _media_transport_match(query)
+    return command
+
+
+def extract_media_transport_payload(query: str) -> dict:
+    """Numbers spoken with an audiobook command (seconds / chapter / rate / minutes)."""
+    _, payload = _media_transport_match(query)
+    return payload
 
 
 _MEDIA_NOUNS = re.compile(
@@ -1464,9 +1789,21 @@ def is_plain_media_command(query: str) -> bool:
     den TV") or is the bare command ("skip", "pause please"). "Stop the
     timer" and "pause the vacuum" are not.
     """
-    if not extract_media_transport_command(query):
+    command = extract_media_transport_command(query)
+    if not command:
         return False
+    if command in _ENHANCED_FASTPATH_COMMANDS:
+        return True
+    if _STARTS_WITH_PLAY.match(fast_media.strip_request_filler(query or "")):
+        # "Play the next episode" skips; "Play the song Next to Me" names a song.
+        return bool(_PLAY_NEXT.match(fast_media.strip_request_filler(query or "")))
     return bool(_MEDIA_NOUNS.search(query or "") or _BARE_MEDIA_COMMAND.match(query or ""))
+
+
+_STARTS_WITH_PLAY = re.compile(rf"^{fast_media.PLAY_VERB}\b", re.IGNORECASE)
+_PLAY_NEXT = re.compile(
+    rf"^{fast_media.PLAY_VERB}\s+(?:the\s+)?(?:next|previous|last)\s+(?:one|episode|track|song|chapter|item)"
+    r"(?:\s+(?:on|in)\s+.+)?$", re.IGNORECASE)
 
 
 def is_time_or_date_query(query: str) -> bool:
@@ -1499,17 +1836,32 @@ async def build_time_or_date_response(query: str) -> str:
         log.error("time answer: %s", exc)
         return ("I don't know the household's time zone yet. An admin can set it in "
                 "Settings > Household time zone, or as TZ in the server's .env.")
-    now = datetime.now(ZoneInfo(tz_name))
+    return spoken_time_answer(query, datetime.now(ZoneInfo(tz_name)))
 
+
+def _ordinal(day: int) -> str:
+    """1st, 2nd, 3rd, 4th ... 11th, 12th, 13th ... 21st."""
+    suffix = "th" if 10 <= day % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
+
+
+def spoken_time_answer(query: str, now: datetime) -> str:
+    """The time or date the way a person says it, for a reply that is read aloud.
+
+    The household's own zone is implied, so it is never named ("America/Phoenix" was read out
+    as "America slash Phoenix"), the hour has no leading zero ("07:29" was "oh seven"), and the
+    date is "Monday, November 23rd" without the year.
+    """
     q = (query or "").strip().lower()
     wants_time = any(token in q for token in ("time", "clock"))
     wants_date = "date" in q or "day" in q or "today" in q
-
+    clock = f"{now.hour % 12 or 12}:{now.minute:02d} {'AM' if now.hour < 12 else 'PM'}"
+    day = f"{now.strftime('%A, %B')} {_ordinal(now.day)}"
     if wants_time and wants_date:
-        return f"It is {now.strftime('%I:%M %p')} on {now.strftime('%A, %B %d, %Y')} ({tz_name})."
+        return f"It's {clock} on {day}."
     if wants_date and not wants_time:
-        return f"Today is {now.strftime('%A, %B %d, %Y')} ({tz_name})."
-    return f"It is {now.strftime('%I:%M %p')} ({tz_name})."
+        return f"Today is {day}."
+    return f"It's {clock}."
 
 
 def has_explicit_action_request(query: str) -> bool:
@@ -2271,13 +2623,18 @@ async def decompose_command_query(query: str) -> list[str]:
     parts = re.split(r'\s+(?:and|then)\s+', query, flags=re.IGNORECASE)
     return [p.strip() for p in parts if p.strip()]
 
-async def resolve_identity(body: dict) -> Any:
+async def resolve_identity(body: dict, *, voice_device_checked: bool = False) -> Any:
     from services.gateway.cache import get_cached_identity
 
     # No caller gets the administrator just by saying nothing. Callers that
     # mean the shared household account must ask for it explicitly; everyone
     # else resolves as anonymous unless they present a real identifier.
     payload = dict(body)
+    # A satellite names its assigned person only when the chat handler set it
+    # from an internal caller's voice context (apply_voice_identity); a client
+    # body that names one anywhere else is ignored.
+    if not voice_device_checked:
+        payload.pop("voice_device", None)
     if (
         "anonymous" not in payload
         and "household" not in payload
@@ -2441,6 +2798,27 @@ async def _resolve_identity_allow_anonymous(
     return await resolve_identity(payload)
 
 
+def _credential_presented(request, body) -> bool:
+    """Whether the caller offered a credential at all.
+
+    Deliberately forgiving about the shape of ``request``: the voice context is
+    read by tests and by loose callers with request-likes that have no ``url``,
+    and a credential check must never be able to fail a turn. Only presence is
+    reported - the route itself is what verifies the key.
+    """
+    try:
+        headers = getattr(request, "headers", None) or {}
+        if headers.get("Authorization") or headers.get("authorization"):
+            return True
+        url = getattr(request, "url", None)
+        query = getattr(url, "query", "") if url is not None else str(getattr(request, "query_params", "") or "")
+        if query and ("token=" in query or "api_key=" in query):
+            return True
+    except Exception:
+        pass
+    return bool((body or {}).get("api_key"))
+
+
 def _presented_api_key(request: Request) -> str:
     """The API key this request presents, from the header or the query string."""
     auth_header = request.headers.get("Authorization")
@@ -2581,10 +2959,17 @@ async def _resolve_identity_from_media_token(request: Request) -> Any | None:
     if not mt:
         return None
     user = request.query_params.get("user", "")
-    if not user or not verify(mt, user):
+    why = media_token_why_invalid(mt, user)
+    if why:
+        log.info(f"[media token] refused for user={user!r} on {request.url.path}: {why}")
         raise HTTPException(status_code=403, detail="Invalid or expired media token")
+    # A voice satellite that did not recognise the speaker acts as the household, and its
+    # streams are signed for that name. The household is not a user: Identity answers it
+    # only when asked for it as the household (a "rag_user" lookup is a 401, and every
+    # audiobook or podcast started by an unrecognised voice failed on its first request).
+    who = {"household": True} if user == fast_media.HOUSEHOLD_USER else {"rag_user": user}
     try:
-        return await resolve_identity({"rag_user": user})
+        return await resolve_identity(who)
     except HTTPException as e:
         raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
 
@@ -3345,8 +3730,11 @@ def _mission_requires_github_auth(query: str) -> bool:
     return any(sig in q for sig in _GITHUB_AUTH_SIGNALS)
 
 
-async def _recognised_speaker(query: str) -> str | None:
-    """Who said ``query`` at a voice satellite just now (services/common/voice_speaker)."""
+async def _speaker_record(query: str) -> dict | None:
+    """What speech to text heard for ``query`` at a voice satellite just now: who
+    (if anyone was recognised), the two best scores and the speech length
+    (services/common/voice_speaker). Used once: a second request with the same
+    words is not this one."""
     from services.common import voice_speaker
     from services.gateway.cache import get_redis
 
@@ -3354,12 +3742,156 @@ async def _recognised_speaker(query: str) -> str | None:
     if not key:
         return None
     try:
-        # Used once: a second request with the same words is not this one.
         raw = await asyncio.to_thread(get_redis().getdel, key)
     except Exception as e:  # recognition is optional
         log.warning(f"[ChatHandler] voice speaker lookup failed: {e}")
         return None
-    return voice_speaker.decode(raw)
+    return voice_speaker.decode_record(raw)
+
+
+async def _recognised_speaker(query: str) -> str | None:
+    """Who said ``query`` at a voice satellite just now (services/common/voice_speaker)."""
+    record = await _speaker_record(query)
+    return record.get("username") if record else None
+
+
+def apply_voice_identity(body: dict, record: dict | None, voice_context: dict | None) -> str | None:
+    """Name who a request is from, in the fixed order, for identity's resolve.
+
+    1. The speaker the voice identified (``voice_id``).
+    2. Else, at a voice satellite, the satellite itself (``voice_device``):
+       identity answers with the person an admin assigned it to, if any.
+    3. Else nothing: the request goes on as the household (the default user).
+
+    A client never names itself: ``voice_device`` is dropped from the body and
+    set only from an internal caller's voice context. An API key outranks all
+    of this (the caller leaves ``record`` None). Returns the identified speaker.
+    """
+    body.pop("voice_device", None)
+    if body.get("api_key"):
+        return None
+    speaker = record.get("username") if record else None
+    if speaker:
+        body["voice_id"] = speaker
+    elif voice_context and voice_context.get("satellite"):
+        body["voice_device"] = voice_context["satellite"]
+    return speaker
+
+
+def voice_decision(identified_by: str | None, user: str | None, satellite: str | None,
+                   record: dict | None) -> tuple[str, str]:
+    """How a spoken request was attributed, and the one log line that says so.
+
+    The order is fixed (docs/VOICE_RECOGNITION.md): the identified speaker, else the person
+    the satellite is assigned to, else the default user. The line carries the
+    two best scores and the speech length, never the signature, so accuracy can
+    be measured from the logs.
+    """
+    decision = {"voice": "identified", "device": "device-assigned"}.get(identified_by or "", "default")
+    record = record or {}
+    top = [c for c in record.get("top") or [] if isinstance(c, dict)]
+
+    def score(i: int) -> str:
+        return f"{top[i].get('username')} {top[i].get('score')}" if len(top) > i else "-"
+
+    speech = record.get("speech_seconds")
+    line = (
+        f"[VoiceDecision] decision={decision} user={user} satellite={satellite or '-'} "
+        f"top={score(0)} second={score(1)} threshold={record.get('threshold', '-')} "
+        f"margin={record.get('margin', '-')} speech={f'{speech}s' if speech is not None else '-'}"
+    )
+    return decision, line
+
+
+async def _offer_voice_candidate(query: str, satellite: str) -> None:
+    """Offer an unrecognised command heard at a satellite assigned to one person
+    as a candidate sample of that person's voice. Identity decides whether it
+    qualifies (and whose it would be, from the satellite's own assignment);
+    an admin approves it before it is ever used. Background work: never fatal."""
+    from services.common import voice_enroll, voice_speaker
+    from services.gateway.cache import get_redis
+
+    key = voice_speaker.candidate_key(query)
+    if not key:
+        return
+    try:
+        take = voice_enroll.decode_take(await asyncio.to_thread(get_redis().getdel, key))
+        if take is None:
+            return
+        resp = await get_http_client().post(
+            f"{IDENTITY_SVC}/api/voice/candidate",
+            json={"satellite": satellite, "embedding": take["embedding"],
+                  "speech_seconds": take.get("speech_seconds"), "model": take.get("model")},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        body = await resp.json(content_type=None)
+        if isinstance(body, dict):
+            log.info(f"[VoiceCandidate] {body.get('status')}: {body.get('reason') or 'waiting for an admin'}")
+    except Exception as e:
+        log.warning(f"[VoiceCandidate] not offered: {type(e).__name__}: {e}")
+
+
+_VOICE_CANDIDATE_TASKS: set[asyncio.Task] = set()
+
+#: What Jarvis adds, once a day at most per voice, when a voice sounds like nobody enrolled. "Learn
+#: my voice" only works at a satellite assigned to one person who has no voice profile yet
+#: (``_voice_teaching_reply``); anywhere else the invitation points to the people who can set it up.
+NEW_VOICE_LINE_LEARN_HERE = (
+    "By the way, I don't think I know your voice yet. Want me to learn it? Just say 'learn my voice'."
+)
+NEW_VOICE_LINE_ASK_GROWN_UP = (
+    "By the way, I don't think I know your voice yet. If you'd like me to learn it, "
+    "ask a grown-up to set that up in the Jarvis app."
+)
+#: The new-voice check must never hold up an answer for long.
+_NEW_VOICE_TIMEOUT = aiohttp.ClientTimeout(total=1.5)
+
+
+async def _new_voice_check(query: str, voice_context: dict) -> dict | None:
+    """Whether this command's voice sounded like nobody enrolled, and the line to add if so.
+
+    Execution keeps the signature of such a command for a few seconds
+    (``voice_speaker.looks_new``); identity checks it against the profiles, counts
+    it in an anonymous cluster for the satellite and says whether to invite the
+    speaker (once a day per voice). Never a profile, never logged; any failure is
+    simply no invitation. A whispered command, or someone already asking to be
+    learned, is not invited.
+    """
+    from services.common import voice_enroll, voice_speaker
+    from services.gateway.cache import get_redis
+
+    satellite = str(voice_context.get("satellite") or "")
+    key = voice_speaker.new_voice_key(query)
+    if not satellite or not key:
+        return None
+    try:
+        take = voice_enroll.decode_take(await asyncio.to_thread(get_redis().getdel, key))
+    except Exception as e:
+        log.warning(f"[VoiceNewVoice] lookup failed: {type(e).__name__}")
+        return None
+    if take is None:
+        return None
+    try:
+        resp = await get_http_client().post(
+            f"{IDENTITY_SVC}/api/voice/new_voice",
+            json={"satellite": satellite, "embedding": take["embedding"],
+                  "speech_seconds": take.get("speech_seconds"), "model": take.get("model") or "resemblyzer-ge2e-256"},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=_NEW_VOICE_TIMEOUT,
+        )
+        body = await resp.json(content_type=None)
+    except Exception as e:
+        log.warning(f"[VoiceNewVoice] not counted: {type(e).__name__}")
+        return None
+    if not isinstance(body, dict) or not body.get("new_voice"):
+        return None
+    quiet = bool(voice_context.get("whispered")) or _wants_voice_learning(query)
+    ask = bool(body.get("ask")) and not quiet
+    note = (NEW_VOICE_LINE_LEARN_HERE if body.get("learn_here") else NEW_VOICE_LINE_ASK_GROWN_UP) if ask else None
+    log.info(f"[VoiceNewVoice] satellite={satellite} visits_week={body.get('visits_week')} "
+             f"invited={'yes' if note else 'no'}{' (whispered)' if voice_context.get('whispered') else ''}")
+    return {"note": note}
 
 
 #: Things a person says to refresh their own voice profile from a satellite.
@@ -3636,11 +4168,10 @@ async def _voice_teaching_reply(query: str, creds: ResolvedCredentials, satellit
         if owner is None:
             return "I couldn't check who this satellite belongs to just now. Try again in a moment."
         if not owner.get("username"):
-            if int(owner.get("owners") or 0) > 1:
+            if owner.get("known"):
                 return (
-                    f"This satellite is shared by {owner['owners']} people, so I can't tell whose voice to learn "
-                    "here. Assign it to just one person in Admin, Users and Devices, or record your samples "
-                    "in Settings, Vocal Signature."
+                    "This satellite is shared, so I can't tell whose voice to learn here. Assign it to one "
+                    "person in Admin, Users and Devices, or record your samples in Settings, Vocal Signature."
                 )
             return (
                 "This satellite isn't assigned to anyone, so I don't know whose voice to learn here. "
@@ -3795,8 +4326,17 @@ def _voice_context_from(request: Request, body: dict) -> dict | None:
     if not isinstance(raw, dict):
         return None
     if not secret_matches(request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET):
-        log.warning("[ChatHandler] voice_context ignored: the caller is not internal")
-        return None
+        # A phone signed in as a person may describe its own turn (the room it is
+        # in, the device, the conversation) but never an Echo's satellite or
+        # media player, which would move a timer or a speaker into another room
+        # (services/common/voice_phone.py, docs/VOICE_PHONE.md).
+        from services.common import voice_phone
+
+        context = voice_phone.app_context(
+            raw, authenticated=_credential_presented(request, body))
+        if context is None:
+            log.warning("[ChatHandler] voice_context ignored: the caller is not internal")
+        return context
 
     def text(key: str, limit: int = 120) -> str | None:
         value = raw.get(key)
@@ -3808,6 +4348,11 @@ def _voice_context_from(request: Request, body: dict) -> dict | None:
     # The satellite's entity: a timer set by voice shows and rings there (execution satellite_timers.py).
     satellite = text("satellite")
     out["satellite"] = satellite if satellite and re.fullmatch(r"assist_satellite\.[a-z0-9_]+", satellite) else None
+    # The satellite's own speaker: media with no device named plays there (fast_media.satellite_player).
+    player = text("media_player")
+    out["media_player"] = player if player and re.fullmatch(r"media_player\.[a-z0-9_]+", player) else None
+    if raw.get("whispered") is True:
+        out["whispered"] = True
     return {k: v for k, v in out.items() if v}
 
 
@@ -3876,22 +4421,142 @@ def _voice_context_note(ctx: dict) -> str:
                      "ask which room they mean when it matters.")
     if ctx.get("asked"):
         lines.append(f"You had just asked them: {ctx['asked']!r}. Their words answer that.")
+    if ctx.get("whispered"):
+        lines.append("The person whispered. Keep your reply short, calm, and quiet (whisper mode).")
     if ctx.get("extra_system_prompt"):
         lines.append(ctx["extra_system_prompt"])
     return ("\n\n[Voice context]\n" + "\n".join(lines)) if lines else ""
 
 
-async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
+async def _fast_drop_in_answer(query: str, creds: Any, voice_context: dict | None) -> str | None:
+    """Tier-1 Drop-In command dispatch without waiting on an LLM turn."""
+    from services.gateway import fast_drop_in
+
+    match = fast_drop_in.parse_drop_in_command(query)
+    if not match:
+        return None
+    payload = dict(match.get("payload") or {})
+    # Forward what execution's UserContext reads, including who is asking and how
+    # (identified_by / via limit a voice request to the entities exposed to voice).
+    user_context = {
+        field: getattr(creds, field, None)
+        for field in ("user", "is_admin", "identified_by", "via", "ha_url", "ha_token")
+    }
+    user_context["voice_satellite"] = (voice_context or {}).get("satellite") or getattr(creds, "voice_satellite", None)
+    try:
+        async with (
+            borrow_http_client() as client,
+            client.post(
+                f"{EXECUTION_SVC}/execute/drop_in",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                json={**payload, "user_context": user_context},
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            ) as resp,
+        ):
+            if resp.status == 200:
+                data = await resp.json(content_type=None)
+                msg = str((data or {}).get("message") or "").strip()
+                if msg:
+                    return msg
+            log.warning("[FastPath] drop_in execution returned %s", resp.status)
+    except Exception as exc:
+        log.warning("[FastPath] drop_in execution failed: %s", type(exc).__name__)
+    return "Could not reach Drop In right now."
+
+
+async def _fast_echo_bluetooth_answer(query: str, creds: dict, voice_context: dict | None) -> str | None:
+    """Tier-1 Bluetooth command for an Echo, without waiting on an LLM turn.
+
+    Every hub call uses the caller's own hub login, so it only sees and switches the Echos
+    that person may use.
+    """
+    from services.gateway import fast_echo_bluetooth
+
+    cmd = fast_echo_bluetooth.match_echo_bluetooth(query)
+    if cmd is None:
+        return None
+    unreachable = "Could not reach that Echo right now."
+    try:
+        status, body = await automation_routes._hub("GET", "/api/states", creds=creds)
+    except Exception as exc:
+        log.warning("[FastPath] bt states failed: %s", type(exc).__name__)
+        return unreachable
+    if status != 200:
+        log.warning("[FastPath] bt states answered %s", status)
+        return unreachable
+
+    if isinstance(body, list):
+        entity_ids = [str(e.get("entity_id")) for e in body if isinstance(e, dict) and e.get("entity_id")]
+    elif isinstance(body, dict):
+        entity_ids = [str(k) for k in body]
+    else:
+        entity_ids = []
+    # Echos are the nodes that have a Bluetooth pairing switch.
+    echo_nodes = [m.group(1) for eid in entity_ids
+                  if (m := re.match(r"^switch\.(.+?)_bluetooth_pairing$", eid))]
+
+    node = None
+    if cmd.target_room:
+        room_slug = cmd.target_room.lower().strip().replace(" ", "_")
+        node = next((n for n in echo_nodes if room_slug in n), None)
+    else:
+        satellite = str((voice_context or {}).get("satellite") or "")
+        if "." in satellite:
+            heard = satellite.split(".", 1)[1].removesuffix("_assist_satellite")
+            node = heard if heard in echo_nodes else None
+    if node is None:
+        return "Which Echo? Say the room, like turn on Bluetooth pairing in the kitchen."
+
+    ents = fast_echo_bluetooth.resolve_bt_entities(body, node)
+    calls = {
+        "pair_on": ("switch/turn_on", ents["pairing_switch"],
+                    "Bluetooth pairing is on for two minutes. Pick the Echo in your phone's Bluetooth settings."),
+        "pair_off": ("switch/turn_off", ents["pairing_switch"], "Bluetooth pairing is off."),
+        "disconnect": ("button/press", ents["disconnect_button"], "Disconnected."),
+    }
+    if cmd.action in calls:
+        service, entity_id, reply = calls[cmd.action]
+        if not entity_id:
+            return "That Echo does not offer Bluetooth audio."
+        try:
+            status, _ = await automation_routes._hub(
+                "POST", f"/api/services/{service}", creds=creds, json={"entity_id": entity_id})
+        except Exception as exc:
+            log.warning("[FastPath] bt %s failed: %s", cmd.action, type(exc).__name__)
+            return unreachable
+        if status != 200:
+            log.warning("[FastPath] bt %s answered %s", cmd.action, status)
+            return unreachable
+        return reply
+    if cmd.action == "status":
+        device_entity = ents["connected_device"]
+        if device_entity:
+            states = fast_echo_bluetooth._normalize_states(body) if isinstance(body, list) else (body or {})
+            device = str(states.get(device_entity) or "")
+            if device and device not in ("unknown", "unavailable", "none", "None"):
+                return f"{device} is connected."
+        return "Nothing is connected over Bluetooth."
+    return None
+
+
+async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None,
+                             spoken_names: dict[str, str] | None = None,
+                             new_fields: dict[str, Any] | None = None):
     """A voice satellite's answer as NDJSON: safe sentences as they are written, then what is left.
 
     Each sentence is a chunk with ``"speech": true`` (``speech_stream.SpeechGate`` chose it). The last
     chunk (``done``) carries the whole ``reply`` and ``speech_rest``, the part of it not yet said
     (``speech_stream.speech_rest``), or ``error`` when the job failed. Every chunk names the reply's
-    ``voice`` when the gateway chose one.
+    ``voice`` when the gateway chose one; the last one also ``new_voice`` and ``voice_note``
+    (``_voice_new_fields``) when the speaker sounded like nobody enrolled.
     """
+    from services.common.spoken_names import speakable
     from services.gateway.speech_stream import speech_rest
 
+    new_fields = new_fields or {}
+
     assert job_queue is not None, "Job queue not initialized"
+    spoken_names = dict(spoken_names or {})
     spoken: list[str] = []
     said = 0  # sentences relayed in all turns (``spoken`` keeps only the current turn's)
     while True:
@@ -3909,7 +4574,7 @@ async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
             if parsed.get("type") == "speech_turn":
                 spoken.clear()
             elif parsed.get("type") == "speech" and str(parsed.get("text") or "").strip():
-                text = str(parsed["text"]).strip()
+                text = speakable(str(parsed["text"]).strip(), spoken_names)
                 spoken.append(text)
                 said += 1
                 yield json.dumps(_make_ollama_chunk(text, model, speech=True, voice=reply_voice)) + "\n"
@@ -3918,13 +4583,13 @@ async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
             reply = str(ans) if ans is not None else ""
             if isinstance(ans, str):
                 _thinking, reply = extract_thinking_and_content(ans)
-            reply = reply.strip()
+            reply = speakable(reply.strip(), spoken_names)
             rest = speech_rest(reply, spoken)
             # What reached the satellite early, so a reply spoken whole can be told from one streamed.
             log.info(f"[speech_stream] job {job_id}: {said} sentences streamed before the end, "
                      f"{len(rest)} of {len(reply)} characters left to say")
             yield json.dumps(_make_ollama_chunk("", model, True, reply=reply, speech_rest=rest,
-                                                voice=reply_voice)) + "\n"
+                                                voice=reply_voice, **new_fields)) + "\n"
             return
         if job["status"] == JobStatus.FAILED:
             err = str(job.get("error") or "Job failed")
@@ -3943,6 +4608,25 @@ async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks=None):
+    """Answer one request to Jarvis, and count how it went for the admin page
+    (voice_outcomes: counts and timings only, written off this path)."""
+    record = voice_outcomes.begin("chat")  # "voice" once the handler sees a satellite's room
+    try:
+        response = await _chat_handler_impl(request, background_tasks)
+    except HTTPException as exc:
+        if exc.status_code >= 500:
+            voice_outcomes.finish(record, "timeout" if exc.status_code == 504 else "error")
+        raise
+    except TimeoutError:
+        voice_outcomes.finish(record, "timeout")
+        raise
+    except Exception:
+        voice_outcomes.finish(record, "error")
+        raise
+    return voice_outcomes.finish_response(record, response)
+
+
+async def _chat_handler_impl(request: Request, background_tasks=None):
     log.info("Chat handler entered")
     client = get_http_client()
     # 1. Resolve Identity
@@ -3963,6 +4647,11 @@ async def chat_handler(request: Request, background_tasks=None):
             return JSONResponse(status_code=401, content={"error": {"message": msg, "type": "unauthorized"}})
         return JSONResponse(status_code=401, content={"error": msg})
     voice_context = _voice_context_from(request, body)
+    if voice_context:
+        record = voice_outcomes.current()
+        if record is not None:
+            record.source = "voice"
+        _SPOKEN_NAMES.set({})
 
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
@@ -4042,11 +4731,8 @@ async def chat_handler(request: Request, background_tasks=None):
     body.pop("rag_user", None)
     body.pop("anonymous", None)
     body.pop("household", None)
-    voice_speaker_name = None
-    if not body.get("api_key"):
-        voice_speaker_name = await _recognised_speaker(query)
-        if voice_speaker_name:
-            body["voice_id"] = voice_speaker_name
+    speaker_record = None if body.get("api_key") else await _speaker_record(query)
+    voice_speaker_name = apply_voice_identity(body, speaker_record, voice_context)
 
     # A kiosk or voice satellite has no personal API key. It may act as the
     # non-admin household, with the shared home credentials, but only when it
@@ -4055,16 +4741,24 @@ async def chat_handler(request: Request, background_tasks=None):
         body["household"] = True
 
     try:
-        creds_data = await resolve_identity(body)
+        creds_data = await resolve_identity(body, voice_device_checked=True)
         creds = ResolvedCredentials(**creds_data)
         # Everything this chat turn controls is Jarvis acting: only entities exposed to voice (exposure.py).
         creds.via = "assistant"
         user_id = creds.user
+        voice_outcomes.set_user(user_id)
         if voice_speaker_name and creds.user == voice_speaker_name:
             creds.identified_by = "voice"
             log.info(f"[ChatHandler] Answering as {user_id}, recognised by voice")
         if voice_context and voice_context.get("satellite"):
             creds.voice_satellite = voice_context["satellite"]
+            decision, line = voice_decision(creds.identified_by, user_id, voice_context["satellite"], speaker_record)
+            log.info(line)
+            voice_outcomes.set_identity(decision)
+            if decision == "device-assigned" and speaker_record and speaker_record.get("top"):
+                task = asyncio.create_task(_offer_voice_candidate(str(query), voice_context["satellite"]))
+                _VOICE_CANDIDATE_TASKS.add(task)
+                task.add_done_callback(_VOICE_CANDIDATE_TASKS.discard)
         if voice_context:
             # The voice the satellite should answer in: whoever it recognised,
             # else whoever the satellite is assigned to, else Jarvis's (None).
@@ -4095,6 +4789,30 @@ async def chat_handler(request: Request, background_tasks=None):
             if is_openai:
                 return _make_openai_response(teaching, selected_model, "voice_teaching")
             return _make_ollama_response(teaching, selected_model, "voice_teaching")
+        # A voice nobody enrolled: answered as usual (the satellite's person, else the default user),
+        # and the answer may carry one invitation to be learned (``_new_voice_check``).
+        if creds.identified_by != "voice":
+            _VOICE_NEW.set(await _new_voice_check(str(query), voice_context))
+
+    # What speech to text wrote, made routable: "PlayDork Diaries" is "Play Dork Diaries",
+    # "Reach after one of <title>" is "Read chapter one of <title>" (voice_transcript.py).
+    if not grounded and voice_context:
+        heard = voice_transcript.normalize(str(query))
+        if heard != query:
+            log.info(f"[Heard] {query!r} taken as {heard!r}")
+            query = heard
+
+    # The answer to "Harbor: the song, or the audiobook?" (or "Do you want me to read it?"):
+    # the option the person named, played on the device that asked (fast_media.py). A pending
+    # question is answered here or asked again, never handed to the model.
+    if not grounded:
+        choice_answer = await _answer_media_choice(query, user_id, creds)
+        if choice_answer is not None:
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", choice_answer)
+            if is_openai:
+                return _make_openai_response(choice_answer, selected_model, "play_media")
+            return _make_ollama_response(choice_answer, selected_model, "play_media")
 
     # A sentence an automation in the device hub owns (HA's conversation trigger) is answered by that
     # automation, before any shortcut or model (services/gateway/sentence_triggers.py).
@@ -4108,6 +4826,22 @@ async def chat_handler(request: Request, background_tasks=None):
             if is_openai:
                 return _make_openai_response(handled["response"], selected_model, "sentence_trigger")
             return _make_ollama_response(handled["response"], selected_model, "sentence_trigger")
+
+        drop_in_reply = await _fast_drop_in_answer(str(query), creds, voice_context)
+        if drop_in_reply is not None:
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", drop_in_reply)
+            if is_openai:
+                return _make_openai_response(drop_in_reply, selected_model, "fast_drop_in")
+            return _make_ollama_response(drop_in_reply, selected_model, "fast_drop_in")
+
+        bt_reply = await _fast_echo_bluetooth_answer(str(query), creds, voice_context)
+        if bt_reply is not None:
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", bt_reply)
+            if is_openai:
+                return _make_openai_response(bt_reply, selected_model, "fast_echo_bluetooth")
+            return _make_ollama_response(bt_reply, selected_model, "fast_echo_bluetooth")
 
     # The watch's weather and calendar buttons must not wait on a 35-75 s LLM
     # turn (and the small model can overflow its 8k context with RAG context).
@@ -4193,6 +4927,35 @@ async def chat_handler(request: Request, background_tasks=None):
         # skipped and called nothing. A plain skip/stop/pause is never the model's job.
         log.info(f"[FastPath] plain media command: {extract_media_transport_command(query)}")
         intent, confidence = "media_transport", 1.0
+    # "Set volume to 100%", "turn it up a bit", "mute": one meaning, one tool (fast_volume.py).
+    volume_ask = None if grounded else fast_volume.parse(query)
+    if volume_ask is not None:
+        log.info(f"[FastPath] volume command: {volume_ask}")
+        intent, confidence = "media_transport", 1.0
+
+    # "Play" heard as another word ("Late <title>"): played only when the libraries have a
+    # strong match for the rest; anything else goes on as it was heard (fast_media.misheard_play).
+    if not grounded and not engine.is_fast_path(intent, confidence):
+        heard_as = await _misheard_play(query, creds)
+        if heard_as:
+            query, intent, confidence = heard_as, "play_media", 1.0
+
+    # "Read John 3:16", "Read chapter 1 of <Title>", "Read <Title>", "Keep reading": read aloud
+    # from the Bible service or the book library (fast_read.py). A title the library does not
+    # hold falls through to the media path below ("Read <Title>" then plays its audiobook).
+    if not grounded and (read_ask := fast_read.parse(query)) is not None:
+        try:
+            read_answer = await fast_read.handle(read_ask, _execution_post, creds.model_dump(), user_id)
+        except Exception as exc:
+            log.warning(f"[FastRead] {read_ask.kind} read of {query!r} failed: {exc}")
+            read_answer = None
+        if read_answer is not None:
+            log.info(f"[FastRead] MATCHED: {read_ask.kind} ({len(read_answer)} characters)")
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", read_answer)
+            if is_openai:
+                return _make_openai_response(read_answer, selected_model, "read_aloud")
+            return _make_ollama_response(read_answer, selected_model, "read_aloud")
 
     # Resolve dynamic threshold from Identity
     threshold_str = await fetch_global_setting("fast_path_threshold", str(_DEFAULT_FAST_PATH_THRESHOLD))
@@ -4238,6 +5001,7 @@ async def chat_handler(request: Request, background_tasks=None):
         cached_state = None
         if intent in ["play_media", "pause_media", "media_transport", "turn_on", "turn_off"]:
             media_entities = await fetch_ha_entities(creds.model_dump())
+            _note_spoken_names(media_entities)
             cached_device_info = get_last_used_device(user_id)
             if cached_device_info and intent not in ("turn_on", "turn_off") \
                     and not str(cached_device_info.get("entity_id") or "").startswith("media_player."):
@@ -4253,29 +5017,74 @@ async def chat_handler(request: Request, background_tasks=None):
                 else:
                     log.info(f"[FastPath] Using cached device: {cached_device_id} (state={cached_state})")
 
+        # A voice satellite's own speaker: what "play music" with no device named means, ahead of
+        # the household's last-used player (fast_media.py). A named device still wins.
+        sat_player, sat_state = (fast_media.satellite_player(voice_context, media_entities)
+                                 if media_entities is not None else (None, None))
+        # Admin > Voice satellites: where media asked for at a satellite plays when no device is named.
+        # "this_device" (the default) is the satellite's own speaker; "last_used" keeps the household's
+        # last player. Anything else is a misconfiguration: said in the log, the default used.
+        if sat_player:
+            playback = (await fetch_global_setting("voice_satellite_playback", "this_device")).strip() or "this_device"
+            if playback not in fast_media.SATELLITE_PLAYBACK:
+                log.error(f"[FastPath] voice_satellite_playback is {playback!r}, not one of "
+                          f"{sorted(fast_media.SATELLITE_PLAYBACK)}: using this_device")
+            elif playback == "last_used":
+                sat_player, sat_state = None, None
+
         # Attempt entity extraction/resolution for control intents
         if intent == "play_media":
+            query = fast_media.last_play_request(query)
             media_type = "video" if is_likely_video_request(query) else None
-            resolved_entity = resolve_media_target(query, media_entities or [], media_type, cached_device_id)
+            named_place = extract_media_place(query, media_entities or [])[1]
+            # "Play X on YouTube" at a satellite with no device named: the satellite's own speaker, where
+            # execution plays the video's sound, or asks which TV when a video was asked for.
+            youtube_here = media_type == "video" and "youtube" in query.lower() and not named_place
+            if sat_player and (media_type != "video" or youtube_here) and not named_place:
+                resolved_entity = sat_player
+                log.info(f"[FastPath] no device named; playing on the satellite's own speaker {sat_player}")
+            else:
+                resolved_entity = resolve_media_target(query, media_entities or [], media_type, cached_device_id,
+                                                       requested_device=named_place)
         elif intent in ["turn_on", "turn_off"]:
             resolved_entity = engine.extract_entity(query, intent)
             if not asks_about_state(query):
-                light_set = fast_lights.choose(engine, query, intent, resolved_entity, media_entities)
+                light_set = fast_lights.choose(engine, query, intent, resolved_entity, media_entities, voice_context)
             if not resolved_entity and not light_set:
-                resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device=cached_device_id)
+                if sat_player and fast_media.power_names_no_device(query):
+                    resolved_entity = sat_player  # "turn off the music" at a satellite: its own speaker
+                    log.info(f"[FastPath] no device named; power {intent} on the satellite's own speaker {sat_player}")
+                else:
+                    resolved_entity = resolve_media_target(query, media_entities or [], media_type="power",
+                                                           cached_device=cached_device_id)
         elif intent in ["pause_media", "media_transport"]:
             # A named player ("on the den TV") or else the last one used while it plays;
             # of players that match, the one playing (resolve_media_target "transport").
             named = engine.extract_target(query, intent)
-            active_cache = cached_device_id if cached_state in ACTIVE_MEDIA_STATES else None
-            resolved_entity = resolve_media_target(query, media_entities or [], media_type="transport",
-                                                   cached_device=None if named else active_cache, requested_device=named)
-            if not resolved_entity and media_entities:
+            if volume_ask is not None:
+                named = fast_volume.place(query)
+            if volume_ask is not None and named:
+                resolved_entity = resolve_media_target(query, media_entities or [], media_type="transport",
+                                                       requested_device=named)
+            elif volume_ask is not None and sat_player:
+                # A volume command names no device: it is for the speaker that heard it, playing or not.
+                resolved_entity = sat_player
+                log.info(f"[FastPath] volume with no device named; the satellite's own speaker {sat_player}")
+            elif not named and sat_player and sat_state in ACTIVE_MEDIA_STATES:
+                resolved_entity = sat_player
+                log.info(f"[FastPath] no player named; the satellite's own speaker {sat_player} is {sat_state}")
+            else:
+                active_cache = cached_device_id if cached_state in ACTIVE_MEDIA_STATES else None
+                resolved_entity = resolve_media_target(query, media_entities or [], media_type="transport",
+                                                       cached_device=None if named else active_cache, requested_device=named)
+            if not resolved_entity and media_entities and not (volume_ask is not None and named):
                 for e in media_entities:
                     if e.get("entity_id", "").startswith("media_player.") and e.get("state") in ("playing", "paused"):
                         resolved_entity = e.get("entity_id")
                         log.info(f"[FastPath] Auto-targeting active {e.get('state')} player: {resolved_entity}")
                         break
+            if not resolved_entity and not named and sat_player:
+                resolved_entity = sat_player  # nothing plays anywhere: "volume up" means the speaker spoken to
         else:
             resolved_entity = engine.extract_entity(query, intent)
 
@@ -4326,6 +5135,32 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_openai_response(ans, selected_model, intent)
         return _make_ollama_response(ans, selected_model, intent)
 
+    # Bare stop/cancel from a voice satellite: if a timer is ringing there, stop it
+    # instead of the music.
+    _bare_stop = str(query or "").strip().lower().strip("?.!") in {"stop", "stop it", "cancel", "turn it off", "enough"}
+    _sat = (voice_context or {}).get("satellite") if isinstance(voice_context, dict) else None
+    if is_fast_path and intent in ("media_transport", "pause_media") and _bare_stop and _sat:
+        try:
+            async with shared_http_client() as _c:
+                _resp = await _c.post(
+                    f"{EXECUTION_SVC}/execute/timer",
+                    json={"action": "stop", "type": "timer", "target_device": _sat, "user_context": creds.model_dump()},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=30.0),
+                )
+                _data = await _resp.json()
+            _detail = _data.get("detail") or {}
+            _ringing = bool(_detail.get("ringing")) or bool(_detail.get("stopped_devices"))
+            if _ringing:
+                ans = _data.get("message", "Stopped.")
+                await update_history(user_id, "user", query)
+                await update_history(user_id, "assistant", ans)
+                if is_openai:
+                    return _make_openai_response(ans, selected_model, "timer_stop")
+                return _make_ollama_response(ans, selected_model, "timer_stop")
+        except Exception as _e:
+            log.warning(f"[FastPath] timer stop check failed: {_e}")
+
     if is_fast_path:
         # Execute immediate tool for simple intents
         endpoint_map = {
@@ -4340,6 +5175,7 @@ async def chat_handler(request: Request, background_tasks=None):
             "location_query": "/execute/location",
         }
         endpoint = endpoint_map.get(intent)
+        direct_answer: str | None = None  # an answer that needs no execution call
         if endpoint:
             exec_payload: dict = {
                 "user_context": creds.model_dump(),
@@ -4364,43 +5200,151 @@ async def chat_handler(request: Request, background_tasks=None):
                 }
                 svc_base = EXECUTION_SVC
             elif intent == "play_media":
-                media_query, _ = extract_media_request(query)
+                media_query, named_device = extract_media_place(query, media_entities or [])
+                # "read <title>" / "read me <title>"
+                m_read = re.match(r"^read(?:\s+me)?\s+(.+?)(?:\s+on\s+(.+))?$", query.strip(), flags=re.IGNORECASE)
+                if m_read and not media_query:
+                    media_query = m_read.group(1).strip()
+                    if m_read.group(2):
+                        named_device = m_read.group(2).strip()
+                q_lower = query.lower().strip()
+                # "Play my latest audiobook", "the audiobook by <author>", "<title> audiobook":
+                # Audiobookshelf, never a Music Assistant search for the sentence (fast_media.py).
+                book_ask = fast_media.parse_audiobook_request(
+                    query, is_device=lambda d: resolve_media_target(query, media_entities or [], requested_device=d) is not None)
+                if book_ask is not None:
+                    ask, book_device = book_ask
+                    if book_device is None and named_device:
+                        # The " on " was part of the title, not a device ("Murder on the Orient Express").
+                        named_device = None
+                        resolved_entity = sat_player or None
+
                 media_type = "video" if is_likely_video_request(query) else None
                 if not media_type:
-                    q_lower = query.lower()
                     if "podcast" in q_lower:
                         media_type = "podcast"
-                    elif any(w in q_lower for w in ["audiobook", "book", "audio book"]):
+                    elif any(w in q_lower for w in ["audiobook", "book", "audio book", "read "]):
                         media_type = "audiobook"
-                clean_q = media_query or query
-                if clean_q.lower().startswith("the "):
-                    clean_q = clean_q[4:].strip()
-                clean_q = re.sub(r'\bSaint\b', 'St.', clean_q, flags=re.IGNORECASE)
-                exec_payload = {
-                    "user_context": creds.model_dump(),
-                    "entity_id": resolved_entity,
-                    "query": clean_q,
-                    "media_content_type": media_type or "artist",
-                    "media_type": media_type,
-                }
-                svc_base = EXECUTION_SVC
+                # "play the book <title>" -> audiobook
+                if q_lower.startswith("play the book "):
+                    media_type = "audiobook"
+                    if not media_query or media_query.lower().startswith("the book"):
+                        media_query = query[len("play the book "):].strip() if q_lower.startswith("play the book ") else media_query
+
+                area = (voice_context or {}).get("area") if isinstance(voice_context, dict) else None
+                if not named_device and area:
+                    device_name = area
+                else:
+                    device_name = named_device
+
+                if book_ask is not None:
+                    ask = book_ask[0]
+                    if ask.mine and creds.user == fast_media.HOUSEHOLD_USER:
+                        log.info(f"[FastPath] '{query}' asks for the speaker's own audiobook; the speaker was not recognised")
+                        direct_answer = fast_media.unknown_speaker_reply()
+                    log.info(f"[FastPath] audiobook request: {ask}")
+                    exec_payload = fast_media.audiobook_payload(ask, {
+                        "user_context": creds.model_dump(),
+                        "entity_id": resolved_entity,
+                        "device_name": device_name,
+                    })
+                    endpoint = "/execute/audiobookshelf"
+                    svc_base = EXECUTION_SVC
+                elif media_type is None and (music_ask := fast_media.parse_music_request(
+                        media_query if media_query is not None else query)).kind == "library":
+                    # "Can you play music?" / "Playin' music." names nothing: something from the library.
+                    log.info(f"[FastPath] '{query}' names no music; asking for something from the library")
+                    exec_payload = {
+                        "user_context": creds.model_dump(),
+                        "entity_id": resolved_entity,
+                        "device_name": device_name,
+                        "query": None,
+                        "media_type": "music",
+                    }
+                    svc_base = EXECUTION_SVC
+                elif media_type is None:
+                    # Music: the verb, filler and determiners are gone ("some worship music" ->
+                    # "worship music"); a genre is searched as a playlist or radio first, and the
+                    # relaxed words ("worship") are tried once when the first search finds nothing.
+                    clean_q = re.sub(r'\bSaint\b', 'St.', music_ask.query or "", flags=re.IGNORECASE)
+                    log.info(f"[FastPath] music request '{query}' -> {music_ask.kind} '{clean_q}'"
+                             + (f" (then '{music_ask.fallback}')" if music_ask.fallback else ""))
+                    exec_payload = {
+                        "user_context": creds.model_dump(),
+                        "entity_id": resolved_entity,
+                        "device_name": device_name,
+                        "query": clean_q,
+                        "media_content_type": "genre" if music_ask.kind == "genre" else "artist",
+                        "media_type": None,
+                        "fallback_query": music_ask.fallback,
+                        # A name ("Play Moon Garden") may be a song, an audiobook, a podcast or a video:
+                        # every source that is set up is searched (execution media_finder.py).
+                        "search_everywhere": music_ask.kind != "genre",
+                    }
+                    svc_base = EXECUTION_SVC
+                else:
+                    clean_q = media_query or query
+                    # strip leading "the book " / "the " for audiobook titles
+                    if media_type == "audiobook" and clean_q.lower().startswith("the book "):
+                        clean_q = clean_q[9:].strip()
+                    if clean_q.lower().startswith("the "):
+                        clean_q = clean_q[4:].strip()
+                    clean_q = re.sub(r'\bSaint\b', 'St.', clean_q, flags=re.IGNORECASE)
+                    exec_payload = {
+                        "user_context": creds.model_dump(),
+                        "entity_id": resolved_entity,
+                        "device_name": device_name,
+                        "query": clean_q,
+                        "media_content_type": media_type or "artist",
+                        "media_type": media_type,
+                        "search_everywhere": True,
+                    }
+                    svc_base = EXECUTION_SVC
             elif intent in ["pause_media", "media_transport"]:
                 transport_cmd = extract_media_transport_command(query) or "pause"
                 if transport_cmd == "resume":
                     transport_cmd = "play"
+                area = (voice_context or {}).get("area") if isinstance(voice_context, dict) else None
+                _, named_device = extract_media_request(query)
+                if volume_ask is not None:
+                    named_device = fast_volume.place(query)
+                if not named_device and area:
+                    transport_device_name = area
+                else:
+                    transport_device_name = named_device
                 exec_payload = {
                     "user_context": creds.model_dump(),
                     "entity_id": resolved_entity,
+                    "device_name": transport_device_name,
                     "command": transport_cmd,
+                    **extract_media_transport_payload(query),
                 }
+                if volume_ask is not None:
+                    exec_payload.update(fast_volume.transport_payload(
+                        volume_ask, fast_volume.current_level(resolved_entity, media_entities)))
+                elif transport_cmd == "volume_set":
+                    exec_payload["volume_level"] = extract_volume_level(query)
                 svc_base = EXECUTION_SVC
             else:
                 svc_base = EXECUTION_SVC
 
+            if direct_answer is not None:
+                await update_history(user_id, "user", query)
+                await update_history(user_id, "assistant", direct_answer)
+                if is_openai:
+                    return _make_openai_response(direct_answer, selected_model, intent)
+                return _make_ollama_response(direct_answer, selected_model, intent)
+
             fast_timeout=aiohttp.ClientTimeout(total=120.0) if intent == "play_media" else aiohttp.ClientTimeout(total=30.0)
             async with shared_http_client() as client:
                 exec_resp = await client.post(f"{svc_base}{endpoint}", json=exec_payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=fast_timeout)
-                ans = (await exec_resp.json()).get("message", "Action completed.")
+                exec_data = await read_execution_reply(exec_resp, endpoint)
+                ans = str(exec_data.get("message") or "Action completed.")
+            exec_detail = exec_data.get("detail")
+            exec_choice = exec_detail.get("choice") if isinstance(exec_detail, dict) else None
+            if intent == "play_media" and isinstance(exec_choice, dict):
+                # A question ("Harbor: the song, or the audiobook?"): its answer comes as the next request.
+                fast_media.remember_choice(user_id, exec_choice)
 
             if resolved_entity and intent in ["play_media", "pause_media", "media_transport", "turn_on", "turn_off"]:
                 entity_map = {e.get("entity_id"): e for e in media_entities or []}
@@ -4661,6 +5605,9 @@ async def chat_handler(request: Request, background_tasks=None):
         # The system stays one of a few fixed texts, so the model server can keep it
         # warm; what belongs to this one request goes with the question (turn_note).
         "system": body.get("system") or default_sys,
+        # The household persona rides on the assistant instruction only: not on a
+        # caller's own system prompt, the code helper or the Raven protocols.
+        "persona": not body.get("system") and _is_assistant_instruction(default_sys),
         "turn_note": (
             ("" if body.get("system") else storage_directive.strip())
             + (_voice_context_note(voice_context) if voice_context else "")
@@ -4681,6 +5628,10 @@ async def chat_handler(request: Request, background_tasks=None):
         # streamed (speech_stream.py), and the end of the stream says what is left to say.
         "speech_stream": speech_stream,
     }
+    # How this request goes is counted when its job ends (voice_outcomes).
+    carried = voice_outcomes.defer()
+    if carried:
+        job_payload["_outcome"] = carried
 
     assert job_queue is not None, "Job queue not initialized"
     job_id = await job_queue.enqueue_job(user_id, job_payload)
@@ -4696,7 +5647,8 @@ async def chat_handler(request: Request, background_tasks=None):
 
     if is_standard_client:
         if should_stream and speech_stream:
-            return StreamingResponse(_speech_stream_gen(job_id, selected_model, _REPLY_VOICE.get()),
+            return StreamingResponse(_speech_stream_gen(job_id, selected_model, _REPLY_VOICE.get(),
+                                                        _SPOKEN_NAMES.get(), _voice_new_fields()),
                                      media_type="application/x-ndjson")
         if should_stream:
             async def standard_stream_gen():
@@ -8470,6 +9422,9 @@ async def screen_time_status(request: Request, username: str, device_key: str | 
         # device can check a parent's offline code with no connection. Absent
         # for anyone else, and the device then keeps the set it has.
         **({"offline_codes": body["offline_codes"]} if isinstance(body.get("offline_codes"), list) else {}),
+        # A minor's Nearby & offline parts (Settings > Nearby & offline), set by
+        # their parents; the phone's guard applies them natively.
+        **({"nearby": body["nearby"]} if isinstance(body.get("nearby"), dict) else {}),
         "week": weekly_screen_time(usage, now.date()),
         **state,
     }
@@ -8483,7 +9438,17 @@ _TAMPER_EVENTS = {
     "guard_disabled": "turned off Jarvis's screen guard",
     "guard_missing": "is running without Jarvis's screen guard",
     "uninstall_attempt": "tried to remove Jarvis",
+    "jarvis_settings_page": "opened Jarvis's app settings",
+    "device_admin": "tried to turn off Jarvis's device admin",
+    "guard_accessibility": "tried to turn off Jarvis's screen guard",
+    "vpn_disconnect": "tried to disconnect Jarvis's web filter",
+    "factory_reset_or_users": "tried to factory reset the device or add another user",
+    "jarvis_install": "tried to install or update Jarvis",
     "offline_unlock": "was unlocked with a parent's offline code",
+    # Reported by the phone once it is back online, with when it started and ended.
+    "bluetooth_off": "had Bluetooth off",
+    "airplane_mode": "was in airplane mode",
+    "offline_parent_command": "applied a parent's command sent over Bluetooth",
     "filter_disabled": "turned off Jarvis's web filter",
     # Ways around the web filter the guard found (FilterBypass on the phone).
     "bypass_app": "has an app that gets around the web filter (closed while the filter is on)",
@@ -8505,6 +9470,8 @@ _TAMPER_EVENTS = {
 _TAMPER_WITH_DETAIL = {
     "offline_unlock": "was unlocked with {detail}'s offline code",
     "offline_code_wrong": "had {detail} typed in at its offline unlock",
+    "bluetooth_off": "had Bluetooth off {detail}",
+    "airplane_mode": "was in airplane mode {detail}",
 }
 
 #: Longest detail kept with a tamper report (an app's name, a DNS host, a count).
@@ -8949,6 +9916,26 @@ async def screen_time_set_rules(request: Request, username: str):
     status, body = await _identity_as_caller(request, "PUT", f"/api/screen-time/{username}/rules", json=await request.json())
     if status == 200:
         await _screen_time_refresh(str((body or {}).get("username") or username).strip().lower())
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.get("/api/users/{username}/nearby-settings")
+async def nearby_settings_get(request: Request, username: str):
+    """Settings > Nearby & offline: the caller's own parts (``me``), or a
+    minor's for that minor's parents (identity decides)."""
+    status, body = await _identity_as_caller(request, "GET", f"/api/users/{username}/nearby-settings")
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.put("/api/users/{username}/nearby-settings")
+async def nearby_settings_put(request: Request, username: str):
+    """A grown member changes their own parts; a minor's parents change the
+    minor's (the child's phone then re-reads its status at once)."""
+    status, body = await _identity_as_caller(
+        request, "PUT", f"/api/users/{username}/nearby-settings", json=await request.json()
+    )
+    if status == 200 and isinstance(body, dict) and body.get("managed_by_parent"):
+        await _screen_time_refresh(str(body.get("username") or username).strip().lower())
     return JSONResponse(status_code=status, content=body)
 
 
@@ -9727,7 +10714,10 @@ async def proxy_delete_talk_conversation(request: Request, token: str):
         # Members only, and a deleted private chat takes its pictures with it.
         await private_chat._member_chat(request, token)
         return await private_chat.delete_room(request, token)
-    return await _proxy_execution_with_identity(request, "/execute/talk", {"action": "delete_conversation", "token": token})
+    resp = await _proxy_execution_with_identity(request, "/execute/talk", {"action": "delete_conversation", "token": token})
+    # Left (or deleted): the room's offline key is replaced on the next ask.
+    await family_mesh.forget_members(token)
+    return resp
 
 
 @app.get("/api/communication/talk/participants")
@@ -9740,14 +10730,20 @@ async def proxy_add_talk_participant(request: Request):
     body = await request.json()
     private_chat.guard_talk(body.get("token"), "add_participant")
     payload = {"action": "add_participant", "token": body.get("token"), "target_user": body.get("user")}
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    resp = await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    # A new member: the room's offline key is replaced on the next ask (family_mesh.py).
+    await family_mesh.forget_members(body.get("token"))
+    return resp
 
 
 @app.delete("/api/communication/talk/participants")
 async def proxy_remove_talk_participant(request: Request, token: str, attendee_id: int):
     private_chat.guard_talk(token, "remove_participant")
     payload = {"action": "remove_participant", "token": token, "attendee_id": attendee_id}
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    resp = await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    # Someone left: the room's offline key is replaced on the next ask, so they get nothing new.
+    await family_mesh.forget_members(token)
+    return resp
 
 
 @app.get("/api/communication/talk/people")
@@ -11978,8 +12974,9 @@ async def library_book_tags(book_id: int, request: Request):
 @app.post("/api/library/books/inspect")
 async def library_inspect_book(request: Request):
     """Fill in a book before adding it: the file's own details, Google Books and
-    Open Library, and suggested tags. Nothing is saved."""
-    await _require_admin(request)
+    Open Library (the ones the admin turned on in Accounts & Integrations), and
+    suggested tags. Nothing is saved."""
+    who = await _require_admin(request)
     form = await request.form()
     upload = form.get("file")
     if upload is None or not hasattr(upload, "read"):
@@ -11987,6 +12984,7 @@ async def library_inspect_book(request: Request):
     out = aiohttp.FormData()
     out.add_field("library_path", await _library_path())
     out.add_field("online", "false" if str(form.get("online") or "").lower() == "false" else "true")
+    out.add_field("user", who)
     out.add_field("file", await upload.read(), filename=getattr(upload, "filename", None) or "book", content_type="application/octet-stream")
     return await _storage_library("POST", "/calibre/books/inspect", data=out, timeout=120.0)
 
@@ -12003,11 +13001,45 @@ async def library_add_book(request: Request):
     data = await upload.read()
     out = aiohttp.FormData()
     out.add_field("library_path", await _library_path())
-    for key in ("title", "authors", "tags", "series", "comments", "publisher", "published", "isbn", "language", "cover_url"):
+    # "online" false (auto-fill off) stops storage looking the book up; absent means on.
+    for key in ("title", "authors", "tags", "series", "comments", "publisher", "published", "isbn", "language", "cover_url",
+                "online"):
         out.add_field(key, str(form.get(key) or "")[:8000])
+    # Whose catalogue integrations (Accounts & Integrations) fill the book in.
+    out.add_field("user", who)
     out.add_field("file", data, filename=getattr(upload, "filename", None) or "book", content_type="application/octet-stream")
     log.info("[library] %s adds %s (%d bytes)", who, getattr(upload, "filename", "book"), len(data))
     return await _storage_library("POST", "/calibre/books/add", data=out, timeout=600.0)
+
+
+@app.post("/api/library/enrich")
+async def library_enrich_books(request: Request):
+    """Fill in books that lack a title, an author or tags (admins).
+
+    ``dry_run`` defaults to true: it counts those books and shows what ``limit`` of
+    them would get, writing nothing. Only empty fields are ever written.
+    """
+    who = await _require_admin(request)
+    body = await _request_json_object(request)
+    dry_run = body.get("dry_run", True) is not False
+    try:
+        limit = max(0, min(int(body.get("limit", 10)), 200))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="limit must be a number from 0 to 200.") from None
+    book_ids = [int(b) for b in (body.get("book_ids") or []) if str(b).isdigit()][:500]
+    log.info("[library] %s fills in books (dry_run=%s, limit=%s)", who, dry_run, limit)
+    return await _storage_library("POST", "/calibre/books/enrich", json_body={
+        "library_path": await _library_path(), "dry_run": dry_run, "limit": limit,
+        "book_ids": book_ids, "online": body.get("online", True) is not False, "user": who,
+    }, timeout=600.0)
+
+
+@app.get("/api/library/catalogues")
+async def library_catalogues(request: Request):
+    """The book catalogues (Google Books, Open Library) as they apply to the caller:
+    on or off, ready or why not, and each one's last answer. Never a key."""
+    who = await _signed_in(request)
+    return await _storage_library("POST", "/calibre/catalogues", json_body={"user": who}, timeout=30.0)
 
 
 #: Topics a feature may ask for (rag topics.py): a Calibre tag such as
@@ -12039,7 +13071,8 @@ async def get_resources(request: Request, topic: str, q: str = ""):
         listing = {}
     passages: list[dict] = []
     if q.strip():
-        # Calibre books are indexed under the Nextcloud account that crawled them.
+        # Calibre books are indexed under the shared "default" owner, which every
+        # user's search includes; older crawls filed them under the crawling account.
         owners = list(dict.fromkeys([str(creds.get("nextcloud_user") or user).lower(), user]))
         for owner in owners:
             try:
@@ -12080,9 +13113,10 @@ async def get_storage_stats(request: Request):
 
         breakdown = base.get("breakdown", {})
         for k, v in extra.get("breakdown", {}).items():
-            if k.startswith("system_"):
-                # System-wide collections (stored under "default"): both
-                # answers already carry the same rows; adding them doubled them.
+            if k.startswith("system_") or k == "calibre_files":
+                # System-wide collections and the shared Calibre library (stored
+                # under "default"): both answers already carry the same rows;
+                # adding them doubled them.
                 continue
             base["total_chunks"] = base.get("total_chunks", 0) + v.get("chunks", 0)
             base["total_documents"] = base.get("total_documents", 0) + v.get("documents", 0)
@@ -12633,7 +13667,9 @@ async def restart_service(service_name: str, request: Request):
     async with borrow_http_client() as client:
         resp = await client.post(
             f"{CONTROL_PLANE_URL}/api/restart/{service_name}",
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            # A recreate waits for the new container to be healthy before retiring the old one.
+            timeout=aiohttp.ClientTimeout(total=330.0),
         )
         if resp.status == 404:
             raise HTTPException(status_code=404, detail=f"Service {service_name} not found")
@@ -12691,7 +13727,8 @@ async def pull_and_restart_service(service_name: str, request: Request):
         resp = await client.post(
             f"{CONTROL_PLANE_URL}/api/containers/{service_name}/pull-and-restart",
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=aiohttp.ClientTimeout(total=120.0),
+            # Pull, then a recreate that waits for the new container to be healthy.
+            timeout=aiohttp.ClientTimeout(total=450.0),
         )
         return await _proxy_json_response(resp)
 
@@ -14776,6 +15813,132 @@ async def assign_geo_vehicle(request: Request):
         err_msg = await resp.text()
         log.error(f"[geo/vehicles] Assign vehicle failed: {resp.status} - {err_msg}")
     raise HTTPException(status_code=resp.status if resp.status < 500 else 502, detail=f"Failed to assign vehicle: {err_msg}")
+
+
+@app.post("/api/geo/vehicles/{vehicle_id}/bluetooth")
+async def link_geo_vehicle_bluetooth(request: Request, vehicle_id: str):
+    """Link a Bluetooth device (by hardware address) to a household vehicle.
+
+    Any signed-in family member may: the person in the car with the phone
+    paired to it is the one who can. The phone says which device; geo checks
+    the address is a stable one and not already another vehicle's."""
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="A JSON object is required")
+    payload = {
+        "address": str(body.get("address") or ""),
+        "kind": str(body.get("kind") or "classic"),
+        "name": str(body.get("name") or ""),
+        "user": ident["user"],
+    }
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{GEO_SVC}/vehicles/{quote(vehicle_id, safe='')}/bluetooth",
+            json=payload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        await _raise_vehicle_link_failure(resp)
+
+
+@app.delete("/api/geo/vehicles/{vehicle_id}/bluetooth/{address}")
+async def unlink_geo_vehicle_bluetooth(request: Request, vehicle_id: str, address: str):
+    """Remove a Bluetooth link: an admin, or the person who made it."""
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    async with shared_http_client() as client:
+        if not ident.get("is_admin"):
+            resp = await client.get(
+                f"{GEO_SVC}/vehicles",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            )
+            if resp.status != 200:
+                raise HTTPException(status_code=502, detail="Geo service unavailable")
+            wanted = address.replace("-", ":").upper()
+            vehicles = (await resp.json()).get("vehicles") or []
+            vehicle = next((v for v in vehicles if isinstance(v, dict) and v.get("id") == vehicle_id), None)
+            link = next((lk for lk in (vehicle or {}).get("bluetooth") or []
+                         if isinstance(lk, dict) and str(lk.get("address") or "").upper() == wanted), None)
+            me = str(ident["user"]).split(".")[-1].lower()
+            if link is not None and str(link.get("linked_by") or "") != me:
+                raise HTTPException(status_code=403, detail="Only a parent or the person who linked it can remove it")
+        resp = await client.delete(
+            f"{GEO_SVC}/vehicles/{quote(vehicle_id, safe='')}/bluetooth/{quote(address, safe='')}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        await _raise_vehicle_link_failure(resp)
+
+
+async def _geo_proximity(method: str, path: str, **kw):
+    async with shared_http_client() as client:
+        resp = await getattr(client, method)(
+            f"{GEO_SVC}{path}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+            **kw,
+        )
+        if resp.status == 200:
+            return await resp.json()
+        if resp.status in (400, 422):
+            try:
+                detail = (await resp.json()).get("detail")
+            except Exception:
+                detail = None
+            raise HTTPException(status_code=resp.status, detail=detail or "Refused")
+    raise HTTPException(status_code=502, detail="Geo service unavailable")
+
+
+@app.get("/api/geo/proximity/config")
+async def get_geo_proximity_config(request: Request):
+    """The household key and members a signed-in family phone needs to find the
+    family's other phones over Bluetooth LE (see services/geo/proximity.py)."""
+    user = await _require_authenticated(request)
+    return await _geo_proximity("get", "/proximity/config", params={"user": user})
+
+
+@app.post("/api/geo/proximity")
+async def post_geo_proximity(request: Request):
+    """Sightings of other family phones, filed under the signed-in person."""
+    user = await _require_authenticated(request)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="A JSON object is required")
+    return await _geo_proximity("post", f"/proximity/{quote(user.split('.')[-1].lower(), safe='')}",
+                                json={"events": body.get("events")})
+
+
+@app.get("/api/geo/proximity/near")
+async def get_geo_proximity_near(request: Request):
+    user = await _require_authenticated(request)
+    return await _geo_proximity("get", "/proximity/near", params={"viewer": user})
+
+
+@app.post("/api/geo/proximity/key/rotate")
+async def rotate_geo_proximity_key(request: Request):
+    """A parent makes a new household key (a lost phone): old identifiers stop resolving."""
+    await _require_admin(request)
+    return await _geo_proximity("post", "/proximity/key/rotate")
+
+
+async def _raise_vehicle_link_failure(resp) -> None:
+    """geo's own answer for a link it understood and refused (404/409/422); 502 otherwise."""
+    if resp.status in (404, 409, 422):
+        try:
+            detail = (await resp.json()).get("detail")
+        except Exception:
+            detail = None
+        raise HTTPException(status_code=resp.status, detail=detail or "The link was refused")
+    raise HTTPException(status_code=502, detail="Geo service unavailable")
 
 
 @app.get("/api/geo/fuel-prices")
@@ -18788,6 +19951,128 @@ async def get_windows_installer_file(name: str, request: Request):
 _STT_TIMEOUT = aiohttp.ClientTimeout(total=3600.0, connect=30.0)
 
 
+#: One spoken turn from a phone: 15 seconds of 16 kHz mono is 480 KB, so this is
+#: already generous, and it keeps a stray upload from filling the queue.
+_VOICE_MAX_AUDIO_BYTES = 8 * 1024 * 1024
+
+
+def _transcript_from(payload: object) -> str:
+    """Whisper's text out of whichever envelope the execution service used.
+
+    ``/execute/stt/transcribe`` answers ``{"status": "SUCCESS", "transcript":
+    "..."}``, while other callers wrap the line as ``text`` (sometimes under
+    ``detail``/``data``). Reading only ``text`` meant every real recording came
+    back empty: the sheet said "Listening", heard nothing, and answered nothing.
+    """
+    for container in (payload, (payload or {}).get("detail") if isinstance(payload, dict) else None,
+                      (payload or {}).get("data") if isinstance(payload, dict) else None):
+        if isinstance(container, dict):
+            for key in ("text", "transcript"):
+                value = container.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    return ""
+
+
+@app.post("/api/voice/listen")
+async def post_voice_listen(request: Request):
+    """A phone's recording as text (docs/VOICE_PHONE.md).
+
+    The capture runs in a native service, not in a browser, so the audio arrives
+    as base64 in one JSON body instead of multipart: one round trip, one answer.
+    Whisper reads the container it is handed, so the recording's own mime type
+    travels with it rather than being re-encoded here.
+    """
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in first")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    audio_b64 = str(body.get("audio_b64") or "").strip()
+    if not audio_b64:
+        raise HTTPException(status_code=400, detail="A recording is required.")
+    import base64 as _b64
+
+    try:
+        audio = _b64.b64decode(audio_b64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="That is not a recording.") from None
+    if not audio:
+        raise HTTPException(status_code=400, detail="That recording is empty.")
+    if len(audio) > _VOICE_MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="That recording is too long.")
+
+    upload = aiohttp.FormData()
+    upload.add_field("model", str(body.get("model") or "base")[:32])
+    upload.add_field("language", str(body.get("language") or "en")[:16])
+    upload.add_field("file", audio, filename="turn.wav",
+                     content_type=str(body.get("mime") or "audio/wav")[:64])
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/stt/transcribe",
+            data=upload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=_STT_TIMEOUT,
+        )
+        if resp.status != 200:
+            log.warning(f"[voice] transcribe: execution answered HTTP {resp.status}")
+            raise HTTPException(status_code=502, detail="Hearing you is unavailable right now.")
+        payload = await resp.json(content_type=None)
+    text = _transcript_from(payload)
+    log.info(f"[voice] {len(audio)} bytes transcribed to {len(text)} characters for {user}")
+    return {"text": text}
+
+
+@app.post("/api/voice/speak")
+async def post_voice_speak(request: Request):
+    """Speak one line to a signed-in person's phone (docs/VOICE_PHONE.md).
+
+    The Echo gets its audio from the hub, which a phone cannot reach, and
+    ``/api/tts/sample`` only ever says one fixed sentence. This turns an
+    arbitrary line into audio in the person's own voice, which is what lets the
+    phone acknowledge a slow answer, say why something failed, or offer a
+    correction - spoken, rather than the silence Siri is criticised for.
+    """
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in first")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    text = str(body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="A line to speak is required.")
+    # A short line is the whole point; anything longer is a reply that should
+    # have come through the chat stream instead.
+    text = text[:1200]
+    voice = str(body.get("voice") or "").strip()[:120] or await _voice_for_reply(user, None)
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/tts",
+            json={"user_context": {"user": user}, "text": text, "voice": voice},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=60.0),
+        )
+        if resp.status != 200:
+            log.warning(f"[voice] speak: execution answered HTTP {resp.status}")
+            raise HTTPException(status_code=502, detail="Speaking is unavailable right now.")
+        payload = await resp.json(content_type=None)
+    detail = (payload or {}).get("detail") if isinstance(payload, dict) else None
+    audio = (detail or {}).get("audio_base64") if isinstance(detail, dict) else None
+    if not audio:
+        raise HTTPException(status_code=502, detail="Speaking is unavailable right now.")
+    return {"audio_b64": audio, "mime": "audio/wav", "voice": voice, "text": text}
+
+
 @app.post("/api/stt/transcribe")
 async def transcribe_audio(request: Request):
     """Transcribe an uploaded recording, or the audio track of an uploaded video.
@@ -19082,6 +20367,442 @@ async def search_abs(q: str, request: Request, limit: int = Query(20, ge=1, le=1
     return {"status": "SUCCESS", "books": [], "podcasts": [], "authors": [], "total": 0, "notice": "ABS unavailable"}
 
 
+# ABS podcasts: what each show is doing, and the one setting worth changing
+
+@app.get("/api/media/audiobookshelf/podcasts")
+async def get_abs_podcasts(request: Request):
+    """Every podcast show with its newest episode and why it may be quiet.
+
+    Nothing here knows a show by name: the podcast libraries and the shows come
+    from the caller's own Audiobookshelf. "Stale" is deliberately three separate
+    facts (no feed address, a feed nobody has polled, a show that is simply
+    between episodes) because each has a different remedy.
+    """
+    creds = await _resolve_identity_from_request(request)  # [abs/podcasts]
+    try:
+        detail = await _media_exec_audiobookshelf(creds, {"action": "podcasts"}, timeout=ABS_PODCAST_TIMEOUT)
+        return {
+            "status": "SUCCESS",
+            "libraries": detail.get("libraries", []),
+            "shows": detail.get("shows", []),
+            "behind_days": detail.get("behind_days"),
+            "stale_check_days": detail.get("stale_check_days"),
+        }
+    except _MediaUpstreamError as e:
+        log.warning(f"[abs/podcasts] {e}")
+    except (TimeoutError, aiohttp.ClientConnectionError) as e:
+        log.warning(f"[abs/podcasts] ABS timeout: {e}")
+    except Exception as e:
+        log.warning(f"[abs/podcasts] ABS error: {e}")
+    return {"status": "SUCCESS", "libraries": [], "shows": [], "notice": "ABS unavailable"}
+
+
+@app.post("/api/media/audiobookshelf/podcasts/{item_id}/auto-download")
+async def set_abs_podcast_auto_download(item_id: str, request: Request):
+    """Turn automatic downloading of a show's new episodes on or off."""
+    creds = await _resolve_identity_from_request(request)  # [abs/podcasts/auto-download]
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    enabled = bool(body.get("enabled")) if isinstance(body, dict) else False
+    try:
+        # The caller's own Audiobookshelf, credentials and all: execution reads
+        # user_context directly here (unlike the reads, which pass a user id and
+        # let execution resolve), so naming only the user left it with no server
+        # to talk to and every switch came back "Audiobookshelf URL not configured".
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/audiobookshelf",
+                json={
+                    "action": "podcast_auto_download",
+                    "item_id": item_id,
+                    "auto_download": enabled,
+                    "user_context": creds,
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT),
+            )
+            data = await resp.json()
+    except (TimeoutError, aiohttp.ClientError) as e:
+        return JSONResponse(
+            status_code=502,
+            content={"status": "FAILURE", "message": f"Audiobookshelf is unreachable: {type(e).__name__}"},
+        )
+    if data.get("status") == "FAILURE":
+        return JSONResponse(status_code=502, content={"status": "FAILURE", "message": data.get("message") or "ABS refused"})
+    return {"status": "SUCCESS", **(data.get("detail") or {})}
+
+
+# ABS accounts: who the server knows, and giving each member their own token
+
+@app.get("/api/media/audiobookshelf/users")
+async def list_abs_users(request: Request):
+    """The ABS accounts this household can hand out credentials for (admin).
+
+    The token each account carries is deliberately not returned: this list says
+    who exists and whether a token is already there, and the route below is what
+    moves one into a member's account.
+    """
+    await _require_admin(request)
+    creds = await _resolve_identity_from_request(request)
+    try:
+        detail = await _media_exec_audiobookshelf(creds, {"action": "users"}, timeout=ABS_PODCAST_TIMEOUT)
+    except _MediaUpstreamError as e:
+        return {"status": "SUCCESS", "users": [], "notice": str(e)}
+    users = [
+        {
+            "id": entry.get("id"),
+            "username": entry.get("username"),
+            "type": entry.get("type"),
+            "is_active": entry.get("is_active", True),
+            "has_token": entry.get("has_token", False),
+        }
+        for entry in detail.get("users") or []
+    ]
+    return {"status": "SUCCESS", "users": users}
+
+
+async def _abs_create_user(creds: Any, username: str, password: str) -> dict:
+    """Create one Audiobookshelf account through execution and return it.
+
+    This is a POST with a request body, not one of the read actions: the account
+    name and its password travel in ``AudiobookshelfRequest``, and the GET helper
+    only carries a user id and query parameters.
+    """
+    try:
+        resp = await _execution_post_as(
+            creds,
+            "/execute/audiobookshelf",
+            {"action": "user_create", "username": username, "password": password},
+        )
+    except (TimeoutError, aiohttp.ClientError) as e:
+        raise _MediaUpstreamError(f"Audiobookshelf is unreachable ({type(e).__name__})") from e
+    try:
+        body = json.loads(bytes(resp.body) or b"{}")
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+    if body.get("status") != "SUCCESS":
+        raise _MediaUpstreamError(body.get("message") or "Audiobookshelf refused the account")
+    return (body.get("detail") or {}).get("user") or {}
+
+
+@app.post("/api/media/audiobookshelf/users")
+async def create_abs_user(request: Request):
+    """Make one Audiobookshelf account with the household's administrator token."""
+    await _require_admin(request)
+    creds = await _resolve_identity_from_request(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    username = str(body.get("username") or "").strip()
+    password = str(body.get("password") or "")
+    if not username or not password:
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "A username and a password are required."})
+    try:
+        user = await _abs_create_user(creds, username, password)
+    except _MediaUpstreamError as e:
+        return JSONResponse(status_code=502, content={"status": "FAILURE", "message": str(e)})
+    return {"status": "SUCCESS", "user": {"id": user.get("id"), "username": user.get("username"), "type": user.get("type"), "has_token": user.get("has_token", False)}}
+
+
+@app.post("/api/media/audiobookshelf/users/provision")
+async def provision_abs_users(request: Request):
+    """Create any missing Audiobookshelf account, then file everyone their token.
+
+    Audiobookshelf lets an administrator create an account and answers with that
+    account's token, so one administrator credential - kept on the default account -
+    is enough to set the whole household up. Nothing is hardcoded: the members come
+    from Identity and the accounts from Audiobookshelf, both read at call time.
+    """
+    admin = await _require_admin(request)
+    creds = await _resolve_identity_from_request(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    password = str(body.get("password") or "")
+    if not password:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "FAILURE", "message": "A temporary password is required to create an account."},
+        )
+    wanted = list(dict.fromkeys(
+        str(name).strip().lower() for name in (body.get("usernames") or []) if str(name).strip()
+    ))
+
+    if not wanted:
+        try:
+            async with shared_http_client() as client:
+                resp = await client.get(
+                    f"{IDENTITY_SVC}/api/users",
+                    headers={
+                        "Authorization": request.headers.get("authorization", ""),
+                        "X-Internal-Secret": INTERNAL_SECRET,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=8.0),
+                )
+                people = await resp.json() if resp.status == 200 else []
+        except (TimeoutError, aiohttp.ClientError):
+            people = []
+        # Never create or overwrite the system default account: it holds the
+        # household's administrator ABS token, so turning it into a regular user
+        # account would replace that admin credential with a non-admin token.
+        wanted = sorted({
+            uname
+            for person in (people if isinstance(people, list) else [])
+            if not person.get("is_system_default")
+            and (uname := str(person.get("username") or "").strip().lower())
+            and uname != "default"
+        })
+
+    try:
+        detail = await _media_exec_audiobookshelf(creds, {"action": "users"}, timeout=ABS_PODCAST_TIMEOUT)
+    except _MediaUpstreamError as e:
+        return JSONResponse(status_code=502, content={"status": "FAILURE", "message": str(e)})
+    accounts = {(entry.get("username") or "").strip().lower(): entry for entry in detail.get("users") or []}
+
+    created: list[str] = []
+    skipped: list[dict] = []
+    reported: set[str] = set()
+    for username in wanted:
+        if username in accounts:
+            continue
+        try:
+            user = await _abs_create_user(creds, username, password)
+        except _MediaUpstreamError as e:
+            skipped.append({"username": username, "reason": f"could not create: {e}"})
+            reported.add(username)
+            continue
+        if not user:
+            skipped.append({"username": username, "reason": "Audiobookshelf did not return the new account"})
+            reported.add(username)
+            continue
+        # Filed below. An account that came back without a token is reported there
+        # once, as a token that is not there yet, rather than twice here.
+        accounts[username] = user
+        created.append(username)
+
+    filed: list[dict] = []
+    async with shared_http_client() as client:
+        for username in wanted:
+            if username in reported:
+                continue
+            account = accounts.get(username)
+            if not account:
+                skipped.append({"username": username, "reason": "no Audiobookshelf account with that name"})
+                continue
+            token = str(account.get("token") or "").strip()
+            if not token:
+                skipped.append({"username": username, "reason": "Audiobookshelf has no token for this account yet"})
+                continue
+            try:
+                resp = await client.post(
+                    f"{IDENTITY_SVC}/api/users/{quote(username, safe='')}/audiobookshelf-token",
+                    json={"token": token, "audiobookshelf_user": account.get("username")},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                )
+                if resp.status != 200:
+                    skipped.append({"username": username, "reason": f"Identity answered {resp.status}"})
+                    continue
+            except (TimeoutError, aiohttp.ClientError) as e:
+                skipped.append({"username": username, "reason": f"Identity unreachable: {type(e).__name__}"})
+                continue
+            filed.append({"username": username, "audiobookshelf_user": account.get("username")})
+
+    # The last step is the one a person would otherwise do by hand in Music Assistant:
+    # an MA account of their own, viewing their own Audiobookshelf. Music Assistant is
+    # homehub's integration, so homehub does it; a failure there is reported, never fatal.
+    music_assistant: dict[str, Any] = {"created": [], "updated": [], "skipped": []}
+    people = sorted({entry["username"] for entry in filed} | set(created))
+    if people:
+        try:
+            from services.gateway import automation_routes
+
+            status, body = await automation_routes._hub(
+                "POST",
+                "/hub/music-assistant/users/reconcile",
+                json={"members": people, "password": password},
+                timeout=aiohttp.ClientTimeout(total=60, connect=5),
+            )
+            if status == 200 and isinstance(body, dict):
+                music_assistant = {
+                    "created": body.get("created") or [],
+                    "updated": body.get("updated") or [],
+                    "skipped": body.get("skipped") or [],
+                }
+            else:
+                music_assistant["skipped"] = [{"username": name, "reason": f"HomeHub answered {status}"} for name in people]
+        except Exception as exc:  # reported, never fatal: the tokens are already filed
+            music_assistant["skipped"] = [{"username": name, "reason": f"HomeHub unreachable: {type(exc).__name__}"} for name in people]
+
+    log.info(
+        f"[abs/users] {admin} created {len(created)} account(s), filed {len(filed)} token(s), "
+        f"skipped {len(skipped)}, Music Assistant {len(music_assistant['created'])} new"
+    )
+    return {
+        "status": "SUCCESS",
+        "created": created,
+        "filed": filed,
+        "skipped": skipped,
+        "music_assistant": music_assistant,
+    }
+
+
+# Music Assistant accounts: the login people open Music Assistant itself with
+
+def _hub_reason(body: Any) -> str:
+    """HomeHub's own words for a refusal (its error handler says ``message``; FastAPI says ``detail``)."""
+    if not isinstance(body, dict):
+        return ""
+    return str(body.get("detail") or body.get("message") or "")
+
+
+async def _ma_via_homehub(method: str, path: str, payload: Any = None) -> tuple[int, Any]:
+    """Ask HomeHub, which holds the household's Music Assistant login (no other service does)."""
+    from services.gateway import automation_routes
+
+    return await automation_routes._hub(
+        method, path, json=payload, timeout=aiohttp.ClientTimeout(total=20, connect=5)
+    )
+
+
+@app.get("/api/media/music-assistant/users")
+async def list_ma_users(request: Request):
+    """The household's Music Assistant accounts and where to open the server (admin).
+
+    An account HomeHub makes for a person is given a random password nobody knows,
+    because the Jarvis app signs in with a token. This list is how an administrator
+    sees who has an account before setting one below.
+    """
+    await _require_admin(request)
+    try:
+        status, body = await _ma_via_homehub("GET", "/hub/music_assistant/users")
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"status": "FAILURE",
+                                                      "message": f"HomeHub unreachable: {type(e).__name__}"})
+    if status != 200 or not isinstance(body, dict):
+        detail = _hub_reason(body)
+        return JSONResponse(status_code=502, content={"status": "FAILURE",
+                                                      "message": detail or f"HomeHub answered {status}"})
+    return {"status": "SUCCESS", **body}
+
+
+@app.post("/api/media/music-assistant/users/password")
+async def set_ma_user_password(request: Request):
+    """Set the password a member signs in to Music Assistant's own web interface with (admin)."""
+    await _require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    username = str((body or {}).get("username") or "").strip()
+    password = str((body or {}).get("password") or "")
+    if not username or not password:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "FAILURE", "message": "A username and a password are required."},
+        )
+    try:
+        status, answer = await _ma_via_homehub(
+            "POST", "/hub/music_assistant/users/password", {"username": username, "password": password}
+        )
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"status": "FAILURE",
+                                                      "message": f"HomeHub unreachable: {type(e).__name__}"})
+    if status != 200 or not isinstance(answer, dict):
+        return JSONResponse(
+            status_code=status if status in (400, 404) else 502,
+            content={"status": "FAILURE", "message": _hub_reason(answer) or f"HomeHub answered {status}"},
+        )
+    return {"status": "SUCCESS", **answer}
+
+
+@app.post("/api/media/audiobookshelf/users/tokens")
+async def issue_abs_user_tokens(request: Request):
+    """Give members their own Audiobookshelf token, from the household's admin one.
+
+    Audiobookshelf issues one token per account and hands it to an administrator,
+    so the household keeps one administrator credential on the default account
+    and this copies each account's own token onto the member of the same name.
+    Nothing is invented and no names are written down here: the ABS accounts and
+    the Jarvis accounts are both read at the time of the call, and a member with
+    no account of that name is reported, not guessed at.
+    """
+    admin = await _require_admin(request)
+    creds = await _resolve_identity_from_request(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    wanted = list(dict.fromkeys(
+        str(name).strip().lower() for name in (body.get("usernames") or []) if str(name).strip()
+    ))
+
+    try:
+        detail = await _media_exec_audiobookshelf(creds, {"action": "users"}, timeout=ABS_PODCAST_TIMEOUT)
+    except _MediaUpstreamError as e:
+        return JSONResponse(status_code=502, content={"status": "FAILURE", "message": str(e)})
+    accounts = {(entry.get("username") or "").strip().lower(): entry for entry in detail.get("users") or []}
+
+    if not wanted:
+        # Everyone this household knows, by name. Identity is the list of members;
+        # ABS is the list of accounts. The system default account holds the
+        # household's administrator credential and must never be overwritten here.
+        try:
+            async with shared_http_client() as client:
+                resp = await client.get(
+                    f"{IDENTITY_SVC}/api/users",
+                    headers={
+                        "Authorization": request.headers.get("authorization", ""),
+                        "X-Internal-Secret": INTERNAL_SECRET,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=8.0),
+                )
+                people = await resp.json() if resp.status == 200 else []
+        except (TimeoutError, aiohttp.ClientError):
+            people = []
+        wanted = sorted({
+            uname
+            for person in (people if isinstance(people, list) else [])
+            if not person.get("is_system_default")
+            and (uname := str(person.get("username") or "").strip().lower())
+            and uname != "default"
+        })
+
+    issued: list[dict] = []
+    skipped: list[dict] = []
+    async with shared_http_client() as client:
+        for username in wanted:
+            account = accounts.get(username)
+            if not account:
+                skipped.append({"username": username, "reason": "no Audiobookshelf account with that name"})
+                continue
+            token = str(account.get("token") or "").strip()
+            if not token:
+                skipped.append({"username": username, "reason": "Audiobookshelf has no token for this account yet"})
+                continue
+            try:
+                resp = await client.post(
+                    f"{IDENTITY_SVC}/api/users/{quote(username, safe='')}/audiobookshelf-token",
+                    json={"token": token, "audiobookshelf_user": account.get("username")},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                )
+                if resp.status != 200:
+                    skipped.append({"username": username, "reason": f"Identity answered {resp.status}"})
+                    continue
+            except (TimeoutError, aiohttp.ClientError) as e:
+                skipped.append({"username": username, "reason": f"Identity unreachable: {type(e).__name__}"})
+                continue
+            issued.append({"username": username, "audiobookshelf_user": account.get("username")})
+
+    log.info(f"[abs/tokens] {admin} issued {len(issued)} token(s), skipped {len(skipped)}")
+    return {"status": "SUCCESS", "issued": issued, "skipped": skipped}
+
+
 # ABS connectivity status
 
 @app.get("/api/media/audiobookshelf/status")
@@ -19131,6 +20852,9 @@ async def get_abs_status(request: Request):
 _MEDIA_UPSTREAM_TIMEOUT = 4.0
 _MEDIA_CHILD_TIMEOUT = 8.0
 _MEDIA_EXEC_TIMEOUT = 10.0
+# The podcast report is one round trip per show on the caller's own server, so it
+# gets more room than a single listing does.
+ABS_PODCAST_TIMEOUT = 30.0
 
 _MEDIA_LIBRARY_TABS = frozenset(
     {"tracks", "albums", "artists", "playlists", "radio", "podcasts", "audiobooks"}
@@ -19408,7 +21132,9 @@ def _media_abs_book_item(book: dict) -> dict:
     return {
         "uri": f"abs://{book.get('id') or ''}",
         "name": book.get("title") or "",
-        "media_type": "audiobook",
+        # A podcast in the last-played list is a podcast: it opens to its episodes
+        # rather than to a book page (execution reports ABS's isPodcast here).
+        "media_type": "podcast" if book.get("has_podcast") else "audiobook",
         "artist": book.get("author") or "",
         "album": book.get("series") or "",
         "image": _media_abs_cover(book.get("id"), book.get("cover_path") or book.get("cover")),
@@ -19417,15 +21143,33 @@ def _media_abs_book_item(book: dict) -> dict:
     }
 
 
+def _media_is_ma_audiobook(entry: Any) -> bool:
+    """Whether an MA item is an audiobook mirrored from Audiobookshelf.
+
+    Audiobooks belong to the caller's own Audiobookshelf account (``abs://...``)
+    so per-user library scope, chapters, and resume positions apply. Music
+    Assistant's shared-account ``library://audiobook/...`` copies duplicate ABS
+    results and cannot open BookPage.
+    """
+    if not isinstance(entry, dict):
+        return False
+    inner = entry.get("media_item") if isinstance(entry.get("media_item"), dict) else entry
+    media_type = str(inner.get("media_type") or entry.get("media_type") or "").strip().lower()
+    if media_type == "audiobook":
+        return True
+    uri = str(inner.get("uri") or entry.get("uri") or "").strip().lower()
+    return "://audiobook/" in uri
+
+
 @app.get("/api/media/home")
 async def get_media_home(request: Request):
     """One call for Listen Now: MA shelves + ABS last played, 4s each, partial."""
     creds = await _resolve_identity_from_request(request)
     errors = MediaErrorInfo()
 
-    async def shelf(name: str, command: str, args: dict) -> tuple[str, list[dict]]:
+    async def shelf(name: str, command: str, args: dict, *, drop: Any = None) -> tuple[str, list[dict]]:
         try:
-            return name, await _media_ma_items(request, command, args)
+            return name, await _media_ma_items(request, command, args, drop=drop)
         except _MediaUpstreamError as e:
             if errors.ma is None:
                 errors.ma = str(e)
@@ -19440,8 +21184,8 @@ async def get_media_home(request: Request):
         return [_media_abs_book_item(b) for b in detail.get("books") or []]
 
     results = await asyncio.gather(
-        shelf("recent", "music/recently_played_items", {"limit": 20}),
-        shelf("continue", "music/in_progress_items", {"limit": 20}),
+        shelf("recent", "music/recently_played_items", {"limit": 20}, drop=_media_is_ma_audiobook),
+        shelf("continue", "music/in_progress_items", {"limit": 20}, drop=_media_is_ma_audiobook),
         shelf("playlists", "music/playlists/library_items", {"limit": 20}),
         # Live-verified 2026-10-05: the library_items family accepts favorite=true.
         shelf("favorites", "music/tracks/library_items", {"limit": 20, "favorite": True}),
@@ -19458,6 +21202,21 @@ async def get_media_home(request: Request):
         "errors": errors,
     }
     return MediaHomeResponse(**payload).model_dump(by_alias=True)
+
+
+def _media_title_key(name: Any) -> str:
+    """A title reduced to what makes two listings the same show.
+
+    Music Assistant mirrors the Audiobookshelf podcast library, so one show can
+    arrive twice: as its ABS item and as MA's library://podcast entry. Case,
+    punctuation and a trailing edition note must not make them look different.
+    """
+    text = str(name or "").casefold()
+    text = re.sub(r"\(.*?\)|\[.*?\]", " ", text)
+    # An apostrophe joins the letters either side ("Pioneer's" is "pioneers"), where
+    # every other mark separates words.
+    text = text.replace("'", "").replace("\u2019", "").replace("_", " ")
+    return re.sub(r"[^\w]+", " ", text).strip()
 
 
 @app.get("/api/media/search")
@@ -19504,6 +21263,12 @@ async def search_media(request: Request, q: str = "", types: str = "", limit: in
     if isinstance(ma_result, dict):
         for key, value in ma_result.items():
             bucket = str(key).lower()
+            if bucket == "audiobooks":
+                # Audiobooks come from this listener's own Audiobookshelf account
+                # (abs://...) with per-user library scope, chapters, and resume
+                # progress. MA's audiobooks bucket mirrors a shared account and
+                # duplicates ABS items with unopenable library://audiobook/ URIs.
+                continue
             if bucket in buckets and isinstance(value, list):
                 entries = value
                 if bucket == "artists":
@@ -19532,6 +21297,25 @@ async def search_media(request: Request, q: str = "", types: str = "", limit: in
                     "media_type": "author",
                 }
             )
+
+    # The same show can arrive twice: its Audiobookshelf item (abs://, with its
+    # episode list, artwork and download settings) and MA's mirror of that library
+    # (library://podcast/<n>, which opens onto episodes MA does not have). They
+    # looked identical in the results and only one of them worked, so the ABS
+    # entry wins and the mirrored copy is dropped by title. A show only MA knows
+    # is still listed.
+    abs_podcast_keys = {
+        key
+        for podcast in (abs_detail.get("podcasts") or [])
+        if (key := _media_title_key(podcast.get("title")))
+    }
+    if abs_podcast_keys:
+        buckets["podcasts"] = [
+            item
+            for item in buckets["podcasts"]
+            if str(item.get("uri") or "").startswith("abs://")
+            or _media_title_key(item.get("name")) not in abs_podcast_keys
+        ]
 
     top = None
     for key in ("tracks", "albums", "artists", "playlists", "audiobooks", "podcasts"):
@@ -19571,6 +21355,24 @@ async def _media_abs_progress(client: aiohttp.ClientSession, creds: Any, item_id
     finally:
         await resp.release()
     return data if isinstance(data, dict) else None
+
+
+def _abs_episode_number(value: Any, fallback: int) -> int:
+    """An episode's number, which ABS stores as the text its feed wrote.
+
+    ``"3"`` is 3, while ``""`` (most shows) and ``"Bonus"`` are not numbers at all.
+    The position in the list is a truer answer than a 500 for those, and the
+    schema refuses a string outright: a podcast opened as a book detail crashed
+    the whole response on one empty field (measured on a show with 11 episodes).
+    """
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return fallback
 
 
 async def _media_abs_item_detail(creds: Any, item_id: str) -> dict:
@@ -19616,24 +21418,44 @@ async def _media_abs_item_detail(creds: Any, item_id: str) -> dict:
     is_podcast = bool(episodes)
     children = []
     if is_podcast:
-        for episode in episodes:
+        for position, episode in enumerate(episodes, start=1):
             children.append(
                 MediaItemChild(
                     uri=f"abs://{item_id}/{episode.get('id') or ''}",
                     name=episode.get("title") or "",
                     media_type="podcast_episode",
                     duration=episode.get("duration"),
-                    index=episode.get("episode"),
+                    index=_abs_episode_number(episode.get("episode"), position),
                 )
             )
     else:
         for index, chapter in enumerate(media.get("chapters") or []):
+            if not isinstance(chapter, dict):
+                continue
+            raw_start = chapter.get("start") if chapter.get("start") is not None else chapter.get("startTime")
+            raw_end = chapter.get("end")
+            raw_dur = chapter.get("duration")
+            try:
+                start_val = float(raw_start) if raw_start is not None else None
+            except (TypeError, ValueError):
+                start_val = None
+            try:
+                end_val = float(raw_end) if raw_end is not None else None
+            except (TypeError, ValueError):
+                end_val = None
+            try:
+                dur_val = float(raw_dur) if raw_dur is not None else None
+            except (TypeError, ValueError):
+                dur_val = None
+            if dur_val is None and start_val is not None and end_val is not None:
+                dur_val = max(0.0, end_val - start_val)
             children.append(
                 MediaItemChild(
                     uri=f"abs://{item_id}#chapter-{index}",
                     name=chapter.get("title") or "",
                     media_type="chapter",
-                    duration=chapter.get("duration"),
+                    duration=dur_val,
+                    start=start_val,
                     index=index,
                 )
             )
@@ -20188,7 +22010,9 @@ async def stream_abs_session(session_id: str, track_index: int, request: Request
         raise HTTPException(status_code=400, detail="Audiobookshelf URL not configured")
 
     user = request.query_params.get("user") or creds.get("user") or creds.get("username") or ""
-    mt = request.query_params.get("mt") or (sign(user)[0] if user else None)
+    # The segments get a token of their own, minted now for the device's lifetime: reusing the
+    # incoming one made every segment expire with the first URL, part way into a long book.
+    mt = sign(user, ttl=DEVICE_TOKEN_TTL_SECONDS)[0] if user else None
 
     track_url = f"{abs_url}/public/session/{session_id}/track/{track_index}"
     playlist_url: str | None = None
@@ -22036,3 +23860,21 @@ async def internal_llm_complete(request: Request):
     if not content:
         raise HTTPException(status_code=502, detail="The model returned an empty answer.")
     return {"content": content, "model": model}
+
+
+_NETWORK_UA_TASKS: set = set()
+
+
+@app.middleware("http")
+async def capture_network_user_agent(request: Request, call_next):
+    try:
+        from services.gateway import network_ua
+
+        hit = network_ua.due(request)
+        if hit:
+            task = asyncio.create_task(asyncio.to_thread(network_ua.write, *hit))
+            _NETWORK_UA_TASKS.add(task)
+            task.add_done_callback(_NETWORK_UA_TASKS.discard)
+    except Exception:
+        log.debug("network user-agent capture skipped", exc_info=True)
+    return await call_next(request)

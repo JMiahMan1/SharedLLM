@@ -22,6 +22,9 @@ import { DatesSection, DaysSection, NotesSection, TodaySection } from './Beloved
 import { JustUsSection } from './JustUsSection';
 import { Card, Field } from './BelovedUi';
 import { useBeloved, useVerse, type BelovedData } from './useBeloved';
+import { dailyTip, type BelovedTipTarget } from '../../../lib/beloved/tips';
+import type { BelovedPrefs } from '../../../lib/beloved/activity';
+import { HeartBackButton, TipCard, TodayStrip } from './BelovedHighlights';
 
 type Tab = 'home' | 'days' | 'today' | 'notes' | 'dates' | 'justus';
 
@@ -248,9 +251,27 @@ function HomeSection({
   const [sent, setSent] = useState(false);
   const me = data.couple.find((p) => p.me);
   const spouse = data.spouse;
+  const spouseName = spouse?.display_name ?? 'your spouse';
   const latestNote = data.view.notes.find((n) => !n.own);
   const fromSpouse = data.view.hearts.filter((h) => !h.own);
   const nextDay = upcoming.find((d) => d.kind !== 'milestone') ?? upcoming[0];
+  const tip = dailyTip(today);
+
+  // A tip is a fixed pointer to a feature, never to any sealed content.
+  const openTip = (target: BelovedTipTarget) => {
+    switch (target) {
+      case 'plan': onTab('justus'); break;
+      case 'prayer':
+      case 'note': onTab('notes'); break;
+      case 'idea': onTab('dates'); break;
+      case 'question':
+      case 'devotion': onTab('today'); break;
+      case 'day': onTab('days'); break;
+      case 'children':
+      case 'cover': onEdit(); break;
+      case 'heart': void heart(); break;
+    }
+  };
 
   const heart = async () => {
     setSending(true);
@@ -268,6 +289,8 @@ function HomeSection({
 
   return (
     <div className="space-y-4" data-testid="beloved-home">
+      <TodayStrip activity={data.activity} me={data.me} spouse={spouse?.username ?? ''} spouseName={spouseName} />
+      <TipCard tip={tip} onOpen={openTip} />
       <Cover token={token} vault={vault} cover={profile?.cover} />
       <div className="-mt-12 flex items-end justify-center gap-3 px-2">
         {me && <UserAvatar username={me.username} avatar={me.avatar} name={me.display_name} size={76} className="ring-4 ring-slate-950" />}
@@ -309,8 +332,16 @@ function HomeSection({
       </button>
       {fromSpouse.length > 0 && (
         <p className="text-center text-xs text-rose-200/80" data-testid="beloved-hearts-received">
-          {spouse?.display_name ?? 'Your spouse'} has sent you {fromSpouse.length} {fromSpouse.length === 1 ? 'heart' : 'hearts'}
+          {spouseName} has sent you {fromSpouse.length} {fromSpouse.length === 1 ? 'heart' : 'hearts'}
         </p>
+      )}
+      {(fromSpouse.length > 0 || latestNote) && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-rose-300/15 bg-rose-500/[0.07] p-3" data-testid="beloved-heart-back-card">
+          <p className="min-w-0 flex-1 break-words text-sm text-rose-50">
+            {fromSpouse.length > 0 ? `A heart from ${spouseName}` : `A note from ${spouseName}`}
+          </p>
+          <HeartBackButton onSend={() => void heart()} busy={sending} />
+        </div>
       )}
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -378,8 +409,17 @@ function ProfileSheet({
     setChildren((rows) => rows.map((row, i) => (i === index ? { ...row, ...change } : row)));
   const [cover, setCover] = useState(record?.cover);
   const [details, setDetails] = useState(reminderDetails());
+  // Show the server's preferences with our own edits layered on top, so a
+  // refetch can never overwrite a toggle the spouse has just changed here.
+  const [prefsDraft, setPrefsDraft] = useState<Partial<BelovedPrefs>>({});
+  const prefs: BelovedPrefs = { ...data.prefs, ...prefsDraft };
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const changePrefs = (next: Partial<BelovedPrefs>) => {
+    setPrefsDraft((p) => ({ ...p, ...next }));
+    void data.setPrefs(next).catch((error) => toast.error(errorText(error, 'Could not save your settings')));
+  };
 
   const pickCover = async (file: File) => {
     if (!IMAGE_TYPES.has(file.type)) {
@@ -577,6 +617,31 @@ function ProfileSheet({
             </div>
             {cover && <p className="mt-1 text-xs text-emerald-200" data-testid="beloved-cover-ready">Photo encrypted and ready.</p>}
           </div>
+          <fieldset className="space-y-2 rounded-xl border border-white/10 p-3" data-testid="beloved-prefs">
+            <legend className="px-1 text-xs font-semibold text-slate-300">Sharing and encouragement</legend>
+            <label className="flex min-h-11 items-start gap-3 text-sm text-slate-200">
+              <input type="checkbox" checked={prefs.share_activity} onChange={(e) => changePrefs({ share_activity: e.target.checked })}
+                className="mt-0.5 h-5 w-5 shrink-0" data-testid="beloved-share-activity" />
+              <span className="min-w-0 break-words">
+                Share when I look at our photos or read notes
+                <span className="mt-0.5 block text-xs text-slate-400">Off: no reading signals are sent at all.</span>
+              </span>
+            </label>
+            <label className="flex min-h-11 items-start gap-3 text-sm text-slate-200">
+              <input type="checkbox" checked={prefs.encouragements} onChange={(e) => changePrefs({ encouragements: e.target.checked })}
+                className="mt-0.5 h-5 w-5 shrink-0" data-testid="beloved-encouragements" />
+              <span className="min-w-0 break-words">Daily encouragement</span>
+            </label>
+            <label className="flex min-h-11 flex-wrap items-center gap-2 text-sm text-slate-200">
+              <span className="min-w-0 flex-1">Encouragement hour</span>
+              <select value={prefs.encourage_hour} onChange={(e) => changePrefs({ encourage_hour: Number(e.target.value) })}
+                data-testid="beloved-encourage-hour" className="glass-input min-h-11 text-base sm:text-sm">
+                {Array.from({ length: 15 }, (_, i) => 7 + i).map((h) => (
+                  <option key={h} value={h}>{h}:00</option>
+                ))}
+              </select>
+            </label>
+          </fieldset>
           <label className="flex min-h-11 items-start gap-3 rounded-xl border border-white/10 p-3 text-sm text-slate-200">
             <input type="checkbox" checked={details} onChange={(e) => setDetails(e.target.checked)} className="mt-0.5 h-5 w-5 shrink-0" data-testid="beloved-reminder-details" />
             <span>

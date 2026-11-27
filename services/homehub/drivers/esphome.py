@@ -48,7 +48,7 @@ import logging
 import math
 import re
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from aioesphomeapi import (
@@ -61,6 +61,7 @@ from aioesphomeapi import (
     ColorMode,
     CoverInfo,
     CoverOperation,
+    EventInfo,
     FanDirection,
     FanInfo,
     LightColorCapability,
@@ -80,6 +81,8 @@ from aioesphomeapi import (
     SwitchInfo,
     TextInfo,
     TextSensorInfo,
+    UpdateCommand,
+    UpdateInfo,
     UserService,
     UserServiceArgType,
     ValveInfo,
@@ -92,12 +95,14 @@ from services.homehub import esphome_audio
 from services.homehub.core import (
     UNAVAILABLE,
     UNKNOWN,
+    UPDATE_INSTALL,
     DeviceUnavailable,
     Driver,
     EntityEntry,
     HubError,
     ServiceCall,
     ServiceNotFound,
+    is_newer_version,
     utcnow,
 )
 from services.homehub.drivers.mjpeg import CameraTokens, camera_attributes
@@ -107,6 +112,7 @@ CONNECT_TIMEOUT = 5.0
 LIST_TIMEOUT = 5.0
 COMMAND_SETTLE = 1.0  # how long a command waits for the node to push the new state
 SERVICE_TIMEOUT = 5.0
+UPDATE_PROGRESS = 4
 #: A camera frame (ESP32 cameras send one in well under a second when idle).
 CAMERA_TIMEOUT_S = 10.0
 #: An ESPHome camera streams for about 5 s after each request, so a live view asks again before then.
@@ -352,13 +358,15 @@ class ESPHomeDriver(Driver):
         from services.homehub.esphome_restarts import RestartMonitor
 
         self.restarts = RestartMonitor(self)  # restarts and drops, with the node's log lines around each
+        #: An echo-dot-assist (hassmic) Echo's management (services/homehub/hassmic.py); None for any other node.
+        self.hassmic: Any = None
         self.local_entities = [e for e in self.entities if "/" not in (e.unique_id or "")
                                and re.match(r"^[0-9A-Fa-f:]{17}-", e.unique_id or "")]
 
     # -- connection -----------------------------------------------------------
-    def _make_client(self, host: str) -> Any:
+    def _make_client(self, host: str, port: int | None = None) -> Any:
         # ``host`` is an address: a ``.local`` name was resolved by mDNS first (``_address_for``).
-        return APIClient(host, self.port, self.password, client_info="homehub",
+        return APIClient(host, port or self.port, self.password, client_info="homehub",
                          noise_psk=self.noise_psk, expected_name=self.device_name or None)
 
     @property
@@ -381,8 +389,13 @@ class ESPHomeDriver(Driver):
             raise DeviceUnavailable(f"{host}:{self.port}: not found by mDNS")
         return address
 
-    async def _try_connect(self, host: str) -> tuple[Any, Any, list[Any], list[Any]]:
-        client = self._make_client(await self._address_for(host))
+    async def _try_connect(self, host: str, port: int | None = None) -> tuple[Any, Any, list[Any], list[Any]]:
+        used_port = port or self.port
+        if host == "127.0.0.1":
+            resolved = host
+        else:
+            resolved = await self._address_for(host)
+        client = self._make_client(resolved, used_port)
         try:
             await asyncio.wait_for(client.connect(on_stop=self._on_stop, login=True), CONNECT_TIMEOUT)
             device_info, infos, services = await asyncio.wait_for(
@@ -390,21 +403,30 @@ class ESPHomeDriver(Driver):
         except (APIConnectionError, OSError, TimeoutError) as exc:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(client.disconnect(force=True), 2)
-            raise DeviceUnavailable(f"{host}:{self.port}: {exc or type(exc).__name__}") from exc
+            raise DeviceUnavailable(f"{host}:{used_port}: {exc or type(exc).__name__}") from exc
         return client, device_info, infos, services
 
     async def _connect(self) -> None:
-        # The address that worked last goes first, so a fallback that answered
-        # keeps being used and the stale one is only retried after it.
+        # The tunnel endpoint first when one is registered for this node (its mobile
+        # relay), then the address that worked last, then the node's mDNS fallback.
         order = [self.host] + [h for h in self.candidates if h != self.host]
+        attempts: list[tuple[str, int | None]] = []
+        tunnel = getattr(self.hub, "echo_tunnels", None)
+        endpoint = tunnel.local_endpoint(self.device_name) if tunnel and self.device_name else None
+        if endpoint is not None:
+            attempts.append(endpoint)
+        attempts.extend((host, None) for host in order)
         errors = []
-        for host in order:
+
+        for host, port in attempts:
             try:
-                client, device_info, infos, services = await self._try_connect(host)
+                client, device_info, infos, services = await self._try_connect(host, port)
             except DeviceUnavailable as exc:
                 errors.append(str(exc))
                 continue
-            if host != self.host:
+            if port is not None:  # a tunnel endpoint, not one of the node's own addresses
+                self.log.info("ESPHome %s connected through its mobile tunnel", self.device_name)
+            elif host != self.host:
                 self.log.warning("ESPHome %s answered at %s, not %s; using that address from now on",
                                  self.device_name, host, self.host)
                 self.host = host
@@ -434,10 +456,28 @@ class ESPHomeDriver(Driver):
         except Exception:
             self.log.exception("ESPHome %s: subscribing to its voice assistant failed", self.device_name)
         self._attach_bluetooth(client, device_info)
+        self._attach_hassmic(client, device_info, services)
         self.publish_firmware_update()
         if self._was_connected:
             self.log.info("ESPHome %s (%s) reconnected", self.device_name, self.host)
         self._was_connected = True
+
+    def _attach_hassmic(self, client: Any, device_info: Any, services: list[Any]) -> None:
+        """A hassmic Echo: its network key, settings login and device-page entities, in the background.
+
+        Only nodes whose firmware says it is hassmic (echo-dot-assist); every other node is left alone. Runs
+        after the keyed connection is up and never blocks it or the voice pipeline.
+        """
+        from services.homehub.hassmic import HassmicManager, is_hassmic
+
+        if not is_hassmic(device_info):
+            return
+        try:
+            if self.hassmic is None:
+                self.hassmic = HassmicManager(self)
+            self.hassmic.attach(client, device_info, services)
+        except Exception:
+            self.log.exception("ESPHome %s: managing it as a hassmic Echo failed", self.device_name)
 
     def _attach_bluetooth(self, client: Any, device_info: Any) -> None:
         """A node running ``bluetooth_proxy`` feeds the hub's Bluetooth bus over this connection."""
@@ -463,6 +503,8 @@ class ESPHomeDriver(Driver):
         self._detach_bluetooth()
         self._client = None
         self.voice.detach()
+        if self.hassmic is not None:
+            self.hassmic.detach()
         self.stop_audio()  # a node that went away reads no more audio
         if self._closing:
             return
@@ -520,6 +562,8 @@ class ESPHomeDriver(Driver):
             t.cancel()
         self.restarts.close()
         self.voice.detach()
+        if self.hassmic is not None:
+            self.hassmic.close()
         self.stop_audio()
         self._unregister_services()
         if self._unsub_bus:
@@ -567,7 +611,6 @@ class ESPHomeDriver(Driver):
 
     def publish_firmware_update(self) -> None:
         """Installed = the ESPHome version the node runs; latest and install come from the builder, if linked."""
-        from services.homehub.core import UPDATE_INSTALL
         from services.homehub.drivers.esphome_builder import builder_for
 
         ent = self._firmware_entity()
@@ -709,7 +752,7 @@ class ESPHomeDriver(Driver):
         # Entities with no state message (buttons, cameras) still get a state now.
         for k, e in self._entity_for.items():
             info = self._infos[k]
-            if isinstance(info, ButtonInfo):
+            if isinstance(info, ButtonInfo | EventInfo):
                 cur = self.hub.states.get(e.entity_id)
                 self.publish(e, cur.state if cur and cur.state != UNAVAILABLE else UNKNOWN, self._attrs(info))
             elif isinstance(info, CameraInfo):
@@ -828,6 +871,10 @@ class ESPHomeDriver(Driver):
             formats = esphome_audio.supported_formats(info)
             if formats:  # what the node asked to be sent; the hub converts to it (esphome_audio.py)
                 a["supported_formats"] = [f.public() for f in formats]
+        elif isinstance(info, EventInfo):
+            a["event_types"] = list(info.event_types)
+        elif isinstance(info, UpdateInfo):
+            a["supported_features"] = UPDATE_INSTALL | UPDATE_PROGRESS
         return a
 
     # -- audio in the node's own format ---------------------------------------------
@@ -922,6 +969,39 @@ class ESPHomeDriver(Driver):
             ent = self._entity_for.get((getattr(st, "device_id", 0) or 0, st.key))
             token = self._camera_tokens.current(ent.entity_id) if ent is not None else ""
             return "idle", camera_attributes(ent.entity_id, token) if ent is not None else {}
+        if isinstance(info, EventInfo):
+            event_type = str(getattr(st, "event_type", "") or "").strip()
+            if not event_type:
+                return UNKNOWN, {}
+            ent = self._entity_for.get((getattr(st, "device_id", 0) or 0, st.key))
+            cur = self.hub.states.get(ent.entity_id) if ent is not None else None
+            now_dt = datetime.now(UTC)
+            if cur is not None and cur.state and cur.state != UNKNOWN:
+                try:
+                    prev_dt = datetime.fromisoformat(cur.state)
+                    if prev_dt.tzinfo is None:
+                        prev_dt = prev_dt.replace(tzinfo=UTC)
+                    if prev_dt >= now_dt:
+                        now_dt = prev_dt + timedelta(microseconds=1)
+                except ValueError:
+                    pass
+            return now_dt.isoformat(), {"event_type": event_type}
+        if isinstance(info, UpdateInfo):
+            installed = getattr(st, "current_version", "") or None
+            latest = getattr(st, "latest_version", "") or None
+            in_progress = bool(getattr(st, "in_progress", False))
+            has_progress = bool(getattr(st, "has_progress", False))
+            progress = getattr(st, "progress", 0.0)
+            state = "on" if is_newer_version(latest, installed) else "off"
+            return state, {
+                "installed_version": installed,
+                "latest_version": latest,
+                "in_progress": in_progress,
+                "title": getattr(st, "title", "") or info.name or None,
+                "release_summary": getattr(st, "release_summary", "") or None,
+                "release_url": getattr(st, "release_url", "") or None,
+                "update_percentage": round(float(progress), 1) if has_progress else None,
+            }
         return getattr(st, "state", UNKNOWN), {}
 
     def _light_state(self, st: Any) -> tuple[str, dict[str, Any]]:
@@ -1025,6 +1105,22 @@ class ESPHomeDriver(Driver):
             return await self._satellite_call(service, data)
         if entity.domain == "update" and _is_firmware_uid(entity):
             return self._install_firmware(entity, service)
+        if entity.domain == "update":
+            k = None
+            for (dev_id, key), e in self._entity_for.items():
+                if e.entity_id == entity.entity_id:
+                    k = (dev_id, key)
+                    break
+            if k is not None and isinstance(self._infos.get(k), UpdateInfo):
+                client = self._require_client()
+                dev_id, key = k
+                if service == "install":
+                    client.update_command(key, UpdateCommand.INSTALL, device_id=dev_id)
+                elif service in ("check", "check_update"):
+                    client.update_command(key, UpdateCommand.CHECK, device_id=dev_id)
+                else:
+                    raise ServiceNotFound(f"update.{service} on {entity.entity_id}")
+                return None
         if entity in self.local_entities or any(e.entity_id == entity.entity_id for e in self.local_entities):
             result = self._local_call(entity, domain, service, data)
             return await result if inspect.isawaitable(result) else result
@@ -1131,6 +1227,10 @@ class ESPHomeDriver(Driver):
             raise DeviceUnavailable(f"ESPHome {self.device_name}: {exc}") from exc
 
     def _local_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
+        if self.hassmic is not None and self.hassmic.owns(entity):
+            return self.hassmic.call(entity, domain, service, data)  # the Echo's settings API (hassmic.py)
+        if entity.domain == "select" and service == "select_option" and (entity.unique_id or "").endswith("-wake_word_2"):
+            return self.voice.set_wake_word(str(data.get("option")), slot=1)  # the node's second wake word
         if entity.domain == "select" and service == "select_option" and (entity.unique_id or "").endswith("-wake_word"):
             return self.voice.set_wake_word(str(data.get("option")))  # the node's own setting (awaited below)
         key = (entity.unique_id or "").rsplit("-", 1)[-1]
@@ -1421,10 +1521,6 @@ class ESPHomeDriver(Driver):
 
     # -- the node asking the hub ------------------------------------------------
     def _on_service_call(self, call: Any) -> None:
-        if not self.allow_service_calls:
-            self.log.info("ESPHome %s asked for %s, but allow_service_calls is off", self.device_name,
-                          call.service)
-            return
         data: dict[str, Any] = dict(call.data)
         for k, v in dict(call.data_template).items():
             if "{{" in v or "{%" in v:
@@ -1432,9 +1528,26 @@ class ESPHomeDriver(Driver):
                                  call.service, k)
             data[k] = v
         if call.is_event:
-            self.hub.bus.fire(call.service, {**data, "device_id": self.entities[0].device_id
-                                             if self.entities else None})
+            device_id = self.entities[0].device_id if self.entities else None
+            self.hub.bus.fire(call.service, {**data, "device_id": device_id})
+            if call.service in ("esphome.tag_scanned", "tag_scanned"):
+                tag_id = str(data.get("tag_id") or "").strip()
+                if re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", tag_id):
+                    if call.service != "tag_scanned":
+                        self.hub.bus.fire("tag_scanned", {"tag_id": tag_id, "device_id": device_id})
+                    self.hub.states.set(f"tag.{tag_id}", utcnow().isoformat(),
+                                        {"tag_id": tag_id, "last_scanned_by_device_id": device_id})
             return
+        if call.service == "esphome.homehub_arbitration_key":
+            # An Echo offering K to HomeHub, which made it (hassmic.member_beacon stops the offers).
+            self.log.debug("ESPHome %s offered HomeHub the Echo network key it already holds", self.device_name)
+            return
+        if not self.allow_service_calls:
+            is_arb_key = call.service.startswith("esphome.") and call.service.endswith("_arbitration_key")
+            if not (is_arb_key and self.entry.options.get("echo_mesh_vouch", True)):
+                self.log.info("ESPHome %s asked for %s, but allow_service_calls is off", self.device_name,
+                              call.service)
+                return
         domain, _, service = call.service.partition(".")
         if not service:
             self.log.warning("ESPHome %s asked for a malformed action %r", self.device_name, call.service)

@@ -1,7 +1,14 @@
+import type { NearPerson } from '../lib/proximity';
+import type { VehicleBtLink } from '../lib/vehicleBluetooth';
 import axios, { type AxiosRequestConfig } from 'axios';
-import type { InternetOutage, NetworkStatus, NetworkUsage, RouterLogLine } from '../lib/network';
+import type { CollectorHealth } from '../lib/collectorHealth';
+import type { ProfileStats, SharingState, ShareArea } from '../lib/profileStats';
+import type { AdminPersonStats } from '../lib/adminPeople';
+import type {
+  InternetOutage, NetworkDevice, NetworkDeviceFields, NetworkStatus, NetworkUsage, RouterLogLine,
+} from '../lib/network';
 import type { CameraInfo, CameraRecordings } from '../lib/cameras';
-import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApps, NotifyLevel, TtsVoices } from '../types/api';
+import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApps, HubDevice, HubVoiceSettings, NotifyLevel, TtsVoices, VoiceAdminOverview, VoiceCalibration, WhisperModeSettings } from '../types/api';
 import type {
   GardenPlant, GardenSpecies, GardenLocation, GardenProfile,
   GardenTodaySummary, GardenCareLog, GardenCareRule,
@@ -19,7 +26,9 @@ import type { MessageMark, PrivateChatInfo, PrivateChatReminders, PrivateChatSta
 import type { PasswordChangeBody, WrappedRecord } from '../lib/privateChatCrypto';
 import { configureBackupKeys, type BackupKeyUpload } from '../lib/privateChatBackupKey';
 import type { RestoreBatch, RestoreClient, RestoreCounts } from '../lib/privateChatBackupFile';
+import type { FirmwareReport } from '../lib/firmware';
 import type { BelovedKind, BelovedOverview, SealedRecord } from '../lib/beloved/records';
+import type { BelovedActivityEntry, BelovedPrefs, BelovedSeenWhat } from '../lib/beloved/activity';
 import type { FreshPosition } from '../lib/freshPosition';
 import type { MusicAssistantStatus } from '../lib/musicAssistant';
 import type { HouseholdTimezone, HouseholdTimezoneUpdate } from '../lib/householdTimezone';
@@ -51,6 +60,7 @@ import type {
 } from '../lib/studio';
 import { Capacitor } from '@capacitor/core';
 import { nativeBinaryAdapter, wantsNativeBinary } from '../lib/nativeBinary';
+import { nearbyState, type NearbyParts, type NearbySettingsState } from '../lib/nearbySettings';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
 import type { ActiveCall, DropInSettings, ArcadeCastResult, ArcadeScreen, PartyRoomSummary, SavedPlace, SavedPlaceInput, VisitSuggestion } from '../types/api';
 import type {
@@ -241,6 +251,10 @@ import type {
   LibraryBook,
   LibraryAudit,
   BookInspection,
+  BookCatalogueId,
+  BookCatalogueReport,
+  BookCatalogues,
+  BookCatalogueTest,
   HealthCycleSummary,
   HealthCyclePeriod,
   HealthCycleLog,
@@ -483,6 +497,16 @@ const normalizeUser = (raw: UserProfileRaw): UserProfile => ({
 });
 
 /**
+ * A short, non-identifying hint for Admin > Network device identification.
+ * Safari on an iPad sends a Mac User-Agent, so the gateway cannot tell the two
+ * apart without knowing the screen takes touch.
+ */
+export function deviceHint(): string {
+  if (typeof navigator === 'undefined') return '';
+  return (navigator.maxTouchPoints || 0) > 1 ? 'touch' : 'no-touch';
+}
+
+/**
  * Base URL and auth headers for a request that bypasses `apiClient` -- one that
  * needs its own timeout, or a streamed body `fetch` can read but axios cannot.
  */
@@ -492,7 +516,7 @@ export function directRequestConfig(): { baseURL: string; headers: Record<string
     const serverUrl = storageGetSync('jarvis_server_url');
     if (serverUrl) baseURL = serverUrl;
   }
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Device-Hint': deviceHint() };
   const token = storageGetSync('jarvis_api_key');
   if (token) headers.Authorization = `Bearer ${token}`;
   return { baseURL, headers };
@@ -678,6 +702,7 @@ apiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  config.headers['X-Device-Hint'] = deviceHint();
   // In the Android app a binary download must come through the native plugin as bytes
   // (see lib/nativeBinary.ts); the WebView's own requests hand it back as corrupted text.
   if (wantsNativeBinary(config)) {
@@ -1284,6 +1309,17 @@ export const api = {
   async getInternetOutages(days = 30): Promise<{ days: number; outages: InternetOutage[] }> {
     return (await apiClient.get('/api/network/outages', { params: { days } })).data;
   },
+  /** Every device Jarvis keeps a record for, with the monitor's live IP and online flag. */
+  async getNetworkDevices(): Promise<{ devices: NetworkDevice[] }> {
+    return (await apiClient.get('/api/network/devices')).data;
+  },
+  /** Send only the fields the admin actually changed; '' returns a field to detection. */
+  async updateNetworkDevice(mac: string, fields: NetworkDeviceFields): Promise<{ status: string }> {
+    return (await apiClient.put(`/api/network/devices/${encodeURIComponent(mac)}`, fields)).data;
+  },
+  async forgetNetworkDevice(mac: string): Promise<{ status: string }> {
+    return (await apiClient.delete(`/api/network/devices/${encodeURIComponent(mac)}`)).data;
+  },
   async getUserTheme(): Promise<{ theme_id: string; packs: unknown[] }> {
     // Runs before/independently of auth, so a 401 must not log the user out.
     const resp = await apiClient.get('/api/users/me/theme', { skipAuthRedirect: true });
@@ -1334,6 +1370,29 @@ export const api = {
    * left every non-admin with an empty picker and "Everyone" as their only
    * choice. This returns username + display name and nothing else.
    */
+  /** One person's profile stats as the caller may see them (docs/PROFILE_STATS.md). */
+  async getProfileStats(username: string, fresh = false): Promise<ProfileStats> {
+    const resp = await apiClient.get(`/api/profile/stats/${encodeURIComponent(username || 'me')}`, { params: fresh ? { fresh: 1 } : undefined });
+    return resp.data;
+  },
+
+  /** Admin > People: one person's stats without the opt-in (admins only, refused on the server otherwise). */
+  async getAdminPersonStats(username: string, fresh = false): Promise<AdminPersonStats> {
+    const resp = await apiClient.get(`/api/profile/admin/${encodeURIComponent(username)}`, { params: fresh ? { fresh: 1 } : undefined });
+    return resp.data;
+  },
+
+  /** The caller's own sharing choice, with the switches other areas already have. */
+  async getProfileSharing(): Promise<SharingState> {
+    const resp = await apiClient.get('/api/profile/sharing');
+    return resp.data;
+  },
+
+  async setProfileSharing(areas: ShareArea[]): Promise<SharingState> {
+    const resp = await apiClient.put('/api/profile/sharing', { areas });
+    return resp.data;
+  },
+
   /** Everyone in the household with their chat picture and Talk account. */
   async getFamilyDirectory(): Promise<FamilyMember[]> {
     const resp = await apiClient.get('/api/users/family-directory');
@@ -1737,6 +1796,12 @@ export const api = {
     return resp.data;
   },
 
+  /** Whether a child's phone is still collecting calls, texts and screen time (parents only). */
+  async getGuardianCollectorHealth(username: string): Promise<CollectorHealth> {
+    const resp = await apiClient.get(`/api/guardian/collector-health/${encodeURIComponent(username)}`);
+    return resp.data;
+  },
+
   async getGuardianActivity(
     username: string,
     limit = 100,
@@ -1842,6 +1907,72 @@ export const api = {
     return resp.data;
   },
 
+  /** Admin: enrolled voices (counts only), the calibration, and candidate samples to review. */
+  async getVoiceAdmin(): Promise<VoiceAdminOverview> {
+    const resp = await apiClient.get('/api/admin/voice');
+    return resp.data;
+  },
+
+  /** Admin: calibrate the voice threshold again from the enrolled voices. */
+  async recalibrateVoice(): Promise<VoiceCalibration> {
+    const resp = await apiClient.post('/api/admin/voice/calibrate');
+    return resp.data;
+  },
+
+  /** Admin: add a candidate sample to its person's voice (an auto sample). */
+  async approveVoiceCandidate(id: number): Promise<{ status: string; samples: number }> {
+    const resp = await apiClient.post(`/api/admin/voice/candidates/${id}`);
+    return resp.data;
+  },
+
+  /** Admin: reject a candidate sample. */
+  async rejectVoiceCandidate(id: number): Promise<{ status: string }> {
+    const resp = await apiClient.delete(`/api/admin/voice/candidates/${id}`);
+    return resp.data;
+  },
+
+  /** Admin: stop listing a voice nobody enrolled (its counts are dropped; it was never a profile). */
+  async forgetNewVoice(id: string, device: string): Promise<{ status: string }> {
+    const resp = await apiClient.delete(`/api/admin/voice/new_voices/${encodeURIComponent(id)}`, { params: { device } });
+    return resp.data;
+  },
+
+  /** Admin: HomeHub's voice settings (whisper mode). */
+  async getHubVoiceSettings(): Promise<HubVoiceSettings> {
+    const resp = await apiClient.get('/api/dashboard/voice/settings');
+    return resp.data;
+  },
+
+  /** Admin: change HomeHub's whisper mode; used from the next command, no restart. */
+  async updateHubVoiceSettings(whisper: Partial<WhisperModeSettings>): Promise<HubVoiceSettings> {
+    const resp = await apiClient.put('/api/dashboard/voice/settings', { whisper });
+    return resp.data;
+  },
+
+  /** Admin: remove every auto-added sample from a person's voice. */
+  async clearAutoVoiceSamples(username: string): Promise<{ status: string; samples: number }> {
+    const resp = await apiClient.delete(`/api/admin/voice/${encodeURIComponent(username)}/auto`);
+    return resp.data;
+  },
+
+  /** Admin: HomeHub's voice satellites, speakers and TVs, with their assignments. */
+  async getHubDevices(): Promise<HubDevice[]> {
+    const resp = await apiClient.get('/api/admin/hub-devices');
+    return resp.data?.devices ?? [];
+  },
+
+  /** Admin: read HomeHub's devices now. */
+  async refreshHubDevices(): Promise<HubDevice[]> {
+    const resp = await apiClient.post('/api/admin/hub-devices/refresh');
+    return resp.data?.devices ?? [];
+  },
+
+  /** Admin: assign a shared device to a person (null: shared) and/or a room. */
+  async assignHubDevice(deviceKey: string, change: { owner_username?: string | null; room?: string | null }): Promise<HubDevice> {
+    const resp = await apiClient.patch(`/api/admin/hub-devices/${encodeURIComponent(deviceKey)}`, change);
+    return resp.data;
+  },
+
   /** Approve sentences taught at your voice satellite: they join your profile. */
   async approvePendingVoice(id: string): Promise<VoiceStatus & { added: number }> {
     const resp = await apiClient.post(`/api/users/me/voice/pending/${encodeURIComponent(id)}`);
@@ -1881,6 +2012,46 @@ export const api = {
     }
   },
 
+  /**
+   * Hear one recorded turn. The clip never leaves the house: the gateway hands
+   * it to the household's own Whisper and answers with the words.
+   */
+  async voiceListen(audioB64: string, mime = 'audio/wav'): Promise<{ text: string }> {
+    const resp = await apiClient.post('/api/voice/listen', { audio_b64: audioB64, mime }, { timeout: 120_000 });
+    return { text: String(resp.data?.text || '') };
+  },
+
+  /**
+   * Speak a line in this person's own voice (their Kokoro voice when they have
+   * chosen one, the house voice otherwise). Returns base64 WAV for the caller
+   * to play, so the sheet can speak the first sentence while the rest arrives.
+   */
+  async voiceSpeak(text: string, voice?: string): Promise<{ audio_b64: string; mime: string; voice: string | null }> {
+    const resp = await apiClient.post('/api/voice/speak', { text, voice }, { timeout: 120_000 });
+    return {
+      audio_b64: String(resp.data?.audio_b64 || ''),
+      mime: String(resp.data?.mime || 'audio/wav'),
+      voice: (resp.data?.voice as string | null) ?? null,
+    };
+  },
+
+  /** The words in a chat answer, whichever shape the gateway answered in. */
+  replyText(data: unknown): string {
+    if (typeof data === 'string') return data;
+    if (!data || typeof data !== 'object') return '';
+    const d = data as Record<string, unknown>;
+    const direct = d.reply ?? d.response ?? d.text ?? d.answer;
+    if (typeof direct === 'string' && direct.trim()) return direct;
+    const message = d.message as { content?: unknown } | undefined;
+    if (message && typeof message.content === 'string' && message.content.trim()) return message.content;
+    const inner = d.data as Record<string, unknown> | undefined;
+    if (inner) {
+      const value = inner.reply ?? inner.response ?? inner.text ?? inner.answer;
+      if (typeof value === 'string' && value.trim()) return value;
+    }
+    return '';
+  },
+
   async chat(message: string, workspaceId?: string, userId?: string, stream = false): Promise<unknown> {
     // A non-streaming turn is billed to the model, so it outlives the 15s
     // axios default: the quick assistant aborted every question it asked and
@@ -1896,6 +2067,75 @@ export const api = {
       { timeout: 640_000 },
     );
     return resp.data;
+  },
+
+  /**
+   * Ask the house a question and hear the answer as it is written.
+   *
+   * `/api/chat` with `speech_stream` splits the answer into sentences as the
+   * model produces them, so the phone can start speaking sentence one while
+   * sentence two is still being generated - the way the Echo Dots answer.
+   * `voice_context` is what marks the turn as spoken: without one the gateway
+   * streams plain text tokens instead, which are not sentences.
+   */
+  async voiceChatStream(
+    message: string,
+    options: {
+      deviceName?: string;
+      area?: string;
+      userId?: string;
+      onSentence: (sentence: { text: string; voice: string | null }) => void;
+      onReply?: (text: string) => void;
+      signal?: AbortSignal;
+    },
+  ): Promise<string> {
+    const body: Record<string, unknown> = {
+      query: message,
+      user_id: options.userId,
+      stream: true,
+      speech_stream: true,
+      voice_context: {
+        source: 'android',
+        ...(options.deviceName ? { device_name: options.deviceName } : {}),
+        ...(options.area ? { area: options.area } : {}),
+      },
+    };
+    let failure = '';
+    let tokens = '';
+    let spoke = false;
+    let full = '';
+    await postNdjson<Record<string, unknown>>(
+      '/api/chat',
+      body,
+      (event) => {
+        const chunk = event.message as { content?: unknown } | undefined;
+        const content = typeof chunk?.content === 'string' ? chunk.content : '';
+        const voice = typeof event.voice === 'string' ? event.voice : null;
+        if (event.done === true) {
+          if (typeof event.error === 'string' && event.error.trim()) {
+            failure = event.error.trim();
+            return;
+          }
+          full = typeof event.reply === 'string' && event.reply.trim() ? event.reply.trim() : tokens.trim();
+          const rest = typeof event.speech_rest === 'string' ? event.speech_rest.trim() : '';
+          if (rest) options.onSentence({ text: rest, voice });
+          else if (!spoke && full) options.onSentence({ text: full, voice });
+          if (full) options.onReply?.(full);
+          return;
+        }
+        if (!content.trim()) return;
+        if (event.speech === true) {
+          spoke = true;
+          options.onSentence({ text: content.trim(), voice });
+        } else {
+          tokens += content;
+        }
+      },
+      options.signal,
+      'Jarvis could not answer',
+    );
+    if (failure) throw new NdjsonError(failure, 502);
+    return full;
   },
 
   async getGatewayConfig(): Promise<GatewayConfig> {
@@ -2069,13 +2309,36 @@ export const api = {
   },
 
   // Life360 & Vehicle Telemetry
-  async getVehicles(): Promise<{ vehicles: Array<{ id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type: string; fuel_price_location?: string; fuel_price_source?: string; fuel_price_updated_at?: string }> }> {
+  async getVehicles(): Promise<{ vehicles: Array<{ id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type: string; fuel_price_location?: string; fuel_price_source?: string; fuel_price_updated_at?: string; bluetooth?: VehicleBtLink[] }> }> {
     const resp = await apiClient.get('/api/geo/vehicles');
     return resp.data;
   },
 
   async saveVehicle(vehicle: { id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type?: string; fuel_price_location?: string }): Promise<{ status: string; vehicle: Record<string, unknown> }> {
     const resp = await apiClient.post('/api/geo/vehicles', vehicle);
+    return resp.data;
+  },
+
+  /** Link a Bluetooth device to a vehicle by its hardware address (the name is display only). */
+  async linkVehicleBluetooth(vehicleId: string, link: { address: string; kind?: string | null; name?: string }): Promise<{ status: string; vehicle: { id: string; name: string; bluetooth?: VehicleBtLink[] } }> {
+    const resp = await apiClient.post(`/api/geo/vehicles/${encodeURIComponent(vehicleId)}/bluetooth`, {
+      address: link.address,
+      kind: link.kind ?? 'classic',
+      name: link.name ?? '',
+    });
+    return resp.data;
+  },
+
+  async unlinkVehicleBluetooth(vehicleId: string, address: string): Promise<{ status: string; vehicle: { id: string; name: string; bluetooth?: VehicleBtLink[] } }> {
+    const resp = await apiClient.delete(
+      `/api/geo/vehicles/${encodeURIComponent(vehicleId)}/bluetooth/${encodeURIComponent(address)}`,
+    );
+    return resp.data;
+  },
+
+  /** Family members whose phones were near the signed-in person's in the last few minutes. */
+  async getProximityNear(): Promise<{ viewer: string; near: NearPerson[] }> {
+    const resp = await apiClient.get('/api/geo/proximity/near');
     return resp.data;
   },
 
@@ -2252,6 +2515,17 @@ export const api = {
   async getEta(userId: string, to = 'home'): Promise<EtaResponse> {
     const resp = await apiClient.get('/api/geo/eta', { params: { user_id: userId, to } });
     return resp.data;
+  },
+
+  /** Settings > Nearby & offline: a person's parts (``me``, or a child's for their parents). */
+  async getNearbySettings(username = 'me'): Promise<NearbySettingsState> {
+    const resp = await apiClient.get(`/api/users/${encodeURIComponent(username)}/nearby-settings`);
+    return nearbyState(resp.data);
+  },
+
+  async setNearbySettings(settings: Partial<NearbyParts>, username = 'me'): Promise<NearbySettingsState> {
+    const resp = await apiClient.put(`/api/users/${encodeURIComponent(username)}/nearby-settings`, { settings });
+    return nearbyState(resp.data);
   },
 
   // Family arrival / departure notices for the signed-in user (on by default).
@@ -3369,8 +3643,24 @@ export const api = {
   },
 
   /** Add a book to the library (admins): the file, with title, authors, tags, series and comments. */
-  async libraryAddBook(form: FormData): Promise<{ book_id: number; title: string; tags: string[]; path: string }> {
+  /** The reply says what Jarvis filled in, or (identified false) that it could not identify the book. */
+  async libraryAddBook(form: FormData): Promise<{
+    book_id: number; title: string; tags: string[]; path: string;
+    identified?: boolean; filled?: Record<string, string>; message?: string; catalogues?: BookCatalogueReport;
+  }> {
     const resp = await apiClient.post('/api/library/books', form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600_000 });
+    return resp.data;
+  },
+
+  /** The book catalogues (Google Books, Open Library) as they apply to the caller, with each one's last answer. */
+  async libraryCatalogues(): Promise<BookCatalogues> {
+    const resp = await apiClient.get('/api/library/catalogues', { timeout: 30_000 });
+    return resp.data;
+  },
+
+  /** The Test button on a book catalogue card: one lookup with the typed (else saved) key or email. */
+  async testBookCatalogue(body: { source: BookCatalogueId; api_key?: string; contact_email?: string }): Promise<BookCatalogueTest> {
+    const resp = await apiClient.post('/api/users/me/book-metadata/test', body, { timeout: 30_000 });
     return resp.data;
   },
 
@@ -3504,6 +3794,34 @@ export const api = {
       `/api/communication/calls/drop-in/${encodeURIComponent(username)}/devices/${encodeURIComponent(deviceKey)}`,
       { drop_in_video: on },
     );
+  },
+
+  /** Queue firmware updates for all Echos that have an update available (one at a time). */
+  async updateAllEchos(): Promise<{ queued: number }> {
+    const resp = await apiClient.post('/api/homehub/echo_ota/update_all', {});
+    return resp.data ?? { queued: 0 };
+  },
+
+  /** Every device's firmware, what is offered, and whether the hub can install it (admin only). */
+  async getFirmware(): Promise<FirmwareReport> {
+    const resp = await apiClient.get('/api/firmware', { timeout: 30000 });
+    return resp.data ?? { devices: [], installing: 0 };
+  },
+
+  /** Install the offered version on one update entity (an ESPHome node compiles and flashes it). */
+  async installFirmware(entityId: string): Promise<{ started: boolean }> {
+    const resp = await apiClient.post('/api/firmware/install', { entity_id: entityId }, { timeout: 60000 });
+    return resp.data ?? { started: false };
+  },
+
+  /** Tell a device with no update entity (Tasmota) to fetch and flash the image at its own update address. */
+  async upgradeDeviceFirmware(deviceId: string): Promise<{ reply?: unknown }> {
+    const resp = await apiClient.post(
+      `/api/firmware/${encodeURIComponent(deviceId)}/upgrade`,
+      undefined,
+      { timeout: 120000 },
+    );
+    return resp.data ?? {};
   },
 
   /** Ring the conversation's other members for a call you just started; ``video`` rings it as a video call. */
@@ -3780,7 +4098,14 @@ export const api = {
     return resp.data;
   },
 
-  async getEntities(): Promise<{ entity_id: string; friendly_name: string; state: string; domain: string }[]> {
+  async getEntities(): Promise<{
+    entity_id: string;
+    friendly_name: string;
+    state: string;
+    domain: string;
+    /** Present when the hub includes raw states (e.g. media volume, hassmic drop-in details). */
+    attributes?: Record<string, unknown>;
+  }[]> {
     const resp = await apiClient.get('/api/entities');
     // A FAILURE body (no Home Assistant credentials) used to return an empty
     // list, so the dropdown said "No entities found" instead of naming the
@@ -4717,13 +5042,41 @@ export const api = {
     return resp.data;
   },
 
-  async replaceBelovedRecord(token: string, kind: BelovedKind, id: string, sealed: string): Promise<SealedRecord> {
-    const resp = await apiClient.put(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/${kind}/${encodeURIComponent(id)}`, { sealed });
+  /** Change one sealed record. `notify` tells the other spouse about a change that matters. */
+  async updateBelovedRecord(token: string, kind: BelovedKind, id: string, sealed: string, notify = false): Promise<SealedRecord & { notified?: boolean }> {
+    const resp = await apiClient.put(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/${kind}/${encodeURIComponent(id)}`, { sealed, notify });
     return resp.data;
+  },
+
+  /** The former name of `updateBelovedRecord`, kept for callers that have not moved over yet. */
+  async replaceBelovedRecord(token: string, kind: BelovedKind, id: string, sealed: string, notify = false): Promise<SealedRecord & { notified?: boolean }> {
+    return api.updateBelovedRecord(token, kind, id, sealed, notify);
   },
 
   async deleteBelovedRecord(token: string, kind: BelovedKind, id: string): Promise<void> {
     await apiClient.delete(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/${kind}/${encodeURIComponent(id)}`);
+  },
+
+  /** A metadata-only reading signal: names what was looked at, never any of its content. */
+  async belovedSeen(token: string, what: BelovedSeenWhat): Promise<{ shared: boolean; notified: boolean }> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/seen`, { what });
+    return resp.data;
+  },
+
+  /** The couple's recent reading signals, newest first: `{who, who_name, what, at}` only. */
+  async belovedActivity(token: string): Promise<{ me: string; activity: BelovedActivityEntry[] }> {
+    const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/activity`);
+    return resp.data;
+  },
+
+  async getBelovedPrefs(token: string): Promise<BelovedPrefs> {
+    const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/prefs`);
+    return resp.data;
+  },
+
+  async setBelovedPrefs(token: string, prefs: Partial<BelovedPrefs>): Promise<BelovedPrefs> {
+    const resp = await apiClient.put(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/prefs`, prefs);
+    return resp.data;
   },
 
   /** A chat attachment's bytes (or its thumbnail), fetched as the caller. */
@@ -5573,6 +5926,84 @@ export const api = {
 
   async getAudiobookshelfLastPlayed(): Promise<{ status: string; notice?: string; books: Array<{ id: string; title: string; author: string; progress: number; last_played: string | number; library_id: string; is_complete?: boolean }> }> {
     const resp = await apiClient.get('/api/media/audiobookshelf/last-played', { timeout: 10000 });
+    return resp.data;
+  },
+
+  /**
+   * Create any missing Audiobookshelf account for a household member and file each
+   * one's own token. Needs a temporary password for the accounts it creates, and an
+   * administrator token on the default account. Admin only.
+   */
+  async provisionAudiobookshelfAccounts(password: string, usernames?: string[]): Promise<{
+    status: string;
+    created: string[];
+    filed: Array<{ username: string; audiobookshelf_user: string }>;
+    skipped: Array<{ username: string; reason: string }>;
+    music_assistant?: {
+      created: string[];
+      updated: string[];
+      skipped: Array<{ username: string; reason: string }>;
+    };
+  }> {
+    const resp = await apiClient.post(
+      '/api/media/audiobookshelf/users/provision',
+      usernames && usernames.length ? { password, usernames } : { password },
+      { timeout: 120000 },
+    );
+    return resp.data;
+  },
+
+  /**
+   * Give each member their own Audiobookshelf token, copied from the account of
+   * the same name (Audiobookshelf issues one token per account and has no API to
+   * mint another). Admin only. Names are read at the time of the call, so
+   * nothing here knows a household member by name.
+   */
+  async issueAudiobookshelfTokens(usernames?: string[]): Promise<{
+    status: string;
+    issued: Array<{ username: string; audiobookshelf_user: string }>;
+    skipped: Array<{ username: string; reason: string }>;
+  }> {
+    const resp = await apiClient.post(
+      '/api/media/audiobookshelf/users/tokens',
+      usernames && usernames.length ? { usernames } : {},
+      { timeout: 60000 },
+    );
+    return resp.data;
+  },
+
+  /**
+   * The household's Music Assistant accounts, and the address people open it at.
+   * Admin only: an account Jarvis made has a random password nobody knows (the
+   * app signs in with a token), so this is what an administrator reads before
+   * giving someone a login they can use themselves.
+   */
+  async musicAssistantUsers(): Promise<{
+    status: string;
+    users: Array<{
+      username: string;
+      user_id?: string;
+      display_name?: string | null;
+      role: string;
+      enabled: boolean;
+    }>;
+    server?: string | null;
+  }> {
+    const resp = await apiClient.get('/api/media/music-assistant/users');
+    return resp.data;
+  },
+
+  /** The password that person signs in to Music Assistant itself with. Admin only. */
+  async setMusicAssistantPassword(username: string, password: string): Promise<{
+    status: string;
+    username: string;
+    changed: boolean;
+  }> {
+    const resp = await apiClient.post(
+      '/api/media/music-assistant/users/password',
+      { username, password },
+      { timeout: 30000 },
+    );
     return resp.data;
   },
 
@@ -6440,9 +6871,10 @@ export const api = {
   },
 
   async pullAndRestart(serviceName: string): Promise<PullAndRestartResult> {
-    // Pull + recreate can exceed the default 15s axios timeout (gateway allows 120s).
+    // Pull + recreate (which waits for the new container to be healthy) can take
+    // minutes; the gateway allows 450s.
     const resp = await apiClient.post(`/api/admin/services/${serviceName}/pull-and-restart`, undefined, {
-      timeout: 130000,
+      timeout: 460000,
     });
     return resp.data;
   },
@@ -6454,7 +6886,8 @@ export const api = {
   },
 
   async restartService(serviceName: string): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post(`/api/admin/services/${serviceName}/restart`);
+    // A restart onto a new image waits for the new container to be healthy (gateway allows 330s).
+    const resp = await apiClient.post(`/api/admin/services/${serviceName}/restart`, undefined, { timeout: 340000 });
     return resp.data;
   },
 

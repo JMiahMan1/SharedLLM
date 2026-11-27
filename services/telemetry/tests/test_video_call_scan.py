@@ -45,7 +45,7 @@ def wired(monkeypatch):
     async def _settings(_session):
         return {"vision_ocr_proxy_url": "http://vision.local", "vision_ocr_model": "vision-test"}
 
-    async def _chat(_session, url, payload, timeout):
+    async def _chat(_session, url, payload, timeout, headers=None):
         second = "second reviewer" in payload["messages"][0]["content"]
         looks["calls"].append("second" if second else "first")
         answer = looks["second" if second else "first"]

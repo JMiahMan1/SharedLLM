@@ -44,6 +44,7 @@
 
 import { deriveCallKey } from './callVerify';
 import { readLinkPreview, type LinkPreview } from './privateLinkPreview';
+import { parseRecipe, type EditRecipe } from './photoEdit/recipe';
 
 export const PBKDF2_ITERATIONS = 600_000;
 export const SALT_BYTES = 16;
@@ -104,7 +105,7 @@ export type PrivatePayload =
    * `preview` is the link preview the sender's device made (privateLinkPreview.ts): it travels
    * inside the encryption, and an app from before previews keeps only `text`.
    */
-  | { t: 'text'; text: string; preview?: LinkPreview }
+  | { t: 'text'; text: string; preview?: LinkPreview; quote?: Quote }
   /** `sent_at` / `taken_at` are seconds since the epoch, inside the encryption (older pictures have neither). */
   | { t: 'image'; blob: string; mime: string; name?: string; caption?: string; sent_at?: number; taken_at?: number; sha256?: string }
   /**
@@ -116,7 +117,78 @@ export type PrivatePayload =
   /** A video clip, in encrypted pieces (`chunks`), with its encrypted poster frame. */
   | VideoPayload
   /** A comment on a picture (or a video, by its poster) in the chat's gallery, naming the picture's blob. */
-  | { t: 'comment'; blob: string; text: string; sent_at?: number };
+  | { t: 'comment'; blob: string; text: string; sent_at?: number }
+  /** Gallery membership (a sealed gallery entry, never a chat message): see GalleryMark. */
+  | GalleryMark
+  /** When this chat's gallery became opt-in (a sealed gallery entry): see GalleryStart. */
+  | GalleryStart
+  /** An edit of a gallery picture, or going back to its original (a sealed gallery entry): see GalleryEdit. */
+  | GalleryEdit;
+
+/**
+ * A message that answers a picture or clip in the chat, inside the encryption:
+ * the server is never told what a message answers (no plaintext reply_to), so
+ * it cannot link a reply to a picture.
+ */
+export interface Quote {
+  /** The chat message being answered. */
+  m: number;
+  /** Its picture's blob, or a clip's poster. */
+  blob: string;
+}
+
+/**
+ * Pictures or clips sent in the chat, put in the gallery or taken out of it.
+ * Kept as a sealed gallery entry (no unread count, no notice), padded to one
+ * size so the server cannot tell how many pictures one names, or whether it
+ * adds or removes.
+ */
+export interface GalleryMark {
+  t: 'gallery';
+  op: 'add' | 'remove';
+  /** Pictures by blob, clips by their poster. */
+  blobs: string[];
+}
+
+/**
+ * The gallery's opt-in start, written once (by the first phone to open the
+ * gallery after the change). Sent stills and clips from before it count as
+ * added; of the pictures that might move (GIF, WebP, PNG), only `kept` (read
+ * and found to be still) do. See privateGalleryModel.galleryMembership.
+ */
+export interface GalleryStart {
+  t: 'gallery_start';
+  kept: string[];
+}
+
+/**
+ * An edit of a picture in the gallery (a sealed gallery entry, never a chat
+ * message). The original blob (`of`) is never changed or deleted: the edited
+ * picture is a new blob, and the recipe says how it was made from the
+ * original, so a later edit starts from the original again instead of
+ * stacking lossy edits. A record with `revert` puts the original back. For
+ * each original the newest record (server time, then id) is the one shown.
+ * Padded to the same size as every other gallery record.
+ */
+export interface GalleryEdit {
+  t: 'gallery_edit';
+  /** The original picture's blob (a sent picture's, or an added one's). */
+  of: string;
+  /** The edited picture: its blob and what it is. Absent on a revert. */
+  blob?: string;
+  mime?: string;
+  width?: number;
+  height?: number;
+  animated?: boolean;
+  /** How it was made from the original, when it fits in the record... */
+  recipe?: EditRecipe;
+  /** ...otherwise in its own encrypted blob (JSON). */
+  recipe_blob?: string;
+  /** Back to the original. */
+  revert?: true;
+  /** When it was edited (seconds). */
+  edited_at?: number;
+}
 
 /**
  * A video clip. Everything here travels inside the message's encryption: the
@@ -441,7 +513,8 @@ export async function openMessage(key: CryptoKey, raw: string | null | undefined
     const payload = JSON.parse(decoder.decode(plain)) as PrivatePayload;
     if (payload?.t === 'text' && typeof payload.text === 'string') {
       const preview = 'preview' in payload ? readLinkPreview(payload.preview) : null;
-      return { t: 'text', text: payload.text, ...(preview ? { preview } : {}) };
+      const quote = readQuote((payload as { quote?: unknown }).quote);
+      return { t: 'text', text: payload.text, ...(preview ? { preview } : {}), ...(quote ? { quote } : {}) };
     }
     const stamp = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined);
     if (payload?.t === 'image' && typeof payload.blob === 'string' && typeof payload.mime === 'string') {
@@ -464,6 +537,16 @@ export async function openMessage(key: CryptoKey, raw: string | null | undefined
       const sentAt = stamp(payload.sent_at);
       return { t: 'comment', blob: payload.blob, text: payload.text, ...(sentAt ? { sent_at: sentAt } : {}) };
     }
+    if (payload?.t === 'gallery') {
+      const raw = payload as { op?: unknown; blobs?: unknown };
+      if ((raw.op !== 'add' && raw.op !== 'remove') || !blobList(raw.blobs)) return null;
+      return { t: 'gallery', op: raw.op, blobs: [...raw.blobs] };
+    }
+    if (payload?.t === 'gallery_edit') return readGalleryEdit(payload as unknown as Record<string, unknown>, stamp);
+    if (payload?.t === 'gallery_start') {
+      const kept = (payload as { kept?: unknown }).kept ?? [];
+      return blobList(kept) ? { t: 'gallery_start', kept: [...kept] } : null;
+    }
     return null;
   } catch {
     return null;
@@ -471,6 +554,41 @@ export async function openMessage(key: CryptoKey, raw: string | null | undefined
 }
 
 const BLOB_ID = /^[0-9a-f]{32}$/;
+
+/** The most blobs one gallery record names (it is padded to one size: see GALLERY_RECORD_BYTES). */
+export const MAX_GALLERY_MARK_BLOBS = 180;
+
+function blobList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= MAX_GALLERY_MARK_BLOBS && value.every((id) => typeof id === 'string' && BLOB_ID.test(id));
+}
+
+/** A gallery edit record, or null when it is not the right shape. */
+function readGalleryEdit(raw: Record<string, unknown>, stamp: (value: unknown) => number | undefined): GalleryEdit | null {
+  if (typeof raw.of !== 'string' || !BLOB_ID.test(raw.of)) return null;
+  const editedAt = stamp(raw.edited_at);
+  if (raw.revert === true) return { t: 'gallery_edit', of: raw.of, revert: true, ...(editedAt ? { edited_at: editedAt } : {}) };
+  if (typeof raw.blob !== 'string' || !BLOB_ID.test(raw.blob) || raw.blob === raw.of) return null;
+  if (typeof raw.mime !== 'string' || !IMAGE_TYPES.has(raw.mime)) return null;
+  const whole = (value: unknown) => (typeof value === 'number' && Number.isInteger(value) && value > 0 && value < 100_000 ? value : undefined);
+  const out: GalleryEdit = { t: 'gallery_edit', of: raw.of, blob: raw.blob, mime: raw.mime };
+  const width = whole(raw.width);
+  const height = whole(raw.height);
+  if (width && height) Object.assign(out, { width, height });
+  if (raw.animated === true) out.animated = true;
+  const recipe = raw.recipe === undefined ? null : parseRecipe(raw.recipe);
+  if (recipe) out.recipe = recipe;
+  else if (typeof raw.recipe_blob === 'string' && BLOB_ID.test(raw.recipe_blob)) out.recipe_blob = raw.recipe_blob;
+  if (editedAt) out.edited_at = editedAt;
+  return out;
+}
+
+function readQuote(value: unknown): Quote | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as { m?: unknown; blob?: unknown };
+  if (typeof raw.m !== 'number' || !Number.isInteger(raw.m) || raw.m < 1) return null;
+  if (typeof raw.blob !== 'string' || !BLOB_ID.test(raw.blob)) return null;
+  return { m: raw.m, blob: raw.blob };
+}
 
 /** A video message, or null when any part of it is not the right shape (the player could not play it anyway). */
 function readVideo(raw: VideoPayload, stamp: (value: unknown) => number | undefined): VideoPayload | null {
@@ -764,6 +882,11 @@ export class PrivateVault {
 
   async encrypt(data: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
     return encryptBytes(this.need(), data);
+  }
+
+  /** A picture's plain bytes, for a check made on this device (whether it animates); the caller wipes them. */
+  async decrypt(data: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+    return decryptBytes(this.need(), data);
   }
 
   /** A decrypted picture as an object URL, revoked on lock. */

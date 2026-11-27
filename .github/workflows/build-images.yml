@@ -20,15 +20,21 @@ on:
       - 'tools/**'
       - '.github/workflows/build-images.yml'
   workflow_dispatch:
+    inputs:
+      services:
+        description: "Comma-separated services to build (for example gateway,homehub,ui); empty builds what the last commit changed"
+        required: false
+        default: ""
 
-# A new push to a pull request cancels that PR's previous build, which only
-# checks that the images still build. Pushes to a branch publish images and
-# pick their services from the diff against the previous push, so a cancelled
-# or superseded push run would never publish its services: each push run gets
-# a group of its own and always finishes.
+# One image build per branch at a time. A new push to a pull request cancels that PR's previous
+# build (it only checks that the images still build). On a branch, a push waits for the running
+# build and GitHub keeps only the newest waiting one: that run builds every service changed since
+# the last SUCCESSFUL build (see "Determine base commit"), so the pushes it replaces lose nothing,
+# five quick merges make one build instead of five, and images are published in commit order.
 concurrency:
-  group: build-images-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  group: build-images-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 
 permissions:
   contents: read
@@ -47,8 +53,8 @@ jobs:
     outputs:
       build_base: ${{ steps.set-outputs.outputs.build_base }}
       services: ${{ steps.set-outputs.outputs.services }}
-      ui: ${{ steps.filter.outputs.ui }}
-      caddy: ${{ steps.filter.outputs.caddy }}
+      ui: ${{ steps.set-outputs.outputs.ui }}
+      caddy: ${{ steps.set-outputs.outputs.caddy }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,9 +63,21 @@ jobs:
 
       - name: Determine base commit for path filtering
         id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            echo "ref=${{ github.event.before }}" >> $GITHUB_OUTPUT
+            # Everything since the last successful build of this branch, so pushes whose own
+            # (waiting) runs were replaced are still built; the previous push when there is none.
+            LAST=$(gh run list --repo "${{ github.repository }}" --workflow build-images.yml \
+                     --branch "${{ github.ref_name }}" --event push --status success --limit 1 \
+                     --json headSha -q '.[0].headSha' 2>/dev/null || true)
+            if [ -n "$LAST" ] && git merge-base --is-ancestor "$LAST" HEAD 2>/dev/null; then
+              echo "Building everything changed since the last successful build: $LAST"
+              echo "ref=$LAST" >> $GITHUB_OUTPUT
+            else
+              echo "ref=${{ github.event.before }}" >> $GITHUB_OUTPUT
+            fi
           else
             echo "ref=$(git rev-parse HEAD~1 2>/dev/null || git rev-list --max-parents=0 HEAD | head -1)" >> $GITHUB_OUTPUT
           fi
@@ -74,15 +92,12 @@ jobs:
             # and rebuilding it makes every deploy pull gigabytes again.
             base:
               - 'docker/Dockerfile.base'
-              - '.github/workflows/build-images.yml'
             caddy:
               - 'Caddyfile'
               - 'docker/Dockerfile.caddy'
-              - '.github/workflows/build-images.yml'
             ui:
               - 'services/ui/**'
               - 'services/config.py'
-              - '.github/workflows/build-images.yml'
             identity:
               - 'services/identity/**'
               - 'services/common/**'
@@ -103,7 +118,6 @@ jobs:
               - 'tools/webscraper.py'
               - 'tools/vision_ocr.py'
               - 'scripts/index_capabilities.py'
-              - '.github/workflows/build-images.yml'
             storage:
               - 'services/storage/**'
               - 'services/common/**'
@@ -125,7 +139,6 @@ jobs:
               - 'services/common/**'
               - 'services/config.py'
               - 'services/workspace_sandbox.py'
-              - '.github/workflows/build-images.yml'
             control_plane:
               - 'services/control_plane/**'
               - 'services/common/**'
@@ -142,7 +155,6 @@ jobs:
               - 'services/health/**'
               - 'services/common/**'
               - 'services/config.py'
-              - '.github/workflows/build-images.yml'
             homehub:
               - 'services/homehub/**'
               - 'services/common/**'
@@ -151,14 +163,12 @@ jobs:
               - 'services/dns/**'
               - 'services/common/**'
               - 'services/config.py'
-              - '.github/workflows/build-images.yml'
             garden:
               - 'services/garden/**'
               - 'services/common/**'
               - 'services/config.py'
               - 'data/plants_seed/**'
               - 'scripts/build_plants_seed.py'
-              - '.github/workflows/build-images.yml'
 
       - name: Set Outputs
         id: set-outputs
@@ -176,8 +186,45 @@ jobs:
             BUILD_BASE='false'
           fi
           
+          # A pull request's image build only checks that the image still builds; its code is checked by
+          # the test suites and the image is built once, after merge. So a PR builds a service only when
+          # something the image is made from changed: its Dockerfile, its requirements, or docker/.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only "${{ steps.base.outputs.ref }}" HEAD)
+            if echo "$CHANGED" | grep -q '^docker/'; then
+              echo "docker/ changed: building every changed service"
+            else
+              KEEP='[]'
+              for svc in $(echo "$SERVICES_JSON" | jq -r '.[]'); do
+                if echo "$CHANGED" | grep -qE "^services/${svc}/(Dockerfile[^/]*|requirements[^/]*\.txt)$"; then
+                  KEEP=$(echo "$KEEP" | jq -c --arg s "$svc" '. + [$s]')
+                fi
+              done
+              echo "Pull request: building only services whose Dockerfile or requirements changed: $KEEP"
+              SERVICES_JSON="$KEEP"
+            fi
+          fi
+
+          # A manual run can name the services to build (a build that was cancelled, for example).
+          REQUESTED="${{ github.event.inputs.services }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$REQUESTED" ]; then
+            SERVICES_JSON=$(echo "$REQUESTED" | tr ', ' '\n\n' | grep -v '^$' | grep -vxE 'ui|caddy' | jq -R . | jq -sc .)
+            BUILD_BASE='false'
+            echo "Manual run: building $SERVICES_JSON"
+          fi
+
+          UI='${{ steps.filter.outputs.ui }}'
+          CADDY='${{ steps.filter.outputs.caddy }}'
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$REQUESTED" ]; then
+            UI=false; CADDY=false
+            echo ",$REQUESTED," | tr -d ' ' | grep -q ',ui,' && UI=true
+            echo ",$REQUESTED," | tr -d ' ' | grep -q ',caddy,' && CADDY=true
+          fi
+
           echo "build_base=$BUILD_BASE" >> $GITHUB_OUTPUT
           echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
+          echo "ui=$UI" >> $GITHUB_OUTPUT
+          echo "caddy=$CADDY" >> $GITHUB_OUTPUT
 
   build-base:
     name: Build & Push Shared Base
@@ -227,8 +274,11 @@ jobs:
           push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=base
-          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'type=gha,mode=max,scope=base' || '' }}
+          # Layer cache in the registry, next to the image (see build-services).
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-base:buildcache
+            type=gha,scope=base
+          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && format('type=registry,ref={0}/{1}/{2}-base:buildcache,mode=max,image-manifest=true,oci-mediatypes=true', env.REGISTRY, env.IMAGE_NAMESPACE, env.REPO_NAME) || '' }}
           platforms: linux/amd64
 
   build-services:
@@ -312,14 +362,20 @@ jobs:
           push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # One cache scope per image. They all shared the default scope, so
-          # each matrix job overwrote the others' cache index and builds found
-          # nothing to reuse (workspace_runtime: 0 cached steps, 7 minutes, 3.5
-          # of them exporting a cache the next job overwrote). Only pushes
-          # write it: a pull request's cache is visible to that PR alone, and
-          # every PR reads the scopes its base branch writes.
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && format('type=gha,mode=max,scope={0}', matrix.service) || '' }}
+          # The layer cache lives in the registry, as a `buildcache` tag beside
+          # each image. It was in the Actions cache (one scope per image), but
+          # that holds 10 GB for the whole repository and the images' layers
+          # alone were 7 GB of it, so every build evicted another's blobs:
+          # execution's cache manifest was found, its layers were not ("blob
+          # ... not found"), and everything after the first apt step rebuilt
+          # on every run (6 minutes). The eviction also took the pip, npm and
+          # Playwright caches with it. Only pushes write the cache; pull
+          # requests read the one their base branch wrote. The gha scope is
+          # still read until the registry cache has been written once.
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-${{ matrix.service }}:buildcache
+            type=gha,scope=${{ matrix.service }}
+          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && format('type=registry,ref={0}/{1}/{2}-{3}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true', env.REGISTRY, env.IMAGE_NAMESPACE, env.REPO_NAME, matrix.service) || '' }}
           build-args: |
             BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-base:${{ steps.base-tag.outputs.tag }}
             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
@@ -386,8 +442,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=ui
-          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'type=gha,mode=max,scope=ui' || '' }}
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-ui:buildcache
+            type=gha,scope=ui
+          cache-to: ${{ format('type=registry,ref={0}/{1}/{2}-ui:buildcache,mode=max,image-manifest=true,oci-mediatypes=true', env.REGISTRY, env.IMAGE_NAMESPACE, env.REPO_NAME) }}
           build-args: |
             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
             BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
@@ -442,6 +500,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=caddy
-          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'type=gha,mode=max,scope=caddy' || '' }}
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-caddy:buildcache
+            type=gha,scope=caddy
+          cache-to: ${{ format('type=registry,ref={0}/{1}/{2}-caddy:buildcache,mode=max,image-manifest=true,oci-mediatypes=true', env.REGISTRY, env.IMAGE_NAMESPACE, env.REPO_NAME) }}
           platforms: linux/amd64

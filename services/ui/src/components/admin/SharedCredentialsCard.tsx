@@ -1,8 +1,9 @@
 import { useState, type FC } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users } from 'lucide-react';
+import { KeyRound, UserPlus, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
+import PasswordField from '../ui/PasswordField';
 import { useIntegrations } from '../../hooks/useIntegrations';
 import type { CredentialShares, ShareableService } from '../../types/api';
 
@@ -28,6 +29,8 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
 }) => {
   const queryClient = useQueryClient();
   const [note, setNote] = useState('');
+  const [tokenResult, setTokenResult] = useState<string>('');
+  const [absPassword, setAbsPassword] = useState('');
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['credential-shares', username],
@@ -51,6 +54,58 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
     },
     onError: (err: unknown) => {
       toast.error(err instanceof Error ? err.message : 'Update failed');
+    },
+  });
+
+  // Audiobookshelf issues one token per account and shows it to an administrator:
+  // there is no API to mint another (POST /api/users/{id}/token is a 404 on 2.33).
+  // So each member's own token is copied from the ABS account of the same name,
+  // which is what stops the household sharing one login.
+  const tokens = useMutation({
+    mutationFn: () => api.issueAudiobookshelfTokens(),
+    onSuccess: (result) => {
+      const issued = result.issued.length;
+      const skipped = result.skipped;
+      setTokenResult(
+        `${issued} given their own token` +
+          (skipped.length
+            ? `; ${skipped.length} not: ` + skipped.map((s) => `${s.username} (${s.reason})`).join(', ')
+            : ''),
+      );
+      queryClient.invalidateQueries({ queryKey: ['me'] });
+      toast.success(skipped.length ? `Filed ${issued} token(s); ${skipped.length} left alone` : `Filed ${issued} token(s)`);
+    },
+    onError: (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : 'Could not file the tokens');
+    },
+  });
+
+  // An administrator token is enough for Audiobookshelf to make accounts, and it
+  // answers with each new account's own token, so the household can be set up from
+  // here without anyone signing in to the server by hand.
+  const provision = useMutation({
+    mutationFn: () => api.provisionAudiobookshelfAccounts(absPassword),
+    onSuccess: (result) => {
+      const created = result.created.length;
+      const filed = result.filed.length;
+      const skipped = result.skipped;
+      const ma = result.music_assistant;
+      const maLine = ma && ma.created.length + ma.updated.length > 0
+        ? `; Music Assistant set up for ${ma.created.length + ma.updated.length}`
+        : '';
+      setTokenResult(
+        `${created} account(s) created, ${filed} given a token` +
+          (skipped.length
+            ? `; ${skipped.length} not: ` + skipped.map((s) => `${s.username} (${s.reason})`).join(', ')
+            : '') +
+          maLine,
+      );
+      setAbsPassword('');
+      queryClient.invalidateQueries({ queryKey: ['me'] });
+      toast.success(`${filed} member(s) now have their own Audiobookshelf token`);
+    },
+    onError: (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : 'Could not set the accounts up');
     },
   });
 
@@ -139,6 +194,60 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
       ) : (
         <p className="text-[9px] text-slate-500">An admin grants or revokes shared access.</p>
       )}
+
+      {isAdmin ? (
+        <div className="pt-1 border-t border-white/5 space-y-2">
+          <button
+            type="button"
+            data-testid="abs-issue-tokens"
+            onClick={() => tokens.mutate()}
+            disabled={tokens.isPending}
+            className="glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest flex items-center gap-2 disabled:opacity-40"
+          >
+            <KeyRound size={14} />
+            {tokens.isPending ? 'Filing tokens…' : 'Give everyone their own Audiobookshelf token'}
+          </button>
+          <p className="text-[10px] text-slate-500 leading-relaxed">
+            Audiobookshelf keeps one token per account. This copies each account&apos;s own token onto the
+            member of the same name, so everyone reads and listens as themselves instead of through the
+            household login.
+          </p>
+          {tokenResult ? (
+            <p role="status" className="text-[10px] text-slate-300">
+              {tokenResult}
+            </p>
+          ) : null}
+
+          <div className="pt-2 space-y-2">
+            <label className="block text-[10px] text-slate-500" htmlFor="abs-account-password">
+              Temporary password for any account created here
+            </label>
+            <PasswordField
+              id="abs-account-password"
+              value={absPassword}
+              onChange={(e) => setAbsPassword(e.target.value)}
+              autoComplete="new-password"
+              aria-label="Temporary password for any account created here"
+              className="glass-input w-full text-xs py-2 bg-black/20 font-mono"
+            />
+            <button
+              type="button"
+              data-testid="abs-provision-accounts"
+              onClick={() => provision.mutate()}
+              disabled={provision.isPending || !absPassword}
+              className="glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest flex items-center gap-2 disabled:opacity-40"
+            >
+              <UserPlus size={14} />
+              {provision.isPending ? 'Setting accounts up…' : 'Create missing Audiobookshelf accounts'}
+            </button>
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              Anyone in this household without an Audiobookshelf account gets one with this password (they can
+              change it), and everyone&apos;s own token is filed straight after. Only works while the default
+              account holds an administrator token.
+            </p>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };
