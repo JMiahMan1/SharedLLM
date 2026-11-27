@@ -118,7 +118,7 @@ export default function ReactionChips({
           role="dialog"
           aria-label="Who reacted"
           data-testid="reaction-people"
-          className="z-20 mt-1 w-max min-w-[11rem] max-w-[min(18rem,80vw)] rounded-2xl border border-white/10 bg-slate-900/95 p-2 text-sm shadow-xl backdrop-blur"
+          className="z-20 mt-1 w-max min-w-[11rem] max-w-[min(18rem,80vw)] scroll-mt-3 scroll-mb-3 rounded-2xl border border-white/10 bg-slate-900/95 p-2 text-sm shadow-xl backdrop-blur"
         >
           <div className="flex items-center justify-between gap-2 pl-1">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Reactions</span>

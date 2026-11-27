@@ -530,9 +530,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                     raise RuntimeError(f"{self.provider_name} HTTP {resp.status}: {raw_text}")
                 resp.raise_for_status()
                 data = self._unwrap_envelope(await resp.json())
-                msg = data.get("choices", [{}])[0].get("message", {})
-                content = msg.get("content", "") or ""
-                reasoning = msg.get("reasoning_content", "") or ""
+                choices = data.get("choices") or []
+                msg = (choices[0].get("message") or {}) if choices and isinstance(choices[0], dict) else {}
+                content = strip_thinking_blocks(msg.get("content") or "")
+                reasoning = msg.get("reasoning_content") or msg.get("reasoning") or ""
                 # Return only the visible content; fall back to reasoning if model
                 # put its entire answer in the thinking block (some model configs do this)
                 return content if content.strip() else reasoning
@@ -543,8 +544,8 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             full_reasoning = ""
             async with client.post(self.base_url, json=payload, headers=headers, timeout=self.timeout) as response:
                 if response.status >= 400:
-                    await response.read()
-                    raise RuntimeError(f"{self.provider_name} stream HTTP {response.status}: {response.text}")
+                    err_text = await response.text()
+                    raise RuntimeError(f"{self.provider_name} stream HTTP {response.status}: {err_text}")
                 response.raise_for_status()
                 # SSE frames arrive as arbitrary byte chunks, so one read can carry
                 # several "data: ..." lines (or a partial one). Buffer and split on
@@ -567,9 +568,12 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                             break
                         try:
                             chunk_json = self._unwrap_envelope(json.loads(data_str))
-                            delta = chunk_json.get("choices", [{}])[0].get("delta", {})
+                            choices = chunk_json.get("choices") or []
+                            if not choices or not isinstance(choices[0], dict):
+                                continue
+                            delta = choices[0].get("delta") or {}
                             content = delta.get("content") or ""
-                            reasoning = delta.get("reasoning_content") or ""
+                            reasoning = delta.get("reasoning_content") or delta.get("reasoning") or ""
 
                             if reasoning:
                                 full_reasoning += reasoning

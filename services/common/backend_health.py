@@ -118,9 +118,11 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
+        probe_interval = _env_seconds("LOCAL_AI_PROBE_INTERVAL_S", 15.0, 1.0, 3600.0)
+        probe_max = max(probe_interval, _env_seconds("LOCAL_AI_PROBE_MAX_S", 30.0, 1.0, 3600.0))
         return cls(
-            probe_interval=_env_seconds("LOCAL_AI_PROBE_INTERVAL_S", 15.0, 1.0, 3600.0),
-            probe_max=_env_seconds("LOCAL_AI_PROBE_MAX_S", 30.0, 1.0, 3600.0),
+            probe_interval=probe_interval,
+            probe_max=probe_max,
             watch_interval=_env_seconds("LOCAL_AI_WATCH_INTERVAL_S", 60.0, 0.0, 86400.0),
             summary_interval=_env_seconds("LOCAL_AI_LOG_SUMMARY_S", 600.0, 10.0, 86400.0),
             probe_timeout=_env_seconds("LOCAL_AI_PROBE_TIMEOUT_S", 4.0, 0.5, 60.0),
@@ -579,7 +581,7 @@ class BackendHealth:
             self._wake.clear()
             if self._stop.is_set():
                 return
-            if woke:
+            if woke or self._wake.is_set():
                 continue  # state changed: recompute the delay
             self.probe_once()
 

@@ -5701,7 +5701,14 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
                         # An offline local AI is a plain sentence, not an "[ERROR]".
                         text = err if fail.get("offline") else f"[ERROR]: {err}"
                         if is_openai:
-                            yield f"data: {json.dumps(_make_openai_chunk(text, selected_model, 'stop'))}\n\n"
+                            chunk = _make_openai_chunk(text, selected_model, 'stop')
+                            if fail.get("offline"):
+                                chunk["offline"] = fail.get("offline")
+                                if fail.get("code"):
+                                    chunk["error_code"] = fail.get("code")
+                                if fail.get("error_id"):
+                                    chunk["error_id"] = fail.get("error_id")
+                            yield f"data: {json.dumps(chunk)}\n\n"
                         else:
                             yield json.dumps(_make_ollama_chunk(
                                 text, selected_model, True, error_code=fail.get("code"), error_id=fail.get("error_id"),
@@ -6552,6 +6559,12 @@ def _arcade_status(exc: BaseException) -> int:
     return 503 if local_ai.ARCADE.is_down() else 502
 
 
+def _lan_timeout(total: float) -> aiohttp.ClientTimeout:
+    """Timeout with an explicit connect limit so a powered-off LAN host raises
+    ConnectionTimeoutError (opening the breaker) instead of a generic TimeoutError."""
+    return aiohttp.ClientTimeout(total=total, sock_connect=min(total * 0.8, local_ai.SETTINGS.connect_timeout))
+
+
 def _arcade_public_url() -> str:
     """The address browsers open games at, or a descriptive error."""
     if not ALPACA_ARCADE_PUBLIC_URL:
@@ -6568,8 +6581,9 @@ async def _fetch_arcade_games(sort: str | None = None) -> list:
         resp = await client.get(
             f"{_arcade_url()}/api/games",
             params=params,
-            timeout=aiohttp.ClientTimeout(total=8.0),
+            timeout=_lan_timeout(8.0),
         )
+        local_ai.ARCADE.record_success()
         data = await _safe_json(resp)
     if resp.status >= 400 or not isinstance(data, dict) or not data.get("success"):
         raise ValueError(f"arcade responded {resp.status}")
@@ -6584,7 +6598,8 @@ async def _family_published_slugs() -> set[str]:
     is treated as having published none, so nothing unapproved slips through."""
     try:
         async with shared_http_client() as client:
-            resp = await client.get(f"{_arcade_url()}/api/family/games", timeout=aiohttp.ClientTimeout(total=8.0))
+            resp = await client.get(f"{_arcade_url()}/api/family/games", timeout=_lan_timeout(8.0))
+            local_ai.ARCADE.record_success()
             data = await _safe_json(resp)
     except Exception as exc:
         _arcade_failed("family states lookup", exc)
@@ -6646,13 +6661,13 @@ async def proxy_family_games(request: Request):
         async with shared_http_client() as client:
             resp = await client.get(
                 f"{_arcade_url()}/api/family/games",
-                timeout=aiohttp.ClientTimeout(total=8.0),
+                timeout=_lan_timeout(8.0),
             )
+            local_ai.ARCADE.record_success()
             data = await _safe_json(resp)
         if resp.status >= 400 or not isinstance(data, dict) or not isinstance(data.get("games"), list):
             raise ValueError(f"arcade responded {resp.status}")
     except Exception as exc:  # report the failure, never swallow it
-        _arcade_failed("family games fetch", exc)
         return {
             "success": False,
             "arcade_available": False,
@@ -6866,8 +6881,13 @@ async def proxy_arcade_scoreboard(request: Request):
         players.sort(key=lambda p: (-p["best_score"], p["display_name"].lower()))
         return {"success": True, "arcade_available": True, "players": players}
     except (TimeoutError, aiohttp.ClientError, ValueError, BackendUnavailable) as exc:
-        _arcade_failed("scoreboard fetch", exc)
-        return {"success": False, "arcade_available": False, "players": [], "error": str(exc)}
+        return {
+            "success": False,
+            "arcade_available": False,
+            "players": [],
+            "error": _arcade_error(exc),
+            "offline": local_ai.ARCADE.is_down(),
+        }
 
 
 @app.post("/api/arcade/games/{slug}/scores")
@@ -6922,8 +6942,9 @@ async def proxy_arcade_highscores(request: Request):
             resp = await client.get(
                 f"{_arcade_url()}/api/highscores",
                 params={"collection": _arcade_collection(request)},
-                timeout=aiohttp.ClientTimeout(total=8.0),
+                timeout=_lan_timeout(8.0),
             )
+            local_ai.ARCADE.record_success()
             if resp.status != 200:
                 raise ValueError(f"arcade responded {resp.status}")
             payload = await resp.json()
@@ -6941,13 +6962,13 @@ async def proxy_arcade_highscores(request: Request):
             "games": payload.get("games") or [],
         }
     except (TimeoutError, aiohttp.ClientError, ValueError, BackendUnavailable) as exc:
-        _arcade_failed("highscores fetch", exc)
         return {
             "success": False,
             "arcade_available": False,
             "players": [],
             "games": [],
-            "error": str(exc),
+            "error": _arcade_error(exc),
+            "offline": local_ai.ARCADE.is_down(),
         }
 
 
@@ -6973,7 +6994,6 @@ async def proxy_arcade_games(request: Request = None):
         ranked = _rank_arcade_games(games, featured_slugs, sort)
         return {"success": True, "arcade_available": True, **payload, **ranked, "count": len(games)}
     except Exception as exc:  # report the failure, never swallow it
-        _arcade_failed("games fetch", exc)
         return {
             "success": False,
             "arcade_available": False,
@@ -11780,6 +11800,7 @@ async def sd_image_generate_proxy(request: Request):
         local_ai.IMAGES.set_url(base_url)
         local_ai.IMAGES.check()
         resp = await get_http_client().post(f"{base_url}/v1/images/generations", json=body)
+        local_ai.IMAGES.record_success()
         return JSONResponse(status_code=resp.status, content=await resp.json())
     except BackendUnavailable as exc:
         return local_ai.offline_response(exc, message=local_ai.IMAGES_OFFLINE)
@@ -11855,8 +11876,9 @@ async def music_song_start(request: Request):
     payload = {k: body[k] for k in ("prompt", "duration_s", "structure", "seed", "temperature", "guidance_scale") if body.get(k) is not None}
     try:
         resp = await get_http_client().post(
-            f"{ALPACA_AUDIO_URL}/api/music/jobs", json=payload, timeout=aiohttp.ClientTimeout(total=30.0)
+            f"{ALPACA_AUDIO_URL}/api/music/jobs", json=payload, timeout=_lan_timeout(30.0)
         )
+        local_ai.AUDIO.record_success()
         result = await resp.json()
     except Exception as exc:  # reported to the caller
         return _audio_failure(exc)
@@ -11876,8 +11898,9 @@ async def music_song_status(request: Request, job_id: str):
         return JSONResponse(status_code=404, content={"status": "ERROR", "message": "No such song"})
     try:
         resp = await get_http_client().get(
-            f"{ALPACA_AUDIO_URL}/api/music/jobs/{job_id}", timeout=aiohttp.ClientTimeout(total=30.0)
+            f"{ALPACA_AUDIO_URL}/api/music/jobs/{job_id}", timeout=_lan_timeout(30.0)
         )
+        local_ai.AUDIO.record_success()
         result = await resp.json()
     except Exception as exc:  # reported to the caller
         return _audio_failure(exc)
@@ -11892,8 +11915,9 @@ async def music_song_cancel(request: Request, job_id: str):
         return JSONResponse(status_code=404, content={"status": "ERROR", "message": "No such song"})
     try:
         resp = await get_http_client().delete(
-            f"{ALPACA_AUDIO_URL}/api/music/jobs/{job_id}", timeout=aiohttp.ClientTimeout(total=30.0)
+            f"{ALPACA_AUDIO_URL}/api/music/jobs/{job_id}", timeout=_lan_timeout(30.0)
         )
+        local_ai.AUDIO.record_success()
         result = await resp.json()
     except Exception as exc:  # reported to the caller
         return _audio_failure(exc)
@@ -12150,6 +12174,7 @@ async def sd_image_models_proxy(request: Request):
         local_ai.IMAGES.set_url(base_url)
         local_ai.IMAGES.check()
         resp = await get_http_client().get(f"{base_url}/v1/images/models")
+        local_ai.IMAGES.record_success()
         return JSONResponse(status_code=resp.status, content=await resp.json())
     except BackendUnavailable as exc:
         return local_ai.offline_response(exc, message=local_ai.IMAGES_OFFLINE)

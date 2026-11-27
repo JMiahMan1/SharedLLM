@@ -241,11 +241,12 @@ def provider_from_settings(settings: dict[str, Any]) -> CloudProvider | None:
 
 async def _send(provider: CloudProvider, messages: list[dict[str, str]]) -> str:
     """The one place a request leaves the house: the existing OpenAI-compatible adapter."""
-    from services.gateway.llm_providers import OpenAICompatibleProvider
+    from services.gateway.llm_providers import OpenAICompatibleProvider, strip_thinking_blocks
 
     adapter = OpenAICompatibleProvider(api_key=provider.api_key, base_url=provider.url,
                                        provider_name=provider.name, timeout=120.0)
-    return await adapter.generate(provider.model, messages, options={"temperature": 0.3})
+    raw = await adapter.generate(provider.model, messages, options={"temperature": 0.3})
+    return strip_thinking_blocks(raw)
 
 
 class CloudFallbackClient:

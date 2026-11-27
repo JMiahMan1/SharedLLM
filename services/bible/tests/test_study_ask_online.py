@@ -235,3 +235,59 @@ async def test_an_offline_refusal_is_its_own_kind():
     assert isinstance(await study_ask._refusal(_R()), study_ask.StudyAskOffline)
     busy = await study_ask._refusal(_Busy())
     assert isinstance(busy, study_ask.StudyAskUnavailable) and not isinstance(busy, study_ask.StudyAskOffline)
+
+
+async def test_stream_offline_sse_chunk_raises_study_ask_offline(monkeypatch):
+    """When the first streaming request trips the breaker mid-flight, the gateway emits an SSE
+    chunk carrying offline='local_ai'. ask_stream must raise StudyAskOffline so online fallback runs."""
+
+    class _StreamResp:
+        status = 200
+
+        def __init__(self):
+            payload = {
+                "choices": [{"delta": {"content": OFFLINE}, "finish_reason": "stop"}],
+                "offline": "local_ai",
+                "error_code": "local_ai_offline",
+            }
+            self.content = self._lines(payload)
+
+        @staticmethod
+        async def _lines(payload):
+            yield f"data: {json.dumps(payload)}\n".encode()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _StreamSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def post(self, *a, **kw):
+            return _StreamResp()
+
+    monkeypatch.setattr(study_ask.aiohttp, "ClientSession", lambda **kw: _StreamSession())
+    with pytest.raises(study_ask.StudyAskOffline):
+        async for _ in study_ask.ask_stream(prompt="p", user="u", gateway_url="http://gw.test", internal_secret="s"):
+            pass
+
+
+def test_online_payload_clamps_long_reference_and_verse_text():
+    long_ref = "1 Corinthians 13:1-13; " * 6
+    long_text = "x" * 2500
+    payload = study_ask.online_payload(
+        reference=long_ref,
+        verses=[{"reference": long_ref, "text": long_text}],
+        translation="kjv",
+        question="What does this mean?",
+        depth="adult",
+    )
+    assert len(payload["reference"]) <= 80
+    assert len(payload["verses"][0]["reference"]) <= 80
+    assert len(payload["verses"][0]["text"]) <= 2000

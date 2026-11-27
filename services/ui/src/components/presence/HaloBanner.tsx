@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { MapPin, ChevronLeft, ChevronRight, Navigation } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useLocation } from '../../context/LocationContext';
@@ -30,28 +30,46 @@ const HaloBanner = ({ rooms, userId }: HaloBannerProps) => {
   const hasLocation = locationCtx?.latitude !== null;
   const [presenceRoom, setPresenceRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(false);
-  const loadingRef = useRef(false);
 
   useEffect(() => {
-    if (!userId) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!userId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPresenceRoom(null);
+      setLoading(false);
+      return;
+    }
+    // Abort on unmount: the fetch must not settle into a torn down happy-dom
+    // window (a late axios interceptor reads window.location), and a resolved
+    // promise must not set state on an unmounted banner.
+    const controller = new AbortController();
+    let alive = true;
     setLoading(true);
-    api.getUserPresence(userId)
+    api.getUserPresence(userId, controller.signal)
       .then((data: PresenceData) => {
-        if (data?.presence) {
-          setPresenceRoom({
-            id: data.presence.room,
-            name: data.presence.room.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-            confidence: data.presence.confidence,
-            source: data.presence.source,
-          });
+        if (!alive) return;
+        if (!data?.presence) {
+          setPresenceRoom(null);
+          return;
         }
+        setPresenceRoom({
+          id: data.presence.room,
+          name: data.presence.room.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          confidence: data.presence.confidence,
+          source: data.presence.source,
+        });
       })
-      .catch(() => setPresenceRoom(null))
+      .catch(() => {
+        if (alive) setPresenceRoom(null);
+      })
       .finally(() => {
-        setLoading(false);
-        loadingRef.current = false;
+        if (alive) {
+          setLoading(false);
+        }
       });
+    return () => {
+      alive = false;
+      controller.abort();
+    };
   }, [userId]);
 
   const displayRooms = rooms || (presenceRoom ? [presenceRoom] : []);
