@@ -78,6 +78,14 @@ let partialWatch: number | null = null;
 let partialBusy = false;
 /** Bumped when a take ends, so a slow partial cannot overwrite the real transcript. */
 let partialToken = 0;
+/** The 15 s cap on one take. Tracked, so take #1's timer cannot end take #2. */
+let hardCap: number | null = null;
+/** The Web Audio context behind the level meter; a WebView only allows a handful of them. */
+let meterCtx: AudioContext | null = null;
+/** The hands-free restart. Tracked, so closing or reopening cancels a stale take. */
+let rearmTimer: number | null = null;
+/** Bumped per start: a start whose permission prompt is still open must not finish. */
+let startSeq = 0;
 let state: AssistState = 'idle';
 /** The turn in flight, so closing the sheet stops it instead of letting it talk to an empty room. */
 let turnAbort: AbortController | null = null;
@@ -103,6 +111,21 @@ function stopMeter() {
   if (partialWatch !== null) {
     window.clearInterval(partialWatch);
     partialWatch = null;
+  }
+  if (hardCap !== null) {
+    window.clearTimeout(hardCap);
+    hardCap = null;
+  }
+  if (rearmTimer !== null) {
+    window.clearTimeout(rearmTimer);
+    rearmTimer = null;
+  }
+  if (meterCtx) {
+    // An Android WebView allows only a few live contexts; leaving them open
+    // made the level meter and the silence detection die after a few turns.
+    const context = meterCtx;
+    meterCtx = null;
+    void Promise.resolve(context.close()).catch(() => undefined);
   }
 }
 
@@ -219,7 +242,9 @@ function deviceName(): string {
 /** Keeps listening after a turn when the sheet is open, so nobody has to tap again. */
 function rearm() {
   if (!handsFree) return;
-  window.setTimeout(() => {
+  if (rearmTimer !== null) window.clearTimeout(rearmTimer);
+  rearmTimer = window.setTimeout(() => {
+    rearmTimer = null;
     if (handsFree) void webStart();
   }, 700);
 }
@@ -326,10 +351,23 @@ async function finishTurn(blob: Blob) {
 }
 
 async function webStart() {
+  // A tap during the 700 ms hands-free pause must start one take, not two.
+  if (rearmTimer !== null) {
+    window.clearTimeout(rearmTimer);
+    rearmTimer = null;
+  }
   if (recorder && recorder.state === 'recording') {
     recorder.stop();
     return;
   }
+  // A fresh take is a fresh question. Tapping "Ask again" while the answer is
+  // still talking used to record Jarvis over the top of itself.
+  stopSpeech();
+  turnAbort?.abort();
+  turnAbort = null;
+  // Bumped by stop(): a start still waiting on a permission prompt must not come
+  // back and leave a recording nobody is listening to.
+  const seq = ++startSeq;
   // A WebView will not record until Android has granted the microphone, and only
   // the native side can ask. Without this the sheet opens and hears nothing.
   try {
@@ -337,15 +375,17 @@ async function webStart() {
   } catch {
     // Ask the browser anyway; a refusal is reported below.
   }
+  if (seq !== startSeq) return;
   if (!navigator.mediaDevices?.getUserMedia) {
     emit({ type: 'status', text: 'microphone unavailable' });
     emit({ type: 'error', text: 'This screen cannot open a microphone. Open Jarvis on the app.' });
     return;
   }
+  let opened: MediaStream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    emit({ type: 'status', text: 'microphone ready' });
+    opened = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (error) {
+    if (seq !== startSeq) return;
     const name = error instanceof Error ? error.name : '';
     emit({
       type: 'status',
@@ -361,26 +401,35 @@ async function webStart() {
     setState('idle');
     return;
   }
+  if (seq !== startSeq) {
+    // The sheet closed while the microphone was opening: give it straight back.
+    opened.getTracks().forEach((track) => track.stop());
+    return;
+  }
+  stream = opened;
+  emit({ type: 'status', text: 'microphone ready' });
   const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(
     (type) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type),
   );
+  let active: MediaRecorder;
   try {
-    recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    active = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
   } catch {
     emit({ type: 'error', text: 'This browser cannot record audio.' });
     releaseMic();
     return;
   }
+  recorder = active;
   chunks = [];
   discard = false;
-  recorder.ondataavailable = (event) => {
+  active.ondataavailable = (event) => {
     if (event.data && event.data.size > 0) chunks.push(event.data);
   };
-  recorder.onstop = () => {
+  active.onstop = () => {
     // Anything still in flight belongs to the take that just ended.
     partialToken += 1;
-    const blob = new Blob(chunks, { type: recorder?.mimeType || 'audio/webm' });
-    recorder = null;
+    const blob = new Blob(chunks, { type: active.mimeType || 'audio/webm' });
+    if (recorder === active) recorder = null;
     if (discard) {
       // The sheet closed mid-take: that clip was never a question.
       discard = false;
@@ -400,7 +449,7 @@ async function webStart() {
     }
     void finishTurn(blob);
   };
-  recorder.start(250);  // periodic chunks: a WebView may send nothing until the end
+  active.start(250);  // periodic chunks: a WebView may send nothing until the end
   setState('listening');
   // Live words: the take is transcribed every 1.5 s so the sheet shows the person
   // being heard. One request at a time, and only the newest take's words show.
@@ -418,13 +467,14 @@ async function webStart() {
   let lastLoudAt = 0;
   let meterRunning = false;
   const stopTake = () => {
-    if (recorder && recorder.state === 'recording') recorder.stop();
+    if (active.state === 'recording') active.stop();
   };
   try {
     const Ctx = window.AudioContext
       || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (Ctx) {
+    if (Ctx && stream) {
       const context = new Ctx();
+      meterCtx = context;
       const analyser = context.createAnalyser();
       analyser.fftSize = 512;
       context.createMediaStreamSource(stream).connect(analyser);
@@ -453,8 +503,9 @@ async function webStart() {
       else if (!heardSpeech && now - startedAt >= 5000) stopTake();
     }, 150);
   }
-  // The hard cap: no recording is left running if the person walks away.
-  window.setTimeout(stopTake, 15000);
+  // The hard cap: no recording is left running if the person walks away. It is
+  // bound to this take's recorder, so it cannot end a later one mid-sentence.
+  hardCap = window.setTimeout(stopTake, 15000);
 }
 
 const web: JarvisAssistPlugin = {
@@ -464,10 +515,15 @@ const web: JarvisAssistPlugin = {
   },
   async stop() {
     handsFree = false;
+    // Cancels a start whose permission prompt is still open, so closing the
+    // sheet cannot leave a recording running behind it.
+    startSeq += 1;
     turnAbort?.abort();
     turnAbort = null;
-    discard = true;
-    if (recorder && recorder.state === 'recording') recorder.stop();
+    if (recorder && recorder.state === 'recording') {
+      discard = true;
+      recorder.stop();
+    }
     stopSpeech();
     releaseMic();
     setState('idle');
@@ -534,8 +590,28 @@ export const JarvisAssist: JarvisAssistPlugin = {
     }
     return web.start();
   },
-  stop: () => web.stop(),
-  stopSpeaking: () => web.stopSpeaking(),
+  // Both halves are stopped, always. The sheet's close button has to end the
+  // native service too, or a hands-free turn keeps the microphone open behind it.
+  stop: async () => {
+    await web.stop();
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await native.stop();
+      } catch {
+        // An older APK has no native service to stop.
+      }
+    }
+  },
+  stopSpeaking: async () => {
+    await web.stopSpeaking();
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await native.stopSpeaking();
+      } catch {
+        // An older APK has no native service to silence.
+      }
+    }
+  },
   status: () => web.status(),
   speak: (options) => web.speak(options),
   setWakePhrase: (options) =>
@@ -546,6 +622,35 @@ export const JarvisAssist: JarvisAssistPlugin = {
       : web.assistantRole(),
   requestAssistantRole: () =>
     Capacitor.isNativePlatform() ? native.requestAssistantRole().catch(() => undefined) : web.requestAssistantRole(),
-  addListener: (eventName, listenerFunc) =>
-    Capacitor.isNativePlatform() ? native.addListener(eventName, listenerFunc) : web.addListener(eventName, listenerFunc),
+  /**
+   * The web turn is what runs on every device - including inside the phone app,
+   * where `start()` deliberately uses it so a tap can never start a microphone
+   * service that Android refuses. So the web listeners must always be attached;
+   * on a phone the native plugin's events are attached as well (a hands-free
+   * native turn speaks through them), and both are removed together.
+   */
+  addListener: (eventName, listenerFunc) => {
+    const registered: Array<Promise<{ remove: () => Promise<void> } | null>> = [
+      web.addListener(eventName, listenerFunc).catch(() => null),
+    ];
+    if (Capacitor.isNativePlatform()) {
+      registered.push(
+        Promise.resolve()
+          .then(() => native.addListener(eventName, listenerFunc))
+          .catch(() => null),
+      );
+    }
+    return Promise.all(registered).then((handles) => ({
+      remove: async () => {
+        for (const handle of handles) {
+          if (!handle) continue;
+          try {
+            await handle.remove();
+          } catch {
+            // already gone with the page it belonged to
+          }
+        }
+      },
+    }));
+  },
 };

@@ -26,7 +26,14 @@ public final class AssistTriggerReceiver extends BroadcastReceiver {
         if (intent == null) return;
         String action = intent.getAction();
         if (ACTION_TALK.equals(action)) {
-            AssistService.turn(context, false);
+            // A pinned shortcut still sends this broadcast, and a broadcast is in
+            // the background: Android 12+ refuses a microphone foreground service
+            // from here. Fall back to the activity, which may start it.
+            try {
+                AssistService.turn(context, false);
+            } catch (RuntimeException refused) {
+                startAssist(context);
+            }
             return;
         }
         if (!Intent.ACTION_MEDIA_BUTTON.equals(action)) return;
@@ -43,7 +50,18 @@ public final class AssistTriggerReceiver extends BroadcastReceiver {
         boolean screenOn = power == null || power.isInteractive();
         if (AssistEntryRules.startsTurn(event.getKeyCode(), event.getAction(), twice, screenOn)) {
             lastPressMs = 0;
-            AssistService.turn(context, false);
+            try {
+                AssistService.turn(context, false);
+            } catch (RuntimeException refused) {
+                startAssist(context);
+            }
         }
+    }
+
+    /** Opened in the foreground, so the turn's service may legally start. */
+    private static void startAssist(Context context) {
+        Intent open = new Intent(context, AssistActivity.class);
+        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        context.startActivity(open);
     }
 }

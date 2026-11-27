@@ -29,6 +29,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -109,6 +111,12 @@ public final class AssistService extends Service {
     }
 
     private final ExecutorService work = Executors.newSingleThreadExecutor();
+    /**
+     * The "one moment" ack runs on its own timer, not on {@link #work}: that
+     * executor carries the chat call, so sleeping on it delayed the answer by the
+     * whole ack delay and fired the ack before chat had even started.
+     */
+    private final ScheduledExecutorService ack = Executors.newSingleThreadScheduledExecutor();
     private final AtomicBoolean alive = new AtomicBoolean(false);
     private final Deque<String> sentences = new ArrayDeque<>();
     private final Object sentenceLock = new Object();
@@ -117,6 +125,9 @@ public final class AssistService extends Service {
     private AssistPlayer player;
     private AudioRecord record;
     private Thread capture;
+    private Thread speaker;
+    /** The scheduled "one moment" line, cancelled the moment an answer exists. */
+    private volatile ScheduledFuture<?> pendingAck;
     private volatile boolean wakeMode;
     private volatile int floor;
     private volatile String conversation = VoiceClient.newConversation();
@@ -131,7 +142,6 @@ public final class AssistService extends Service {
         client = new VoiceClient(this);
         player = new AssistPlayer(this);
         channel();
-        startSpeaker();
     }
 
     @Override
@@ -152,6 +162,9 @@ public final class AssistService extends Service {
             running = true;
             foreground();
             startCapture();
+            // Started here rather than in onCreate: the loop only runs while a
+            // turn is alive, and a speaker created before that spun at 100% CPU.
+            startSpeaker();
         }
         beginTurn();
         return START_NOT_STICKY;
@@ -162,9 +175,22 @@ public final class AssistService extends Service {
         alive.set(false);
         running = false;
         wakeMode = false;
+        cancelAck();
         stopCapture();
         if (player != null) player.stop();
+        // The speaker waits on this lock: without the wake-up it never sees the
+        // service go away, and a thread left waiting holds its line forever.
+        synchronized (sentenceLock) {
+            sentences.clear();
+            streamDone = true;
+            sentenceLock.notifyAll();
+        }
+        if (speaker != null) {
+            speaker.interrupt();
+            speaker = null;
+        }
         work.shutdownNow();
+        ack.shutdownNow();
         setState(STATE_IDLE);
         super.onDestroy();
     }
@@ -178,6 +204,7 @@ public final class AssistService extends Service {
 
     private void beginTurn() {
         if (!alive.get()) return;
+        cancelAck();
         synchronized (sentenceLock) {
             sentences.clear();
         }
@@ -186,6 +213,13 @@ public final class AssistService extends Service {
         firstSentenceAt = 0;
         spoken = 0;
         setState(STATE_LISTENING);
+    }
+
+    /** Drop a "one moment" line that has not been said yet. */
+    private void cancelAck() {
+        ScheduledFuture<?> pending = pendingAck;
+        pendingAck = null;
+        if (pending != null) pending.cancel(false);
     }
 
     /** A finished recording: words, then the house, then the answer as it is written. */
@@ -225,27 +259,26 @@ public final class AssistService extends Service {
     private void ask(String question) {
         firstSentenceAt = 0;
         // Never silence: if the house has not started answering in a moment, say so.
-        final boolean[] heard = {false};
-        work.execute(() -> {
-            try {
-                Thread.sleep(900);
-            } catch (InterruptedException e) {
-                return;
-            }
-            if (firstSentenceAt == 0) {
-                heard[0] = true;
+        // On the timer executor, so it neither delays nor blocks the chat call.
+        cancelAck();
+        pendingAck = ack.schedule(() -> {
+            if (firstSentenceAt == 0 && alive.get()) {
                 say(VoiceTurnRules.ack(VoiceTurnRules.Ack.THINKING));
             }
-        });
+        }, 900, TimeUnit.MILLISECONDS);
         work.execute(() -> client.chat(question, conversation, new VoiceClient.Stream() {
             @Override
             public void sentence(String said) {
-                if (firstSentenceAt == 0) firstSentenceAt = SystemClock.elapsedRealtime();
+                if (firstSentenceAt == 0) {
+                    firstSentenceAt = SystemClock.elapsedRealtime();
+                    cancelAck();
+                }
                 queue(said);
             }
 
             @Override
             public void done(String reply) {
+                cancelAck();
                 lastReply = reply == null ? "" : reply;
                 emit(EV_REPLY, lastReply, 0);
                 streamDone = true;
@@ -256,6 +289,7 @@ public final class AssistService extends Service {
 
             @Override
             public void failed(String reason) {
+                cancelAck();
                 if (VoiceClient.signInProblem(reason)) {
                     emit(EV_ERROR, "Sign in to Jarvis again on this phone.", 0);
                 } else if (firstSentenceAt == 0) {
@@ -289,8 +323,12 @@ public final class AssistService extends Service {
      * network's.
      */
     private void startSpeaker() {
-        Thread speaker = new Thread(() -> {
-            while (alive.get() || !Thread.currentThread().isInterrupted()) {
+        if (speaker != null) return;
+        speaker = new Thread(() -> {
+            // `&&`, not `||`: with `||` the loop kept spinning as soon as the
+            // service went away - a busy thread burning the battery and the CPU
+            // (and a UI that eventually stops responding).
+            while (alive.get() && !Thread.currentThread().isInterrupted()) {
                 String line;
                 synchronized (sentenceLock) {
                     while (sentences.isEmpty() && !streamDone && alive.get()) {
@@ -300,6 +338,7 @@ public final class AssistService extends Service {
                             return;
                         }
                     }
+                    if (!alive.get()) return;
                     line = sentences.pollFirst();
                     if (line == null) {
                         if (streamDone && alive.get()) {

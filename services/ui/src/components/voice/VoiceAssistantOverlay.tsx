@@ -39,17 +39,31 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
   // What the service reports, however it is running (native plugin or this page).
   useEffect(() => {
     if (!isOpen) return;
-    let remove: (() => void) | undefined;
+    let cancelled = false;
+    let handle: { remove: () => Promise<void> } | undefined;
     void JarvisAssist.addListener('assist', (event: AssistEvent) => {
-      if (event.type === 'state' && event.text) setState(event.text as AssistState);
+      if (cancelled) return;
+      if (event.type === 'state' && event.text) {
+        const next = event.text as AssistState;
+        setState(next);
+        // A new turn starts from a clean sheet: the previous answer and its
+        // error must not sit under this turn's words.
+        if (next === 'listening') {
+          setSaid('');
+          setError('');
+        }
+      }
       if (event.type === 'level') setLevel(typeof event.level === 'number' ? event.level : 0);
       if (event.type === 'partial' && event.text) {
         // Words as they are spoken: the orb stops looking dead while the
         // person is still talking. The finished take replaces them.
         setHeard(event.text);
+        setError('');
       }
       if (event.type === 'transcript' && event.text) {
         setHeard(event.text);
+        setSaid('');
+        setError('');
       }
       if (event.type === 'sentence' && event.text) setSaid((prev) => (prev ? `${prev} ${event.text}` : String(event.text)));
       if (event.type === 'reply' && event.text) setSaid(event.text);
@@ -58,10 +72,19 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
         setError(event.text || 'That did not work.');
         setState('idle');
       }
-    }).then((handle) => {
-      remove = () => void handle.remove();
+    }).then((registered) => {
+      // Closed before the listeners resolved: drop them instead of leaking one
+      // per open/close of the sheet.
+      if (cancelled) {
+        void registered.remove();
+        return;
+      }
+      handle = registered;
     });
-    return () => remove?.();
+    return () => {
+      cancelled = true;
+      void handle?.remove();
+    };
   }, [isOpen]);
 
   // A new turn starts as the sheet opens.
@@ -74,6 +97,7 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
     setHeard('');
     setSaid('');
     setLevel(0);
+    setTyping(false);
     setState('listening');
     /* eslint-enable react-hooks/set-state-in-effect */
     void JarvisAssist.start({ wake: false }).catch(() => {
@@ -264,6 +288,19 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
                   className="h-12 flex-1 rounded-full border border-white/10 bg-white/5 px-5 text-base text-white placeholder:text-white/35 focus:border-white/25 focus:outline-none"
                 />
                 <button
+                  type="button"
+                  aria-label="Speak instead"
+                  onClick={() => {
+                    setTyping(false);
+                    setError('');
+                    setState('listening');
+                    void JarvisAssist.start({ wake: false });
+                  }}
+                  className="grid h-12 w-12 place-items-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+                >
+                  <Mic size={18} />
+                </button>
+                <button
                   type="submit"
                   aria-label="Send"
                   className="grid h-12 w-12 place-items-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
@@ -274,7 +311,12 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
             ) : (
               <div className="flex items-center gap-5">
                 <button
-                  onClick={() => setTyping(true)}
+                  onClick={() => {
+                    // Writing closes the microphone: leaving it open recorded a
+                    // take nobody meant to make and answered the room.
+                    void JarvisAssist.stop();
+                    setTyping(true);
+                  }}
                   aria-label="Type instead"
                   className="grid h-16 w-16 place-items-center rounded-full border border-white/10 bg-white/5 text-white/65 transition-colors hover:bg-white/10 hover:text-white"
                 >
