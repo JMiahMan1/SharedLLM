@@ -272,10 +272,13 @@ registerPlugin(CommsPlugin.class);
             android.content.SharedPreferences p = GuardApi.prefs(this);
             if (p.getBoolean("assist_tile_offered", false)) return;
             p.edit().putBoolean("assist_tile_offered", true).apply();
-            StatusBarManager bar = getSystemService(StatusBarManager.class);
+            // Fully qualified: MainActivity does not import these, and this file
+            // must not grow imports for one shortcut offer.
+            android.app.StatusBarManager bar = getSystemService(android.app.StatusBarManager.class);
             if (bar == null) return;
-            bar.requestAddTileService(new ComponentName(this, AssistTileService.class), "Jarvis",
-                    Icon.createWithResource(this, R.mipmap.ic_launcher), getMainExecutor(), result -> { });
+            bar.requestAddTileService(new android.content.ComponentName(this, AssistTileService.class), "Jarvis",
+                    android.graphics.drawable.Icon.createWithResource(this, getApplicationInfo().icon),
+                    getMainExecutor(), result -> { });
         } catch (Exception ignored) {
             // No shortcut offered; the tile is still in the shade's edit list.
         }
