@@ -60,6 +60,22 @@ def test_the_tile_has_a_glyph_the_shade_can_draw():
     assert "getApplicationInfo().icon" not in TILE_SERVICE
 
 
+def test_the_tile_glyph_is_the_mascot_and_has_both_ears():
+    """A head with one ear is exactly what went wrong on the assistant screen."""
+    icon = MAIN / "res/drawable/ic_jarvis_tile.xml"
+    text = icon.read_text()
+    paths = [p.get(ANDROID + "pathData") or "" for p in ET.parse(icon).getroot().iter("path")]
+
+    # The mascot's own crest, not a generic smile.
+    assert any(p.startswith("M58,12 L46,26") for p in paths)
+    # Both side accents, mirrored about x=54 in the mascot's 108 grid.
+    assert any(p.startswith("M27,48 h4") for p in paths), "the left ear is missing"
+    assert any(p.startswith("M81,48 h-4") for p in paths), "the right ear is missing"
+    # And the two eyes.
+    assert sum(1 for p in paths if p.startswith("M46,55m") or p.startswith("M62,55m")) == 2
+    assert "M9.3,15.1q2.7,1.6 5.4,0" not in text, "the old smile should be gone"
+
+
 def test_every_trigger_opens_the_assistant_screen_instead_of_a_service():
     assert 'ASSIST_PATH = "/?voice=1"' in ASSIST_ACTIVITY
     assert "MainActivity.class" in ASSIST_ACTIVITY
