@@ -270,14 +270,19 @@ registerPlugin(CommsPlugin.class);
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
         try {
             android.content.SharedPreferences p = GuardApi.prefs(this);
+            // Not before there is a session: the dialog used to appear over the login
+            // form on a brand-new phone, asking about a tile for an app that had not
+            // been set up yet. The listing is offered once there is a key to talk with.
+            String apiKey = p.getString("jarvis_api_key", "");
+            if (apiKey == null || apiKey.isEmpty()) return;
             if (p.getBoolean("assist_tile_offered", false)) return;
             p.edit().putBoolean("assist_tile_offered", true).apply();
             // Fully qualified: MainActivity does not import these, and this file
             // must not grow imports for one shortcut offer.
             android.app.StatusBarManager bar = getSystemService(android.app.StatusBarManager.class);
             if (bar == null) return;
-            bar.requestAddTileService(new android.content.ComponentName(this, AssistTileService.class), "Jarvis",
-                    android.graphics.drawable.Icon.createWithResource(this, getApplicationInfo().icon),
+            bar.requestAddTileService(new android.content.ComponentName(this, AssistTileService.class), "Ask Jarvis",
+                    android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_jarvis_tile),
                     getMainExecutor(), result -> { });
         } catch (Exception ignored) {
             // No shortcut offered; the tile is still in the shade's edit list.

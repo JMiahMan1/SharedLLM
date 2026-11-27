@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../context/AuthContext';
 import ChatNotify from '../plugins/chatNotify';
+import { isVoicePath, openVoiceAssistant } from '../lib/voiceLaunch';
 import NudgeOverlay, { type Nudge } from './chat/NudgeOverlay';
 
 /**
@@ -106,7 +107,17 @@ export default function NativeBridge() {
   useEffect(() => {
     if (!native) return;
     const handle = ChatNotify.addListener('open', ({ path }) => {
-      if (typeof path === 'string' && path.startsWith('/')) navigate(path);
+      if (typeof path !== 'string' || !path.startsWith('/')) return;
+      // A hardware trigger (tile, widget, voice button, Digital Assistant) asks for
+      // the assistant, not for a page: open it over the dashboard. Navigating to
+      // '/?voice=1' used to land on '/' and do nothing, which is why the tile looked
+      // broken.
+      if (isVoicePath(path)) {
+        navigate('/');
+        openVoiceAssistant();
+        return;
+      }
+      navigate(path);
     });
     return () => {
       void handle.then((h) => h.remove()).catch(() => {});

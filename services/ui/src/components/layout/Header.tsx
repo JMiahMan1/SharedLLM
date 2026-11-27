@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Bell, LogOut, Satellite, User as UserIcon, Settings, Shield, ChevronUp, Loader2 } from 'lucide-react';
+import { Search, Bell, LogOut, Satellite, User as UserIcon, Settings, Shield, ChevronUp, Loader2, Mic } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../services/api';
 import type { TelemetryNotification } from '../../types/api';
@@ -17,6 +17,7 @@ import { useIntegrations } from '../../hooks/useIntegrations';
 import { useDialogFocus } from '../../lib/focusTrap';
 import { sharePushKey } from '../../lib/push';
 import { noticeHref } from '../../lib/noticeLink';
+import { openVoiceAssistant } from '../../lib/voiceLaunch';
 
 // Navigation search index: the header box is a *command-palette* style finder
 // for pages/tabs/settings, distinct from the RAG/semantic search on Knowledge.
@@ -245,6 +246,20 @@ const Header = () => {
             {statusText}
           </span>
         </div>
+
+        {/* On every page, not only the dashboard: the sheet lives on `/`, so this
+            raises the request and lets the dashboard claim it on arrival. */}
+        <button
+          onClick={() => {
+            openVoiceAssistant();
+            if (window.location.pathname !== '/') navigate('/');
+          }}
+          aria-label="Ask Jarvis"
+          title="Ask Jarvis"
+          className="glass-card p-3 hover:bg-white/5 transition-colors"
+        >
+          <Mic size={20} className="text-[var(--site-accent)]" />
+        </button>
 
         <div className="relative" ref={bellRef}>
           <button
