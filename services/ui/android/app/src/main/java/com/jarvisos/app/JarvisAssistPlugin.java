@@ -111,7 +111,7 @@ public class JarvisAssistPlugin extends Plugin {
     @PluginMethod
     public void assistantRole(PluginCall call) {
         JSObject out = new JSObject();
-        boolean can = AssistEntryRules.canHoldAssistantRole(Build.VERSION.SDK_INT);
+        boolean can = AssistEntryRules.canHoldAssistantRole(android.os.Build.VERSION.SDK_INT);
         out.put("canHold", can);
         out.put("held", can && roleHeld());
         call.resolve(out);
@@ -120,7 +120,7 @@ public class JarvisAssistPlugin extends Plugin {
     /** The one tap that makes Jarvis the phone's assistant (long-press home). */
     @PluginMethod
     public void requestAssistantRole(PluginCall call) {
-        if (!AssistEntryRules.canHoldAssistantRole(Build.VERSION.SDK_INT)) {
+        if (!AssistEntryRules.canHoldAssistantRole(android.os.Build.VERSION.SDK_INT)) {
             call.reject("This phone is too old to hand an app the assistant role.");
             return;
         }
