@@ -4,38 +4,59 @@
 
   The shade draws a tile icon as a monochrome mask, so a full-colour launcher
   icon comes out as an unrecognisable blob - which is what the tile looked like
-  before this file. One flat shape instead: the rounded Jarvis head with its two
-  eyes and a smile, the same face the assistant screen shows.
+  before this file. One flat white shape instead.
+
+  The shape is the app's own mascot (res/drawable/ic_launcher_foreground.xml),
+  traced from it rather than reimagined: the rounded head, BOTH side accents at
+  x=25 and x=74, the two eyes and the lightning crest. A head with one ear is
+  what went wrong on the assistant screen, so both are here by construction.
+
+  The paths are the mascot's own, in its 108 grid, scaled to fill 24dp: the
+  head is stroked rather than filled so the eyes and crest stay visible, and the
+  head's interior stays empty at any tint colour.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
-    android:viewportHeight="24">
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
 
-    <!-- the head: a rounded squircle, outlined so the eyes read at 24dp -->
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M7.6,3.2h8.8c2.43,0 4.4,1.97 4.4,4.4v8.8c0,2.43 -1.97,4.4 -4.4,4.4h-8.8c-2.43,0 -4.4,-1.97 -4.4,-4.4v-8.8c0,-2.43 1.97,-4.4 4.4,-4.4z"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="1.9"
-        android:strokeLineJoin="round" />
+    <group
+        android:scaleX="0.2222"
+        android:scaleY="0.2222"
+        android:translateX="0"
+        android:translateY="1.78">
 
-    <!-- left eye -->
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M7.9,10.2a1.5,1.5 0 1,1 3,0a1.5,1.5 0 1,1 -3,0z" />
+        <!-- the head outline, from the mascot's shell path -->
+        <path
+            android:fillColor="#00000000"
+            android:pathData="M30,54 C30,37 40,27 54,27 C68,27 78,37 78,54 L78,65 C78,74 71,80 62,80 L46,80 C37,80 30,74 30,65 Z"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="7"
+            android:strokeLineJoin="round" />
 
-    <!-- right eye -->
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M13.1,10.2a1.5,1.5 0 1,1 3,0a1.5,1.5 0 1,1 -3,0z" />
+        <!-- left ear, at the mascot's x=25..34 -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M27,48 h4 a3,3 0 0,1 3,3 v9 a3,3 0 0,1 -3,3 h-4 a2,2 0 0,1 -2,-2 v-11 a2,2 0 0,1 2,-2 Z" />
 
-    <!-- a small smile, so the glyph is friendly rather than a battery -->
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M9.3,15.1q2.7,1.6 5.4,0"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="1.5"
-        android:strokeLineCap="round" />
+        <!-- right ear, the mirror of it at x=74..83 -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M81,48 h-4 a3,3 0 0,0 -3,3 v9 a3,3 0 0,0 3,3 h4 a2,2 0 0,0 2,-2 v-11 a2,2 0 0,0 -2,-2 Z" />
+
+        <!-- both eyes, at the mascot's (46,55) and (62,55) -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M46,55m-5,0a5,5 0 1,0 10,0a5,5 0 1,0 -10,0z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M62,55m-5,0a5,5 0 1,0 10,0a5,5 0 1,0 -10,0z" />
+
+        <!-- the lightning crest, unmodified from the mascot -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M58,12 L46,26 H52.5 L49,38 L63,22 H56.5 L60,12 Z" />
+    </group>
 </vector>
