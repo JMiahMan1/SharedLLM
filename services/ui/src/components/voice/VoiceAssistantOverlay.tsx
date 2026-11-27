@@ -1,44 +1,30 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Loader2, Mic, Send, Square, X } from 'lucide-react';
-import { api } from '../../services/api';
 import { Capacitor } from '@capacitor/core';
-import { JarvisAssist, type AssistState } from '../../plugins/jarvisAssist';
+import { Keyboard, Loader2, Mic, Send, Sparkles, Square, X } from 'lucide-react';
+import { api } from '../../services/api';
+import { JarvisAssist, type AssistEvent, type AssistState } from '../../plugins/jarvisAssist';
 
+/**
+ * Ask Jarvis, out loud.
+ *
+ * One screen, one orb, no chrome. The orb is the assistant: it breathes while it
+ * waits, swells with your voice while it listens, turns while it thinks and
+ * sends out rings while it talks. What it heard sits above what it is saying, so
+ * a misheard question is obvious at a glance instead of a mystery.
+ *
+ * The turn itself runs on the household's own server - the phone records a
+ * question, the gateway hears it, answers it, and the sentence being spoken is
+ * synthesised while the next is still being written. Nothing leaves the house.
+ */
 interface Props {
   isOpen: boolean;
   onClose: () => void;
+  /** Called with each transcript, so the caller can fill a search box. */
   onCommand?: (transcript: string) => void;
   userId?: string;
 }
 
-/** The gateway answers a typed turn in one of these shapes; read the words out of whichever arrived. */
-function replyText(data: unknown): string {
-  if (!data || typeof data !== 'object') return typeof data === 'string' ? data : '';
-  const d = data as Record<string, unknown>;
-  const message = d.message as { content?: unknown } | undefined;
-  if (typeof d.reply === 'string') return d.reply;
-  if (typeof message?.content === 'string') return message.content;
-  const nested = d.data as Record<string, unknown> | undefined;
-  if (typeof nested?.reply === 'string') return nested.reply;
-  if (typeof d.response === 'string') return d.response;
-  return '';
-}
-
-const STATE_WORDS: Record<AssistState, string> = {
-  idle: 'Tap to talk',
-  listening: 'Listening',
-  thinking: 'Thinking',
-  speaking: 'Speaking',
-};
-
-/**
- * The phone's voice assistant: press once, talk, hear the answer spoken back
- * while it is still being written. Unlike a cloud assistant it never goes
- * quiet — if the answer is slow it says so, and if it cannot hear you it says
- * that too. Typing is always available, because a phone in a quiet room is not
- * always a phone you can talk to.
- */
 export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, userId }: Props) {
   const [state, setState] = useState<AssistState>('idle');
   const [level, setLevel] = useState(0);
@@ -46,98 +32,53 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
   const [said, setSaid] = useState('');
   const [error, setError] = useState('');
   const [typing, setTyping] = useState(false);
-  /** Shown once, on a phone that can hold the assistant role and does not. */
   const [draft, setDraft] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [roleOffer, setRoleOffer] = useState(false);
   const native = Capacitor.isNativePlatform();
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const scroller = useRef<HTMLDivElement | null>(null);
 
-  // Every event the service emits lands here: state, mic level, what it heard,
-  // each sentence as it is spoken, and the whole reply at the end.
+  // What the service reports, however it is running (native plugin or this page).
   useEffect(() => {
     if (!isOpen) return;
-    let cancelled = false;
-    let handle: { remove: () => Promise<void> } | undefined;
-    void JarvisAssist.addListener('assist', (event) => {
-      if (cancelled) return;
+    let remove: (() => void) | undefined;
+    void JarvisAssist.addListener('assist', (event: AssistEvent) => {
       if (event.type === 'state' && event.text) setState(event.text as AssistState);
-      else if (event.type === 'level') setLevel(Math.max(0, Math.min(100, event.level || 0)));
-      else if (event.type === 'transcript') {
-        setHeard(event.text || '');
-        setSaid('');
-        if (event.text) onCommand?.(event.text);
-      } else if (event.type === 'sentence') setSaid((prev) => (prev ? `${prev} ${event.text || ''}` : event.text || ''));
-      else if (event.type === 'reply') setSaid(event.text || '');
-      else if (event.type === 'error') setError(event.text || 'That did not work.');
-    }).then((h) => {
-      if (cancelled) void h.remove();
-      else handle = h;
+      if (event.type === 'level') setLevel(typeof event.level === 'number' ? event.level : 0);
+      if (event.type === 'transcript' && event.text) {
+        setHeard(event.text);
+        onCommand?.(event.text);
+      }
+      if (event.type === 'sentence' && event.text) setSaid((prev) => (prev ? `${prev} ${event.text}` : String(event.text)));
+      if (event.type === 'reply' && event.text) setSaid(event.text);
+      if (event.type === 'error') {
+        setError(event.text || 'That did not work.');
+        setState('idle');
+      }
+    }).then((handle) => {
+      remove = () => void handle.remove();
     });
-    return () => {
-      cancelled = true;
-      void handle?.remove();
-    };
+    return () => remove?.();
   }, [isOpen, onCommand]);
 
-  // Opening the sheet starts a turn: pressing the microphone should never make
-  // you press something else first.
+  // A new turn starts as the sheet opens.
   useEffect(() => {
     if (!isOpen) return;
-    /* eslint-disable react-hooks/set-state-in-effect -- opening the sheet is a
-       deliberate reset of the turn before it; it runs once per open, never in a
-       render loop. */
+    /* eslint-disable react-hooks/set-state-in-effect -- opening the sheet is a deliberate
+       reset of the turn before it; it runs once per open, never in a render loop. */
     setError('');
     setHeard('');
     setSaid('');
     setLevel(0);
-    if (!native) {
-      setTyping(true);
-      return;
-    }
     setState('listening');
     /* eslint-enable react-hooks/set-state-in-effect */
-    JarvisAssist.start({ wake: false }).catch((e: Error) => {
+    void JarvisAssist.start({ wake: false }).catch(() => {
       setState('idle');
       setTyping(true);
-      setError(e?.message || 'Jarvis needs the microphone to hear you.');
+      setError('This device will not open the microphone. Type instead.');
     });
-    return () => {
-      void JarvisAssist.stop();
-    };
-  }, [isOpen, native]);
+  }, [isOpen]);
 
-  useEffect(() => {
-    if (typing) inputRef.current?.focus();
-  }, [typing]);
-
-  const close = useCallback(() => {
-    void JarvisAssist.stop();
-    onClose();
-  }, [onClose]);
-
-  const send = useCallback(async () => {
-    const text = draft.trim();
-    if (!text || busy) return;
-    setBusy(true);
-    setError('');
-    setHeard(text);
-    setSaid('');
-    setDraft('');
-    onCommand?.(text);
-    try {
-      const data = await api.chat(text, undefined, userId, false);
-      const answer = replyText(data);
-      setSaid(answer || 'I did not get an answer to that.');
-      if (answer && native) void JarvisAssist.speak({ text: answer }).catch(() => {});
-    } catch (e) {
-      setError((e as Error)?.message || 'That did not reach the house.');
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, draft, native, onCommand, userId]);
-
-  const [roleOffer, setRoleOffer] = useState(false);
-
+  // Ask once whether this phone could hand us the assistant role.
   useEffect(() => {
     if (!isOpen || !native) return;
     void JarvisAssist.assistantRole()
@@ -147,138 +88,219 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
       .catch(() => {});
   }, [isOpen, native]);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' });
+  }, [said]);
 
-  const rings = state === 'listening' || state === 'speaking';
+  const close = () => {
+    void JarvisAssist.stop();
+    onClose();
+  };
+
+  const send = async (text: string) => {
+    const question = text.trim();
+    if (!question) return;
+    setDraft('');
+    setError('');
+    setSaid('');
+    setHeard(question);
+    onCommand?.(question);
+    setState('thinking');
+    try {
+      const answer = api.replyText(await api.chat(question, undefined, userId, false));
+      setSaid(answer || 'I did not have an answer for that.');
+      setState('speaking');
+      if (native) await JarvisAssist.speak({ text: answer });
+      setState('idle');
+    } catch {
+      setError('I could not reach the house just now.');
+      setState('idle');
+    }
+  };
+
+  const speaking = state === 'speaking';
+  const thinking = state === 'thinking';
+  const listening = state === 'listening';
+  const swell = listening ? 1 + Math.min(level, 100) / 260 : speaking ? 1.06 : 1;
+
+  const words: Record<AssistState, string> = {
+    idle: 'Ask me anything',
+    listening: 'Listening',
+    thinking: 'Thinking',
+    speaking: 'Speaking',
+  };
 
   return (
     <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[100] flex flex-col bg-black/70 backdrop-blur-3xl"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Jarvis voice assistant"
-      >
-        <div className="flex justify-end p-4 pt-[calc(1rem+var(--safe-top))]">
-          <button onClick={close} className="rounded-full p-3 text-slate-300 hover:bg-white/10" aria-label="Close assistant">
-            <X size={22} />
-          </button>
-        </div>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18 }}
+          className="fixed inset-0 z-[100] flex flex-col overflow-hidden text-white"
+          style={{ background: 'var(--color-bg-base, #0b0d12)' }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Ask Jarvis"
+        >
+          {/* the accent glow: the only light in the room */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                'radial-gradient(60% 45% at 50% 34%, color-mix(in srgb, var(--site-accent, #8b5cf6) 26%, transparent) 0%, transparent 70%)',
+            }}
+          />
 
-        <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6">
-          <div className="relative flex h-40 w-40 items-center justify-center">
-            {rings &&
-              [0, 1, 2].map((i) => (
-                <span
-                  key={i}
-                  className="absolute rounded-full border border-white/20"
-                  style={{
-                    width: `${88 + i * 18 + level * 0.5}px`,
-                    height: `${88 + i * 18 + level * 0.5}px`,
-                    opacity: 0.5 - i * 0.12,
-                    transition: 'width 120ms linear, height 120ms linear',
-                  }}
-                />
-              ))}
-            <div className="glass-panel flex h-24 w-24 items-center justify-center rounded-full">
-              {state === 'thinking' ? (
-                <Loader2 className="animate-spin text-slate-200" size={30} />
-              ) : (
-                <Mic className={state === 'listening' ? 'text-emerald-300' : 'text-slate-200'} size={30} />
-              )}
-            </div>
+          <div className="relative flex items-center justify-between px-[calc(1rem+var(--safe-left))] pt-[calc(0.75rem+var(--safe-top))] pr-[calc(1rem+var(--safe-right))]">
+            <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.28em] text-white/40">
+              <Sparkles size={12} /> Jarvis
+            </span>
+            <button
+              onClick={close}
+              aria-label="Close"
+              className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <X size={18} />
+            </button>
           </div>
 
-          <p className="text-sm font-medium tracking-wide text-slate-300" aria-live="polite">
-            {STATE_WORDS[state]}
-          </p>
-
-          {heard && <p className="max-w-md text-center text-lg text-white">{heard}</p>}
-          {said && <p className="max-w-md text-center text-base leading-relaxed text-slate-200" aria-live="polite">{said}</p>}
-          {error && <p className="max-w-md text-center text-sm text-amber-300/90">{error}</p>}
-
-          {typing && (
-            <form
-              className="flex w-full max-w-md items-center gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void send();
-              }}
-            >
-              <input
-                ref={inputRef}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="Ask Jarvis…"
-                className="glass-card min-h-11 flex-1 rounded-xl px-4 text-base text-white placeholder:text-slate-400"
-                aria-label="Ask Jarvis"
+          {/* the orb */}
+          <div className="relative flex flex-1 flex-col items-center justify-center gap-8 px-6">
+            <div className="relative grid place-items-center">
+              {speaking &&
+                [0, 0.35, 0.7].map((delay) => (
+                  <motion.span
+                    key={delay}
+                    aria-hidden
+                    className="absolute h-44 w-44 rounded-full border border-white/15"
+                    initial={{ scale: 0.9, opacity: 0.5 }}
+                    animate={{ scale: 2.1, opacity: 0 }}
+                    transition={{ duration: 2.4, repeat: Infinity, delay, ease: 'easeOut' }}
+                  />
+                ))}
+              <motion.div
+                aria-hidden
+                className="absolute h-44 w-44 rounded-full blur-2xl"
+                style={{ background: 'var(--site-accent, #8b5cf6)', opacity: speaking ? 0.55 : 0.35 }}
+                animate={{ scale: swell * 1.05 }}
+                transition={{ type: 'spring', stiffness: 120, damping: 18 }}
               />
-              <button
-                type="submit"
-                disabled={busy || !draft.trim()}
-                className="min-h-11 min-w-11 rounded-xl bg-white/10 text-white disabled:opacity-40"
-                aria-label="Send"
+              <motion.div
+                className="relative grid h-44 w-44 place-items-center rounded-full shadow-2xl"
+                style={{
+                  background:
+                    'radial-gradient(circle at 34% 28%, rgba(255,255,255,0.92) 0%, var(--site-accent, #8b5cf6) 46%, rgba(9,11,16,0.92) 100%)',
+                }}
+                animate={{ scale: swell, rotate: speaking ? [0, 4, -4, 0] : 0 }}
+                transition={
+                  speaking
+                    ? { rotate: { duration: 2.6, repeat: Infinity, ease: 'easeInOut' }, scale: { type: 'spring', stiffness: 120, damping: 18 } }
+                    : { type: 'spring', stiffness: 120, damping: 18 }
+                }
               >
-                <Send size={18} className="mx-auto" />
-              </button>
-            </form>
-          )}
-        </div>
+                {thinking ? (
+                  <Loader2 size={40} className="animate-spin text-white/90" />
+                ) : listening ? (
+                  <Mic size={40} className="text-white/95" />
+                ) : (
+                  <Sparkles size={36} className="text-white/90" />
+                )}
+              </motion.div>
+            </div>
 
-        {native && roleOffer && (
-          <p className="px-6 pb-1 text-center text-xs text-slate-400">
-            Say “Hey Jarvis” from any screen:{' '}
-            <button
-              onClick={() => {
-                void JarvisAssist.requestAssistantRole().finally(() => setRoleOffer(false));
-              }}
-              className="text-purple-300 underline underline-offset-2"
-            >
-              make Jarvis the assistant
-            </button>
-          </p>
-        )}
-        <div className="flex items-center justify-center gap-3 p-6 pb-[calc(1.5rem+var(--safe-bottom))]">
-          {native && !typing && (
-            <>
-              <button
-                onClick={() => {
-                  void JarvisAssist.stopSpeaking();
-                  setState('listening');
-                }}
-                className="glass-card flex min-h-11 items-center gap-2 rounded-full px-5 text-sm text-slate-100"
+            <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-white/45">{words[state]}</p>
+
+            {(heard || said) && (
+              <div
+                ref={scroller}
+                className="max-h-[34vh] w-full max-w-md space-y-3 overflow-y-auto text-center [scrollbar-width:none]"
               >
-                <Square size={16} /> Stop talking
-              </button>
-              <button
-                onClick={() => {
-                  void JarvisAssist.stop().finally(() => setState('idle'));
-                  setTyping(true);
+                {heard && <p className="text-2xl font-medium leading-snug text-white/95">{heard}</p>}
+                {said && (
+                  <p aria-live="polite" className="text-base leading-relaxed text-white/70">
+                    {said}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* controls */}
+          <div className="relative flex flex-col items-center gap-3 px-6 pb-[calc(1.5rem+var(--safe-bottom))]">
+            {error && (
+              <p className="rounded-full border border-amber-300/30 bg-amber-400/10 px-4 py-2 text-center text-sm text-amber-100">
+                {error}
+              </p>
+            )}
+            {native && roleOffer && (
+              <p className="text-center text-xs text-white/40">
+                Hold your home button and talk to me:{' '}
+                <button
+                  onClick={() => {
+                    void JarvisAssist.requestAssistantRole().finally(() => setRoleOffer(false));
+                  }}
+                  className="text-white/70 underline underline-offset-2"
+                >
+                  make Jarvis your assistant
+                </button>
+              </p>
+            )}
+
+            {typing ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void send(draft);
                 }}
-                className="glass-card min-h-11 rounded-full px-5 text-sm text-slate-100"
+                className="flex w-full max-w-md items-center gap-2"
               >
-                Type instead
-              </button>
-            </>
-          )}
-          {native && typing && (
-            <button
-              onClick={() => {
-                setTyping(false);
-                setError('');
-                setState('listening');
-                void JarvisAssist.start({ wake: false }).catch((e: Error) => setError(e?.message || ''));
-              }}
-              className="glass-card flex min-h-11 items-center gap-2 rounded-full px-5 text-sm text-slate-100"
-            >
-              <Mic size={16} /> Talk instead
-            </button>
-          )}
-        </div>
-      </motion.div>
+                <input
+                  autoFocus
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="Ask in writing…"
+                  aria-label="Ask in writing"
+                  className="h-12 flex-1 rounded-full border border-white/10 bg-white/5 px-5 text-base text-white placeholder:text-white/35 focus:border-white/25 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  aria-label="Send"
+                  className="grid h-12 w-12 place-items-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+                >
+                  <Send size={18} />
+                </button>
+              </form>
+            ) : (
+              <div className="flex items-center gap-5">
+                <button
+                  onClick={() => setTyping(true)}
+                  aria-label="Type instead"
+                  className="grid h-16 w-16 place-items-center rounded-full border border-white/10 bg-white/5 text-white/65 transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  <Keyboard size={22} />
+                </button>
+                <button
+                  onClick={() => (speaking ? void JarvisAssist.stopSpeaking() : close())}
+                  aria-label={speaking ? 'Stop talking' : 'Stop listening'}
+                  className="grid h-20 w-20 place-items-center rounded-full bg-white text-[#0b0d12] shadow-xl transition-transform active:scale-95"
+                >
+                  <Square size={26} fill="currentColor" />
+                </button>
+                <button
+                  onClick={() => void JarvisAssist.start({ wake: false })}
+                  aria-label="Ask again"
+                  className="grid h-16 w-16 place-items-center rounded-full border border-white/10 bg-white/5 text-white/65 transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  <Mic size={22} />
+                </button>
+              </div>
+            )}
+          </div>
+        </motion.div>
+      )}
     </AnimatePresence>
   );
 }
