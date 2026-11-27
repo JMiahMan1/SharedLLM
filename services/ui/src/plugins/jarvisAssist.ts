@@ -177,9 +177,17 @@ async function webStart() {
   recorder.onstop = () => {
     const blob = new Blob(chunks, { type: recorder?.mimeType || 'audio/webm' });
     recorder = null;
-    void finishTurn(blob);
+    if (blob.size < 2000) {
+        // Under about a fifth of a second there is no speech in it. Posting that
+        // comes back as an empty transcript, which looks like a dead button.
+        releaseMic();
+        setState('idle');
+        emit({ type: 'error', text: 'I did not hear anything. Check the microphone permission, then try again.' });
+        return;
+      }
+      void finishTurn(blob);
   };
-  recorder.start();
+  recorder.start(250);  // periodic chunks: a WebView may send nothing until the end
   setState('listening');
   // The level meter is decoration: a browser or WebView with no Web Audio must
   // still be able to record, or the button reads as dead.
