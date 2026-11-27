@@ -36,7 +36,7 @@ glass face as the only high-contrast area. It must read at 32 px and at 200 px.
 | Rim | inner rect inset 1.5, stroke accent | `opacity = 0.22 + glow * 0.5`. This is the head's "mood ring", and it goes amber for `error`. |
 | Visor | `x=22 y=32 w=76 h=62 rx=26` | Dark glass, `#0b0d12 → #131926`. **Must enclose the mouth** (bottom edge 94, mouth around 78). |
 | Eyes | centres `(46,54)` and `(74,54)`, `rx=8`, `ry=8.6 * eyeOpen` | Pupils `r=3.1` offset by `lookX`/`lookY`. |
-| Brows | `M38 → L52` and mirrored, stroke 2 | Drawn only when `|brow| > 0.15`; worried (inner ends up) falls to `-1`. |
+| Brows | `M38 → L52` and mirrored, stroke 2 | Drawn only for a worried or cross face: `brow` beyond ±0.15, and a worried brow reaches -1. |
 | Mouth | arc at `y=78`, half-width `11 + 2*mouthCurve`, sag `5.5*mouthCurve`, stroke `2.6 + mouthOpen*4.2` | Replaced entirely while speaking. |
 | Voice bars | 5 bars, 8 apart, centred `x=60`, base `y=76` | Accent halo `w=5.6` plus a **white core** `w=2.7` (`#ffffff`) - the white core is what reads as speech. |
 | Thinking dots | 3 circles at `x=52/60/68`, `y=76`, `r = 1.6 + dot*1.5` | Replace the mouth while thinking. |
