@@ -159,4 +159,28 @@ public class JarvisAssistPlugin extends Plugin {
                 "roleResult");
     }
 
+
+    /**
+     * Only the microphone permission. The browser turn does the recording, so a
+     * tap needs Android's grant without starting a microphone foreground service
+     * (which Android 12+ can refuse from a tap, taking the app down with it).
+     */
+    @PluginMethod
+    public void requestMicrophone(PluginCall call) {
+        JSObject out = new JSObject();
+        if (getPermissionState("microphone") == com.getcapacitor.PermissionState.GRANTED) {
+            out.put("granted", true);
+            call.resolve(out);
+            return;
+        }
+        requestPermissionForAlias("microphone", call, "microphoneResult");
+    }
+
+    @PermissionCallback
+    private void microphoneResult(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("granted", getPermissionState("microphone") == com.getcapacitor.PermissionState.GRANTED);
+        if (call != null) call.resolve(out);
+    }
+
 }
