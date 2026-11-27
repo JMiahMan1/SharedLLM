@@ -16,6 +16,10 @@
  *   - **Slow, not busy.** A face that is always moving is a face nobody trusts.
  *     Idle breathes once every four seconds and blinks once per cycle; only
  *     listening and speaking move at the speed of the person.
+ *   - **Every light lives inside the dark visor.** The renderer draws the mouth
+ *     and the voice bars on dark glass, never on the accent-coloured shell:
+ *     purple lights on a purple head are invisible, which is exactly how the
+ *     first version failed on a real phone.
  *
  * The hardware contract is written down in `docs/JARVIS_HEAD.md`.
  */
@@ -35,6 +39,9 @@ export const FACE_STATES: readonly FaceState[] = [
 /** How many voice bars a talking face draws. */
 export const VOICE_BARS = 5;
 
+/** How many dots a thinking face draws. */
+export const THINKING_DOTS = 3;
+
 export interface JarvisExpression {
   state: FaceState;
   /** 0 = lids shut, 1 = wide awake. */
@@ -49,8 +56,16 @@ export interface JarvisExpression {
   mouthCurve: number;
   /** Voice bars, `VOICE_BARS` of them, each 0..1. Empty unless speaking. */
   bars: number[];
-  /** How brightly the visor glows, 0..1. */
+  /** Thinking dots, `THINKING_DOTS` of them, each 0..1. Empty unless thinking. */
+  dots: number[];
+  /** How brightly the shell rim and visor glow, 0..1. */
   glow: number;
+  /** Ear-pod light: the microphone level when listening, speech energy when speaking, 0..1. */
+  pod: number;
+  /** Status pip above the visor, 0..1. */
+  pip: number;
+  /** Brow attitude, -1 worried (inner ends up) .. 1 cross (inner ends down). 0 = unreadable. */
+  brow: number;
   /** Head tilt in degrees, -12..12. */
   tilt: number;
   /** Vertical bob, -1..1 of a head unit. */
@@ -115,6 +130,17 @@ export function voiceBar(tickMs: number, index: number): number {
 }
 
 /**
+ * One deterministic thinking dot, 0..1.
+ *
+ * Cubing the raised sine makes each dot sit low for most of its turn and pop
+ * briefly, which reads as "working" rather than as a loading spinner.
+ */
+export function thinkingDot(tickMs: number, index: number): number {
+  const wave = (Math.sin(seconds(tickMs) * 3.4 - index * 0.9) + 1) / 2;
+  return clamp01(0.3 + 0.7 * wave ** 3);
+}
+
+/**
  * The whole face, as a pure function.
  *
  * @param state one of `FACE_STATES`
@@ -123,6 +149,7 @@ export function voiceBar(tickMs: number, index: number): number {
  */
 export function faceFor(state: FaceState, level = 0, tickMs = 0): JarvisExpression {
   const loud = levelToUnit(level);
+  const blink = blinkAt(tickMs);
   const base: JarvisExpression = {
     state,
     eyeOpen: 0.92,
@@ -131,7 +158,11 @@ export function faceFor(state: FaceState, level = 0, tickMs = 0): JarvisExpressi
     mouthOpen: 0.06,
     mouthCurve: 0.15,
     bars: [],
+    dots: [],
     glow: 0.34,
+    pod: 0.12,
+    pip: 0.4,
+    brow: 0,
     tilt: 0,
     bob: 0,
     squint: 0,
@@ -145,20 +176,26 @@ export function faceFor(state: FaceState, level = 0, tickMs = 0): JarvisExpressi
         ...base,
         // Breathing, not swaying: a tenth of a head unit.
         bob: (breathe(tickMs) - 0.5) * 0.04,
-        eyeOpen: 0.92 * (1 - blinkAt(tickMs)),
+        eyeOpen: 0.92 * (1 - blink),
         glow: 0.3 + breathe(tickMs, 6) * 0.08,
+        pod: 0.1 + breathe(tickMs, 5) * 0.06,
+        pip: 0.35 + breathe(tickMs, 6) * 0.12,
       };
 
     case 'listening':
       return {
         ...base,
-        // Attentive: wide, looking slightly up at the person, and answering the
-        // room's noise so the person can see they are being heard.
-        eyeOpen: 1,
+        // Attentive: wide and looking slightly up at the person. He still
+        // blinks while listening - a face that stops blinking looks frozen,
+        // and a frozen orb was the thing this replaced.
+        eyeOpen: 1 - blink,
         lookY: 0.18,
         mouthOpen: 0.08 + loud * 0.22,
         mouthCurve: 0.05,
         glow: 0.45 + loud * 0.5,
+        // The ear-pods are the "I can hear you" light: they follow the room.
+        pod: 0.35 + loud * 0.65,
+        pip: 0.85,
         bob: (breathe(tickMs, 2.4) - 0.5) * 0.02,
       };
 
@@ -167,12 +204,17 @@ export function faceFor(state: FaceState, level = 0, tickMs = 0): JarvisExpressi
         ...base,
         // A glance to one side, then the other, and a visor that pulses while
         // the answer is being written.
-        eyeOpen: 0.66,
+        eyeOpen: 0.66 * (1 - blink),
         lookX: Math.sin(seconds(tickMs) * 1.4) * 0.55,
         lookY: 0.28,
         mouthOpen: 0,
         mouthCurve: -0.05,
+        dots: Array.from({ length: THINKING_DOTS }, (_, i) => thinkingDot(tickMs, i)),
         glow: 0.4 + breathe(tickMs, 1.6) * 0.25,
+        pod: 0.22 + breathe(tickMs, 2.2) * 0.12,
+        pip: 0.6,
+        // Brows raised a little: pondering, not angry.
+        brow: -0.3,
         tilt: Math.sin(seconds(tickMs) * 0.9) * 2.5,
       };
 
@@ -181,11 +223,16 @@ export function faceFor(state: FaceState, level = 0, tickMs = 0): JarvisExpressi
       const mean = bars.reduce((sum, v) => sum + v, 0) / bars.length;
       return {
         ...base,
-        eyeOpen: 0.84,
+        // He blinks through a long answer too: a wide-eyed stare for thirty
+        // seconds is the uncanny thing, not the words.
+        eyeOpen: 0.84 * (1 - blink),
         mouthOpen: 0.25 + mean * 0.75,
         mouthCurve: 0.2,
         bars,
         glow: 0.5 + mean * 0.4,
+        // The pods pulse with the speech envelope, a beat behind the mouth.
+        pod: 0.35 + mean * 0.65,
+        pip: 0.9,
         // A slow nod, a third of a second out of phase with the words.
         bob: Math.sin(seconds(tickMs) * 2.2) * 0.018,
         tilt: Math.sin(seconds(tickMs) * 1.1) * 1.6,
@@ -200,6 +247,8 @@ export function faceFor(state: FaceState, level = 0, tickMs = 0): JarvisExpressi
         mouthOpen: 0.18,
         mouthCurve: 1,
         glow: 0.72,
+        pod: 0.45 + breathe(tickMs, 1.4) * 0.25,
+        pip: 1,
         bob: (breathe(tickMs, 1.4) - 0.5) * 0.05,
       };
 
@@ -211,6 +260,10 @@ export function faceFor(state: FaceState, level = 0, tickMs = 0): JarvisExpressi
         mouthOpen: 0.1,
         mouthCurve: -0.7,
         glow: 0.5,
+        pod: 0.4,
+        pip: 0.95,
+        // Worried brows: the inner ends lift.
+        brow: -0.85,
         tilt: -7,
         accent: 'amber',
       };
@@ -222,6 +275,8 @@ export function faceFor(state: FaceState, level = 0, tickMs = 0): JarvisExpressi
         mouthOpen: 0,
         mouthCurve: 0.05,
         glow: 0.1,
+        pod: 0.05,
+        pip: 0.1,
         bob: (breathe(tickMs, 6) - 0.5) * 0.05,
       };
 
