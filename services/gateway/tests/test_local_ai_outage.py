@@ -451,3 +451,80 @@ def test_a_photo_check_that_cannot_run_passes_retry_after_to_the_phone(monkeypat
     assert resp.status_code == 503
     assert resp.headers["Retry-After"] == "300"
     assert json.loads(resp.body)["retry_after_s"] == 300
+
+
+def test_background_jobs_sort_below_interactive_user_chat():
+    """Deferrable background jobs must get PRIORITY_LOW so they never starve a user's question while local AI is down."""
+    from services.gateway.messaging import PRIORITY_LOW, PRIORITY_NORMAL, infer_priority_from_payload
+
+    assert infer_priority_from_payload({"query": "summarize notes", "background": True}) == PRIORITY_LOW
+    assert infer_priority_from_payload({"query": "what is a parable?"}) == PRIORITY_NORMAL
+
+
+async def test_openai_compatible_provider_awaits_stream_error_and_strips_thinking(monkeypatch):
+    """Streaming HTTP >= 400 awaits response.text() instead of formatting a bound method, and non-streaming strips <think>."""
+    from services.gateway import llm_providers
+
+    class _ErrResp:
+        status = 429
+
+        async def text(self):
+            return "rate limit exceeded"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _OkResp:
+        status = 200
+
+        def raise_for_status(self):
+            return None
+
+        async def json(self):
+            return {"choices": [{"message": {"content": "<think>secret</think>Grace and peace."}}]}
+
+    class _EmptyChoicesResp:
+        status = 200
+
+        def raise_for_status(self):
+            return None
+
+        async def json(self):
+            return {"choices": []}
+
+    class _Client:
+        def __init__(self, resp):
+            self._resp = resp
+
+        def post(self, *a, **kw):
+            if hasattr(self._resp, "__aenter__"):
+                return self._resp
+
+            async def _coro():
+                return self._resp
+
+            return _coro()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    provider = llm_providers.OpenAICompatibleProvider(api_key="k", base_url="http://cloud.test/v1/chat/completions")
+
+    # 1. Streaming 429 must include real body text, not "<bound method ...>"
+    monkeypatch.setattr(gateway_main, "shared_http_client", lambda: _Client(_ErrResp()))
+    with pytest.raises(RuntimeError, match="rate limit exceeded"):
+        await provider.generate("m", [{"role": "user", "content": "hi"}], chunk_callback=AsyncMock())
+
+    # 2. Non-streaming strips <think> blocks
+    monkeypatch.setattr(gateway_main, "shared_http_client", lambda: _Client(_OkResp()))
+    assert await provider.generate("m", [{"role": "user", "content": "hi"}]) == "Grace and peace."
+
+    # 3. Empty choices does not raise IndexError
+    monkeypatch.setattr(gateway_main, "shared_http_client", lambda: _Client(_EmptyChoicesResp()))
+    assert await provider.generate("m", [{"role": "user", "content": "hi"}]) == ""

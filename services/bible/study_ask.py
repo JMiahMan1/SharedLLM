@@ -439,10 +439,12 @@ async def ask_stream(
                     break
                 try:
                     chunk = json.loads(data)
-                    delta = chunk["choices"][0].get("delta") or {}
-                except (ValueError, KeyError, IndexError, TypeError):
+                    delta = (chunk.get("choices") or [{}])[0].get("delta") or {}
+                except (ValueError, KeyError, IndexError, TypeError, AttributeError):
                     continue
                 text = delta.get("content") or ""
+                if isinstance(chunk, dict) and chunk.get("offline") and not wrote:
+                    raise StudyAskOffline(text.strip() or "Jarvis's local AI is offline right now.")
                 if text:
                     wrote = True
                     yield text
@@ -471,14 +473,17 @@ def online_payload(*, reference: str, verses: list[dict], translation: str, ques
     """
     return {
         "feature": ONLINE_FEATURE,
-        "reference": str(reference or ""),
+        "reference": str(reference or "").strip()[:80],
         "verses": [
-            {"reference": str(v.get("reference") or "").strip(), "text": str(v.get("text") or "").strip()}
+            {
+                "reference": str(v.get("reference") or "").strip()[:80],
+                "text": str(v.get("text") or "").strip()[:2_000],
+            }
             for v in verses[:MAX_VERSES]
             if str(v.get("text") or "").strip() and str(v.get("reference") or "").strip()
         ],
-        "translation": str(translation or ""),
-        "question": str(question or "").strip(),
+        "translation": str(translation or "").strip(),
+        "question": str(question or "").strip()[:MAX_QUESTION_CHARACTERS],
         "reading_level": depth if depth in DEPTHS else "adult",
     }
 

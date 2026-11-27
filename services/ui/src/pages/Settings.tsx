@@ -945,13 +945,16 @@ const AppUpdatesSection = () => {
             ) : apkPhase === 'ready' || apkPhase === 'installing' ? (
               <button
                 data-testid="apk-install-button"
+                disabled={apkPhase === 'installing'}
                 onClick={() => {
                   trigger('medium');
                   setApkError(null);
                   setApkPhase('installing');
                   void installVerifiedApk()
                     .then(() => {
-                      if (aliveRef.current) toast.success('Installer opened. Tap Install.', { id: 'apk-install' });
+                      if (!aliveRef.current) return;
+                      setApkPhase('ready');
+                      toast.success('Installer opened. Tap Install.', { id: 'apk-install' });
                     })
                     .catch((err) => {
                       if (!aliveRef.current) return;

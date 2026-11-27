@@ -201,3 +201,11 @@ def test_a_watch_probe_needs_two_misses_in_a_row_to_mark_it_down():
     assert health.state == UP  # the answer in between reset the count
     health.probe_once()
     assert health.state == DOWN
+
+
+def test_probe_max_is_at_least_probe_interval(monkeypatch):
+    monkeypatch.setenv("LOCAL_AI_PROBE_INTERVAL_S", "45")
+    monkeypatch.delenv("LOCAL_AI_PROBE_MAX_S", raising=False)
+    s = Settings.from_env()
+    assert s.probe_interval == 45.0
+    assert s.probe_max == 45.0

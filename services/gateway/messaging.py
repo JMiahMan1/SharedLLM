@@ -707,8 +707,9 @@ def infer_priority_from_payload(payload: dict[str, Any]) -> int:
         except (TypeError, ValueError):
             log.warning(f"Ignoring a job priority that is not a number: {payload['priority']!r}")
 
-    # Raven missions are low priority (long-running)
-    if payload.get("_mission_id"):
+    # Raven missions and background work are low priority so a user's question
+    # always sorts ahead of deferred work (including while the local AI is offline).
+    if payload.get("_mission_id") or payload.get("background"):
         return PRIORITY_LOW
 
     query = str(payload.get("query", "")).lower()

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { MapPin, ChevronLeft, ChevronRight, Navigation } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useLocation } from '../../context/LocationContext';
@@ -30,14 +30,12 @@ const HaloBanner = ({ rooms, userId }: HaloBannerProps) => {
   const hasLocation = locationCtx?.latitude !== null;
   const [presenceRoom, setPresenceRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(false);
-  const loadingRef = useRef(false);
 
   useEffect(() => {
     if (!userId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPresenceRoom(null);
       setLoading(false);
-      loadingRef.current = false;
       return;
     }
     // Abort on unmount: the fetch must not settle into a torn down happy-dom
@@ -48,7 +46,11 @@ const HaloBanner = ({ rooms, userId }: HaloBannerProps) => {
     setLoading(true);
     api.getUserPresence(userId, controller.signal)
       .then((data: PresenceData) => {
-        if (!alive || !data?.presence) return;
+        if (!alive) return;
+        if (!data?.presence) {
+          setPresenceRoom(null);
+          return;
+        }
         setPresenceRoom({
           id: data.presence.room,
           name: data.presence.room.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
@@ -62,7 +64,6 @@ const HaloBanner = ({ rooms, userId }: HaloBannerProps) => {
       .finally(() => {
         if (alive) {
           setLoading(false);
-          loadingRef.current = false;
         }
       });
     return () => {
