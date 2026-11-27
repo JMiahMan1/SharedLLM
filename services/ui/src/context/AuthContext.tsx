@@ -27,8 +27,16 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
 }
 
-/** Reading the phone's own storage at start; never the server. */
-const STORAGE_TIMEOUT_MS = 3000;
+/**
+ * Reading the phone's own storage at start; never the server.
+ *
+ * Three seconds was too short on the hardware this app actually runs on: a
+ * cold start on a tablet took over ten seconds to reach the stored key, so
+ * every launch opened on a red "Initialization timed out" banner and the login
+ * form while the session restored underneath it. The timeout only has to stop
+ * a spinner spinning forever, so it is long enough for a slow phone to answer.
+ */
+export const STORAGE_TIMEOUT_MS = 15000;
 /** The server is retried this often at start while it cannot be reached (capped). */
 const RETRY_MS = [1000, 2000, 4000, 8000, 15000, 30000];
 
@@ -102,7 +110,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     // answer (the network waking up after an app update) must never send a
     // signed-in person to the login screen.
     const storageTimeout = setTimeout(() => {
-      setInitError('Initialization timed out. Please restart the app.');
+      // Not a failure yet: a slow phone often finishes a moment later. Saying
+      // "restart the app" over a read that is merely slow sent people to a
+      // login screen they did not need.
+      setInitError('Still starting up. If it does not continue shortly, restart the app.');
       setIsLoading(false);
     }, STORAGE_TIMEOUT_MS);
     let cancelled = false;
