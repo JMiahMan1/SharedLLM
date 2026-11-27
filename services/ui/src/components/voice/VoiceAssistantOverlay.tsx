@@ -19,12 +19,10 @@ import { JarvisAssist, askJarvis, type AssistEvent, type AssistState } from '../
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  /** Called with each transcript, so the caller can fill a search box. */
-  onCommand?: (transcript: string) => void;
   userId?: string;
 }
 
-export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, userId }: Props) {
+export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props) {
   const [state, setState] = useState<AssistState>('idle');
   const [level, setLevel] = useState(0);
   const [heard, setHeard] = useState('');
@@ -47,7 +45,6 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
       if (event.type === 'level') setLevel(typeof event.level === 'number' ? event.level : 0);
       if (event.type === 'transcript' && event.text) {
         setHeard(event.text);
-        onCommand?.(event.text);
       }
       if (event.type === 'sentence' && event.text) setSaid((prev) => (prev ? `${prev} ${event.text}` : String(event.text)));
       if (event.type === 'reply' && event.text) setSaid(event.text);
@@ -60,7 +57,7 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
       remove = () => void handle.remove();
     });
     return () => remove?.();
-  }, [isOpen, onCommand]);
+  }, [isOpen]);
 
   // A new turn starts as the sheet opens.
   useEffect(() => {

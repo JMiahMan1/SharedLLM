@@ -730,9 +730,6 @@ const Dashboard = () => {
         isOpen={voiceOpen}
         onClose={() => setVoiceOpen(false)}
         userId={user?.id?.toString()}
-        onCommand={(transcript) => {
-          setSearchQuery(transcript);
-        }}
       />
 
       {/* Dashboard Settings */}
