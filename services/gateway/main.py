@@ -19932,13 +19932,20 @@ _VOICE_MAX_AUDIO_BYTES = 8 * 1024 * 1024
 
 
 def _transcript_from(payload: object) -> str:
-    """Whisper's text out of whichever envelope the execution service used."""
+    """Whisper's text out of whichever envelope the execution service used.
+
+    ``/execute/stt/transcribe`` answers ``{"status": "SUCCESS", "transcript":
+    "..."}``, while other callers wrap the line as ``text`` (sometimes under
+    ``detail``/``data``). Reading only ``text`` meant every real recording came
+    back empty: the sheet said "Listening", heard nothing, and answered nothing.
+    """
     for container in (payload, (payload or {}).get("detail") if isinstance(payload, dict) else None,
                       (payload or {}).get("data") if isinstance(payload, dict) else None):
         if isinstance(container, dict):
-            value = container.get("text")
-            if isinstance(value, str):
-                return value.strip()
+            for key in ("text", "transcript"):
+                value = container.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
     return ""
 
 

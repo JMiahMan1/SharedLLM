@@ -129,6 +129,21 @@ def test_a_recording_is_heard_and_answered_as_text(client):
     assert sent["headers"]["X-Internal-Secret"] == gateway_main.INTERNAL_SECRET
 
 
+def test_a_recording_comes_back_as_text_when_execution_says_transcript(client):
+    """The live service answers {"status", "transcript"}, not {"text"}.
+
+    Reading only "text" made every real recording look empty: the assistant
+    said "Listening", heard nothing, and never answered.
+    """
+    client_stub = _Client(200, {"status": "SUCCESS", "transcript": "  what is the capital of France "})
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(gateway_main, "shared_http_client", lambda: _Ctx(client_stub))
+        resp = client.post("/api/voice/listen", json={"audio_b64": "UklGRg==", "mime": "audio/webm"})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"text": "what is the capital of France"}
+
+
 def test_something_that_is_not_a_recording_is_refused(client):
     assert client.post("/api/voice/listen", json={"audio_b64": ""}).status_code == 400
     assert client.post("/api/voice/listen", json={"audio_b64": "not base64!!"}).status_code == 400
