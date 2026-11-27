@@ -103,4 +103,60 @@ public class JarvisAssistPlugin extends Plugin {
                 .edit().putString("jarvis_wake_phrase", phrase.trim().toLowerCase()).apply();
         call.resolve();
     }
+
+    /**
+     * Whether this phone can hand an app the assistant role, and whether it
+     * already has. The sheet offers it only when the answer is yes and no.
+     */
+    @PluginMethod
+    public void assistantRole(PluginCall call) {
+        JSObject out = new JSObject();
+        boolean can = AssistEntryRules.canHoldAssistantRole(android.os.Build.VERSION.SDK_INT);
+        out.put("canHold", can);
+        out.put("held", can && roleHeld());
+        call.resolve(out);
+    }
+
+    /** The one tap that makes Jarvis the phone's assistant (long-press home). */
+    @PluginMethod
+    public void requestAssistantRole(PluginCall call) {
+        if (!AssistEntryRules.canHoldAssistantRole(android.os.Build.VERSION.SDK_INT)) {
+            call.reject("This phone is too old to hand an app the assistant role.");
+            return;
+        }
+        try {
+            openRoleRequest(call);
+        } catch (Exception e) {
+            call.reject("Android would not open the assistant setting.");
+        }
+    }
+
+    /** Called by Capacitor when the role dialog closes, whichever way it went. */
+    public void roleResult(PluginCall call) {
+        if (call != null) call.resolve();
+    }
+
+    @android.annotation.TargetApi(29)
+    private boolean roleHeld() {
+        android.app.role.RoleManager roles =
+                (android.app.role.RoleManager) getContext().getSystemService(android.app.role.RoleManager.class);
+        return roles != null && roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT);
+    }
+
+    @android.annotation.TargetApi(29)
+    private void openRoleRequest(PluginCall call) {
+        android.app.role.RoleManager roles =
+                (android.app.role.RoleManager) getContext().getSystemService(android.app.role.RoleManager.class);
+        if (roles == null || !roles.isRoleAvailable(android.app.role.RoleManager.ROLE_ASSISTANT)) {
+            call.reject("This phone does not offer the assistant role.");
+            return;
+        }
+        if (roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)) {
+            call.resolve();
+            return;
+        }
+        startActivityForResult(call, roles.createRequestRoleIntent(android.app.role.RoleManager.ROLE_ASSISTANT),
+                "roleResult");
+    }
+
 }

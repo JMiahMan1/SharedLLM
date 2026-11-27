@@ -46,6 +46,7 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
   const [said, setSaid] = useState('');
   const [error, setError] = useState('');
   const [typing, setTyping] = useState(false);
+  /** Shown once, on a phone that can hold the assistant role and does not. */
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const native = Capacitor.isNativePlatform();
@@ -135,6 +136,17 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
     }
   }, [busy, draft, native, onCommand, userId]);
 
+  const [roleOffer, setRoleOffer] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen || !native) return;
+    void JarvisAssist.assistantRole()
+      .then((role) => {
+        if (role.canHold && !role.held) setRoleOffer(true);
+      })
+      .catch(() => {});
+  }, [isOpen, native]);
+
   if (!isOpen) return null;
 
   const rings = state === 'listening' || state === 'speaking';
@@ -216,6 +228,19 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
           )}
         </div>
 
+        {native && roleOffer && (
+          <p className="px-6 pb-1 text-center text-xs text-slate-400">
+            Say “Hey Jarvis” from any screen:{' '}
+            <button
+              onClick={() => {
+                void JarvisAssist.requestAssistantRole().finally(() => setRoleOffer(false));
+              }}
+              className="text-purple-300 underline underline-offset-2"
+            >
+              make Jarvis the assistant
+            </button>
+          </p>
+        )}
         <div className="flex items-center justify-center gap-3 p-6 pb-[calc(1.5rem+var(--safe-bottom))]">
           {native && !typing && (
             <>
