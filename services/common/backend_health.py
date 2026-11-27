@@ -584,7 +584,6 @@ class BackendHealth:
             if woke or self._wake.is_set():
                 continue  # state changed: recompute the delay
             self.probe_once()
-rexویرایش با موفقیت انجام شد، اما ممکن است خطاهای نگارشی یا املایی در متن جدید وجود داشته باشد. لطفاً متن ویرایش شده را بررسی کنید و در صورت نیاز اصلاح نمایید.
 
     def snapshot(self) -> dict[str, object]:
         """The state for a status endpoint: no host names, no exception text."""
