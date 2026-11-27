@@ -85,3 +85,23 @@ available.
 - `services/ui/android/app/src/test/java/com/jarvisos/app/VoiceTurnRulesTest.java`
   and `VoiceWavTest.java` - the turn-taking and audio-format rules.
 - `services/ui/src/plugins/jarvisAssist.test.ts` - the web fallback never throws.
+
+## Ways in (built)
+
+Four, because no single one works on every phone:
+
+1. **The home-screen widget, "Talk to Jarvis"** - a tap starts a turn with no app open.
+2. **A pinned shortcut** - the assistant can be a launcher shortcut too.
+3. **A physical button** - a headset or Bluetooth button starts a turn on release; play/pause
+   and track-skip start one on a double press with the screen on, so a pocket pause never listens.
+4. **The system assistant** - with the assistant role, long-pressing home starts a turn; the
+   Quick Settings tile does the same from the shade.
+
+The rules that decide all of this live in `AssistEntryRules` and are unit tested, so a phone that
+cannot have one route still has the others.
+
+## Still not built
+
+- **A continuous wake word.** `AssistService` accepts a wake flag and trims "hey jarvis" with
+  `VoiceTurnRules.wake`, but nothing feeds it continuous audio yet: hearing a wake word all day
+  needs an on-device detector (or a permanently listening STT loop) and an honest battery story.

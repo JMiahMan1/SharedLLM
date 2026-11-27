@@ -621,6 +621,51 @@
             android:foregroundServiceType="microphone"
             android:stopWithTask="false" />
 
+        <!-- The ways into the assistant besides the in-app mic: a home-screen
+             widget, a headset/Bluetooth button, the assistant role (long-press
+             home) and a Quick Settings tile. No single one works on every
+             phone, which is why there are four. -->
+        <receiver
+            android:name=".AssistTriggerReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".VoiceAssistWidget"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/voice_assist_widget_info" />
+        </receiver>
+
+        <service
+            android:name=".AssistTileService"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="Jarvis"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <activity
+            android:name=".AssistActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".DropInService"
             android:exported="false"
