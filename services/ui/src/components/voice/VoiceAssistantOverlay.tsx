@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Capacitor } from '@capacitor/core';
 import { Keyboard, Loader2, Mic, Send, Sparkles, Square, X } from 'lucide-react';
-import { api } from '../../services/api';
-import { JarvisAssist, type AssistEvent, type AssistState } from '../../plugins/jarvisAssist';
+import { JarvisAssist, askJarvis, type AssistEvent, type AssistState } from '../../plugins/jarvisAssist';
 
 /**
  * Ask Jarvis, out loud.
@@ -31,6 +30,8 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
   const [heard, setHeard] = useState('');
   const [said, setSaid] = useState('');
   const [error, setError] = useState('');
+  /** A one-line diagnostic (microphone granted or blocked), so silence explains itself. */
+  const [note, setNote] = useState('');
   const [typing, setTyping] = useState(false);
   const [draft, setDraft] = useState('');
   const [roleOffer, setRoleOffer] = useState(false);
@@ -50,6 +51,7 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
       }
       if (event.type === 'sentence' && event.text) setSaid((prev) => (prev ? `${prev} ${event.text}` : String(event.text)));
       if (event.type === 'reply' && event.text) setSaid(event.text);
+      if (event.type === 'status' && event.text) setNote(event.text);
       if (event.type === 'error') {
         setError(event.text || 'That did not work.');
         setState('idle');
@@ -66,6 +68,7 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
     /* eslint-disable react-hooks/set-state-in-effect -- opening the sheet is a deliberate
        reset of the turn before it; it runs once per open, never in a render loop. */
     setError('');
+    setNote('');
     setHeard('');
     setSaid('');
     setLevel(0);
@@ -103,19 +106,9 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
     setDraft('');
     setError('');
     setSaid('');
-    setHeard(question);
-    onCommand?.(question);
-    setState('thinking');
-    try {
-      const answer = api.replyText(await api.chat(question, undefined, userId, false));
-      setSaid(answer || 'I did not have an answer for that.');
-      setState('speaking');
-      if (native) await JarvisAssist.speak({ text: answer });
-      setState('idle');
-    } catch {
-      setError('I could not reach the house just now.');
-      setState('idle');
-    }
+    // The typed question runs the spoken turn, so it answers out loud the same
+    // way a microphone turn does (and is cut off by the same stop button).
+    await askJarvis(question, userId);
   };
 
   const speaking = state === 'speaking';
@@ -212,6 +205,9 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
             </div>
 
             <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-white/45">{words[state]}</p>
+            {note && !error && (
+              <p className="text-[10px] uppercase tracking-[0.22em] text-white/25">{note}</p>
+            )}
 
             {(heard || said) && (
               <div
