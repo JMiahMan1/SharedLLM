@@ -2069,6 +2069,75 @@ export const api = {
     return resp.data;
   },
 
+  /**
+   * Ask the house a question and hear the answer as it is written.
+   *
+   * `/api/chat` with `speech_stream` splits the answer into sentences as the
+   * model produces them, so the phone can start speaking sentence one while
+   * sentence two is still being generated - the way the Echo Dots answer.
+   * `voice_context` is what marks the turn as spoken: without one the gateway
+   * streams plain text tokens instead, which are not sentences.
+   */
+  async voiceChatStream(
+    message: string,
+    options: {
+      deviceName?: string;
+      area?: string;
+      userId?: string;
+      onSentence: (sentence: { text: string; voice: string | null }) => void;
+      onReply?: (text: string) => void;
+      signal?: AbortSignal;
+    },
+  ): Promise<string> {
+    const body: Record<string, unknown> = {
+      query: message,
+      user_id: options.userId,
+      stream: true,
+      speech_stream: true,
+      voice_context: {
+        source: 'android',
+        ...(options.deviceName ? { device_name: options.deviceName } : {}),
+        ...(options.area ? { area: options.area } : {}),
+      },
+    };
+    let failure = '';
+    let tokens = '';
+    let spoke = false;
+    let full = '';
+    await postNdjson<Record<string, unknown>>(
+      '/api/chat',
+      body,
+      (event) => {
+        const chunk = event.message as { content?: unknown } | undefined;
+        const content = typeof chunk?.content === 'string' ? chunk.content : '';
+        const voice = typeof event.voice === 'string' ? event.voice : null;
+        if (event.done === true) {
+          if (typeof event.error === 'string' && event.error.trim()) {
+            failure = event.error.trim();
+            return;
+          }
+          full = typeof event.reply === 'string' && event.reply.trim() ? event.reply.trim() : tokens.trim();
+          const rest = typeof event.speech_rest === 'string' ? event.speech_rest.trim() : '';
+          if (rest) options.onSentence({ text: rest, voice });
+          else if (!spoke && full) options.onSentence({ text: full, voice });
+          if (full) options.onReply?.(full);
+          return;
+        }
+        if (!content.trim()) return;
+        if (event.speech === true) {
+          spoke = true;
+          options.onSentence({ text: content.trim(), voice });
+        } else {
+          tokens += content;
+        }
+      },
+      options.signal,
+      'Jarvis could not answer',
+    );
+    if (failure) throw new NdjsonError(failure, 502);
+    return full;
+  },
+
   async getGatewayConfig(): Promise<GatewayConfig> {
     const resp = await apiClient.get('/api/config');
     return resp.data.config;

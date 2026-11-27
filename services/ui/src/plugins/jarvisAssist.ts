@@ -20,7 +20,8 @@ import { api } from '../services/api';
  * `{type: 'state'|'level'|'transcript'|'sentence'|'reply'|'error', text?, level?}`.
  */
 export interface AssistEvent {
-  type: 'state' | 'level' | 'transcript' | 'sentence' | 'reply' | 'error';
+  /** `status` is a short diagnostic line (microphone state), so a silent sheet says why. */
+  type: 'state' | 'level' | 'transcript' | 'sentence' | 'reply' | 'error' | 'status';
   text?: string;
   level?: number;
 }
@@ -58,13 +59,19 @@ type Listener = (event: AssistEvent) => void;
 
 const listeners = new Set<Listener>();
 let recorder: MediaRecorder | null = null;
+/** Set when the sheet closes mid-take: the partial clip is dropped, not submitted. */
+let discard = false;
 /** While the assistant screen is open it keeps listening after each answer. */
 let handsFree = false;
 let stream: MediaStream | null = null;
 let chunks: Blob[] = [];
 let audio: HTMLAudioElement | null = null;
+/** Resolves the clip's promise when the answer is cut off, so the queue moves on. */
+let audioStop: (() => void) | null = null;
 let meter: number | null = null;
 let state: AssistState = 'idle';
+/** The turn in flight, so closing the sheet stops it instead of letting it talk to an empty room. */
+let turnAbort: AbortController | null = null;
 
 function emit(event: AssistEvent) {
   for (const listener of [...listeners]) listener(event);
@@ -101,6 +108,13 @@ async function blobToBase64(blob: Blob): Promise<string> {
 
 function playBase64(b64: string, mime: string): Promise<void> {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      audioStop = null;
+      resolve();
+    };
     try {
       const bytes = atob(b64);
       const buffer = new Uint8Array(bytes.length);
@@ -109,17 +123,88 @@ function playBase64(b64: string, mime: string): Promise<void> {
       audio = new Audio(url);
       audio.onended = () => {
         URL.revokeObjectURL(url);
-        resolve();
+        finish();
       };
       audio.onerror = () => {
         URL.revokeObjectURL(url);
-        resolve();
+        finish();
       };
-      void audio.play().catch(() => resolve());
+      // "Stop talking" pauses the clip, which fires neither event above: without
+      // this the speech queue would wait forever on an answer nobody is hearing.
+      audioStop = () => {
+        try {
+          audio?.pause();
+        } catch {
+          // already gone
+        }
+        finish();
+      };
+      void audio.play().catch(() => finish());
     } catch {
-      resolve();
+      finish();
     }
   });
+}
+
+/* ------------------------------------------------------- speaking in order */
+
+/**
+ * Sentences are synthesised as they arrive, but played in order.
+ *
+ * Each sentence's `/api/voice/speak` starts the moment its text exists, and one
+ * chain plays them one after another, so sentence two's audio is already in hand
+ * while sentence one is being heard. That is what makes a turn feel like the
+ * Echo Dots instead of a pause followed by a monologue.
+ */
+let speechTail: Promise<void> = Promise.resolve();
+let speechAborted = false;
+
+function beginSpeech() {
+  speechAborted = false;
+  speechTail = Promise.resolve();
+}
+
+function enqueueSpeech(text: string, voice?: string | null) {
+  const line = text.trim();
+  if (!line || speechAborted) return;
+  speechTail = speechTail.then(async () => {
+    if (speechAborted) return;
+    try {
+      const spoken = await api.voiceSpeak(line, voice || undefined);
+      if (spoken?.audio_b64 && !speechAborted) {
+        await playBase64(spoken.audio_b64, spoken.mime || 'audio/wav');
+      }
+    } catch {
+      // One sentence that cannot be spoken must not cut the answer short.
+    }
+  });
+}
+
+function stopSpeech() {
+  speechAborted = true;
+  speechTail = Promise.resolve();
+  audioStop?.();
+  audioStop = null;
+  audio = null;
+}
+
+/** How this device names itself in the house's conversation context. */
+function deviceName(): string {
+  try {
+    const saved = localStorage.getItem('jarvis_device_name');
+    if (saved) return saved;
+  } catch {
+    // no storage: the platform name is enough
+  }
+  return Capacitor.isNativePlatform() ? 'Phone' : 'Browser';
+}
+
+/** Keeps listening after a turn when the sheet is open, so nobody has to tap again. */
+function rearm() {
+  if (!handsFree) return;
+  window.setTimeout(() => {
+    if (handsFree) void webStart();
+  }, 700);
 }
 
 /** "Hey Jarvis, what time is it" is the question "what time is it". */
@@ -128,36 +213,77 @@ function withoutWake(text: string): string {
   return cut || text;
 }
 
+/**
+ * Answer one question out loud, speaking each sentence as it is written.
+ *
+ * Shared by the microphone turn and the typed one, so both behave the same and
+ * both are cut off together when the sheet closes. The gateway streams the
+ * answer as sentences (`speech_stream`); each one is synthesised immediately and
+ * played in order, which is the Echo Dot's behaviour rather than "wait, then
+ * read a paragraph".
+ */
+export async function askJarvis(text: string, userId?: string): Promise<void> {
+  const question = withoutWake(text.trim());
+  if (!question) return;
+  turnAbort?.abort();
+  const controller = new AbortController();
+  turnAbort = controller;
+  beginSpeech();
+  emit({ type: 'transcript', text: question });
+  setState('thinking');
+  let answer = '';
+  try {
+    await api.voiceChatStream(question, {
+      deviceName: deviceName(),
+      userId,
+      signal: controller.signal,
+      onSentence: (sentence) => {
+        if (state === 'thinking') setState('speaking');
+        emit({ type: 'sentence', text: sentence.text });
+        enqueueSpeech(sentence.text, sentence.voice);
+      },
+      onReply: (full) => {
+        answer = full;
+        emit({ type: 'reply', text: full });
+      },
+    });
+    await speechTail;
+    if (!answer) emit({ type: 'error', text: 'I heard you but got no answer.' });
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === 'AbortError')) {
+      emit({ type: 'error', text: error instanceof Error ? error.message : 'That did not work.' });
+    }
+  } finally {
+    if (turnAbort === controller) turnAbort = null;
+    releaseMic();
+    setState('idle');
+    rearm();
+  }
+}
+
 async function finishTurn(blob: Blob) {
+  let answered = false;
   try {
     setState('thinking');
     const audioB64 = await blobToBase64(blob);
     const heard = await api.voiceListen(audioB64, blob.type || 'audio/webm');
-    const text = withoutWake((heard?.text || '').trim());
-    if (!text) {
-      emit({ type: 'error', text: "I didn't catch that." });
-      setState('idle');
+    const text = (heard?.text || '').trim();
+    if (!withoutWake(text)) {
+      emit({ type: 'error', text: "I didn't catch that. Try again after the tone." });
       return;
     }
-    emit({ type: 'transcript', text });
-    const answer = await api.chat(text, undefined, undefined, false);
-    const reply = api.replyText(answer);
-    if (!reply) {
-      emit({ type: 'error', text: 'I heard you but got no answer.' });
-      setState('idle');
-      return;
-    }
-    emit({ type: 'reply', text: reply });
-    setState('speaking');
-    const spoken = await api.voiceSpeak(reply);
-    if (spoken?.audio_b64) await playBase64(spoken.audio_b64, spoken.mime || 'audio/wav');
+    answered = true;
+    await askJarvis(text);
   } catch (error) {
     emit({ type: 'error', text: error instanceof Error ? error.message : 'That did not work.' });
   } finally {
     releaseMic();
-    setState('idle');
-    // Keep listening while the screen is open, so nobody has to tap again.
-    if (handsFree) window.setTimeout(() => { if (handsFree) void webStart(); }, 700);
+    if (!answered) {
+      setState('idle');
+      // A quiet take must not end the session: one silence used to stop
+      // hands-free listening for good, which reads as "it stopped working".
+      rearm();
+    }
   }
 }
 
@@ -173,10 +299,28 @@ async function webStart() {
   } catch {
     // Ask the browser anyway; a refusal is reported below.
   }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    emit({ type: 'status', text: 'microphone unavailable' });
+    emit({ type: 'error', text: 'This screen cannot open a microphone. Open Jarvis on the app.' });
+    return;
+  }
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch {
-    emit({ type: 'error', text: 'Jarvis needs the microphone to hear you.' });
+    emit({ type: 'status', text: 'microphone ready' });
+  } catch (error) {
+    const name = error instanceof Error ? error.name : '';
+    emit({
+      type: 'status',
+      text: name === 'NotAllowedError' ? 'microphone blocked' : 'microphone unavailable',
+    });
+    emit({
+      type: 'error',
+      text:
+        name === 'NotAllowedError'
+          ? 'Jarvis is not allowed the microphone. Allow it in Android settings, then tap the microphone again.'
+          : 'Jarvis needs the microphone to hear you.',
+    });
+    setState('idle');
     return;
   }
   const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(
@@ -190,21 +334,31 @@ async function webStart() {
     return;
   }
   chunks = [];
+  discard = false;
   recorder.ondataavailable = (event) => {
     if (event.data && event.data.size > 0) chunks.push(event.data);
   };
   recorder.onstop = () => {
     const blob = new Blob(chunks, { type: recorder?.mimeType || 'audio/webm' });
     recorder = null;
+    if (discard) {
+      // The sheet closed mid-take: that clip was never a question.
+      discard = false;
+      releaseMic();
+      setState('idle');
+      return;
+    }
     if (blob.size < 2000) {
-        // Under about a fifth of a second there is no speech in it. Posting that
-        // comes back as an empty transcript, which looks like a dead button.
-        releaseMic();
-        setState('idle');
-        emit({ type: 'error', text: 'I did not hear anything. Check the microphone permission, then try again.' });
-        return;
-      }
-      void finishTurn(blob);
+      // Under about a fifth of a second there is no speech in it. Posting that
+      // comes back as an empty transcript, which looks like a dead button.
+      releaseMic();
+      setState('idle');
+      emit({ type: 'error', text: 'I did not hear anything. Check the microphone permission, then try again.' });
+      // Listening continues: one quiet take used to end hands-free for good.
+      rearm();
+      return;
+    }
+    void finishTurn(blob);
   };
   recorder.start(250);  // periodic chunks: a WebView may send nothing until the end
   setState('listening');
@@ -242,13 +396,16 @@ const web: JarvisAssistPlugin = {
   },
   async stop() {
     handsFree = false;
+    turnAbort?.abort();
+    turnAbort = null;
+    discard = true;
     if (recorder && recorder.state === 'recording') recorder.stop();
+    stopSpeech();
     releaseMic();
     setState('idle');
   },
   async stopSpeaking() {
-    audio?.pause();
-    audio = null;
+    stopSpeech();
     if (state === 'speaking') setState('idle');
   },
   async status() {
