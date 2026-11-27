@@ -69,6 +69,8 @@ let audio: HTMLAudioElement | null = null;
 /** Resolves the clip's promise when the answer is cut off, so the queue moves on. */
 let audioStop: (() => void) | null = null;
 let meter: number | null = null;
+/** Ends the take when the person stops talking; waiting out a fixed cap reads as a dead button. */
+let silenceWatch: number | null = null;
 let state: AssistState = 'idle';
 /** The turn in flight, so closing the sheet stops it instead of letting it talk to an empty room. */
 let turnAbort: AbortController | null = null;
@@ -86,6 +88,10 @@ function stopMeter() {
   if (meter !== null) {
     window.clearInterval(meter);
     meter = null;
+  }
+  if (silenceWatch !== null) {
+    window.clearInterval(silenceWatch);
+    silenceWatch = null;
   }
 }
 
@@ -362,31 +368,52 @@ async function webStart() {
   };
   recorder.start(250);  // periodic chunks: a WebView may send nothing until the end
   setState('listening');
-  // The level meter is decoration: a browser or WebView with no Web Audio must
-  // still be able to record, or the button reads as dead.
+  // The level meter also ends the take: once the person has spoken and then
+  // gone quiet there is no reason to make them wait out a timer, and waiting
+  // out a fixed 15 s is what made the button feel dead. A WebView with no Web
+  // Audio still records (the cap ends that take), so it never blocks the turn.
+  const startedAt = Date.now();
+  let heardSpeech = false;
+  let lastLoudAt = 0;
+  let meterRunning = false;
+  const stopTake = () => {
+    if (recorder && recorder.state === 'recording') recorder.stop();
+  };
   try {
     const Ctx = window.AudioContext
       || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (Ctx) {
-    const context = new Ctx();
-    const analyser = context.createAnalyser();
-    analyser.fftSize = 512;
-    context.createMediaStreamSource(stream).connect(analyser);
-    const data = new Uint8Array(analyser.frequencyBinCount);
-    meter = window.setInterval(() => {
-      analyser.getByteFrequencyData(data);
-      const level = Math.min(100, Math.round((data.reduce((sum, v) => sum + v, 0) / data.length) * 2.2));
-      emit({ type: 'level', level });
-    }, 100);
+      const context = new Ctx();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 512;
+      context.createMediaStreamSource(stream).connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      meterRunning = true;
+      meter = window.setInterval(() => {
+        analyser.getByteFrequencyData(data);
+        const level = Math.min(100, Math.round((data.reduce((sum, v) => sum + v, 0) / data.length) * 2.2));
+        emit({ type: 'level', level });
+        if (level >= 7) {
+          heardSpeech = true;
+          lastLoudAt = Date.now();
+        }
+      }, 100);
     }
   } catch {
     // No meter, but the turn still runs.
   }
-  // A turn ends by itself: the same 15 s cap the phone's service uses, and no
-  // recording is left running if the person walks away.
-  window.setTimeout(() => {
-    if (recorder && recorder.state === 'recording') recorder.stop();
-  }, 15000);
+  if (meterRunning) {
+    silenceWatch = window.setInterval(() => {
+      const now = Date.now();
+      // Spoken, then quiet: that was the question.
+      if (heardSpeech && now - lastLoudAt >= 1100) stopTake();
+      // Nothing said at all: end early with "I did not hear anything" rather
+      // than recording five seconds of a silent room.
+      else if (!heardSpeech && now - startedAt >= 5000) stopTake();
+    }, 150);
+  }
+  // The hard cap: no recording is left running if the person walks away.
+  window.setTimeout(stopTake, 15000);
 }
 
 const web: JarvisAssistPlugin = {
