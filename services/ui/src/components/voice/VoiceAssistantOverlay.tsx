@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Capacitor } from '@capacitor/core';
-import { Keyboard, Loader2, Mic, Send, Sparkles, Square, X } from 'lucide-react';
+import { Keyboard, Mic, Send, Sparkles, Square, X } from 'lucide-react';
 import { JarvisAssist, askJarvis, type AssistEvent, type AssistState } from '../../plugins/jarvisAssist';
+import JarvisHead from './JarvisHead';
+import { faceStateFor } from './jarvisFace';
 
 /**
  * Ask Jarvis, out loud.
@@ -33,8 +35,27 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
   const [typing, setTyping] = useState(false);
   const [draft, setDraft] = useState('');
   const [roleOffer, setRoleOffer] = useState(false);
+  /** A brief flourish after a turn: a smile for a good answer, a worried face for a failure. */
+  const [reaction, setReaction] = useState<'happy' | 'error' | null>(null);
+  const reactionTimer = useRef<number | null>(null);
   const native = Capacitor.isNativePlatform();
   const scroller = useRef<HTMLDivElement | null>(null);
+
+  const flash = useCallback((kind: 'happy' | 'error', ms: number) => {
+    setReaction(kind);
+    if (reactionTimer.current !== null) window.clearTimeout(reactionTimer.current);
+    reactionTimer.current = window.setTimeout(() => {
+      reactionTimer.current = null;
+      setReaction(null);
+    }, ms);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (reactionTimer.current !== null) window.clearTimeout(reactionTimer.current);
+    },
+    [],
+  );
 
   // What the service reports, however it is running (native plugin or this page).
   useEffect(() => {
@@ -51,6 +72,8 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
         if (next === 'listening') {
           setSaid('');
           setError('');
+          // A new turn clears the last turn's face.
+          setReaction(null);
         }
       }
       if (event.type === 'level') setLevel(typeof event.level === 'number' ? event.level : 0);
@@ -66,11 +89,16 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
         setError('');
       }
       if (event.type === 'sentence' && event.text) setSaid((prev) => (prev ? `${prev} ${event.text}` : String(event.text)));
-      if (event.type === 'reply' && event.text) setSaid(event.text);
+      if (event.type === 'reply' && event.text) {
+        setSaid(event.text);
+        // A short smile: he answered, and he is pleased about it.
+        flash('happy', 1800);
+      }
       if (event.type === 'status' && event.text) setNote(event.text);
       if (event.type === 'error') {
         setError(event.text || 'That did not work.');
         setState('idle');
+        flash('error', 2400);
       }
     }).then((registered) => {
       // Closed before the listeners resolved: drop them instead of leaking one
@@ -85,7 +113,7 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
       cancelled = true;
       void handle?.remove();
     };
-  }, [isOpen]);
+  }, [isOpen, flash]);
 
   // A new turn starts as the sheet opens.
   useEffect(() => {
@@ -98,6 +126,7 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
     setSaid('');
     setLevel(0);
     setTyping(false);
+    setReaction(null);
     setState('listening');
     /* eslint-enable react-hooks/set-state-in-effect */
     void JarvisAssist.start({ wake: false }).catch(() => {
@@ -138,9 +167,7 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
   };
 
   const speaking = state === 'speaking';
-  const thinking = state === 'thinking';
-  const listening = state === 'listening';
-  const swell = listening ? 1 + Math.min(level, 100) / 260 : speaking ? 1.06 : 1;
+  const face = faceStateFor(state, reaction);
 
   const words: Record<AssistState, string> = {
     idle: 'Ask me anything',
@@ -186,7 +213,7 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
             </button>
           </div>
 
-          {/* the orb */}
+          {/* the face */}
           <div className="relative flex flex-1 flex-col items-center justify-center gap-8 px-6">
             <div className="relative grid place-items-center">
               {speaking &&
@@ -200,34 +227,7 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
                     transition={{ duration: 2.4, repeat: Infinity, delay, ease: 'easeOut' }}
                   />
                 ))}
-              <motion.div
-                aria-hidden
-                className="absolute h-44 w-44 rounded-full blur-2xl"
-                style={{ background: 'var(--site-accent, #8b5cf6)', opacity: speaking ? 0.55 : 0.35 }}
-                animate={{ scale: swell * 1.05 }}
-                transition={{ type: 'spring', stiffness: 120, damping: 18 }}
-              />
-              <motion.div
-                className="relative grid h-44 w-44 place-items-center rounded-full shadow-2xl"
-                style={{
-                  background:
-                    'radial-gradient(circle at 34% 28%, rgba(255,255,255,0.92) 0%, var(--site-accent, #8b5cf6) 46%, rgba(9,11,16,0.92) 100%)',
-                }}
-                animate={{ scale: swell, rotate: speaking ? [0, 4, -4, 0] : 0 }}
-                transition={
-                  speaking
-                    ? { rotate: { duration: 2.6, repeat: Infinity, ease: 'easeInOut' }, scale: { type: 'spring', stiffness: 120, damping: 18 } }
-                    : { type: 'spring', stiffness: 120, damping: 18 }
-                }
-              >
-                {thinking ? (
-                  <Loader2 size={40} className="animate-spin text-white/90" />
-                ) : listening ? (
-                  <Mic size={40} className="text-white/95" />
-                ) : (
-                  <Sparkles size={36} className="text-white/90" />
-                )}
-              </motion.div>
+              <JarvisHead state={face} level={level} size={176} />
             </div>
 
             <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-white/45">{words[state]}</p>
