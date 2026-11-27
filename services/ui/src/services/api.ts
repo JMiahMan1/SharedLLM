@@ -571,9 +571,33 @@ async function fetchNdjson<T>(
   const { baseURL, headers } = directRequestConfig();
   if (init.method === 'GET') delete headers['Content-Type'];
   const resp = await fetch(`${baseURL || ''}${path}`, { ...init, headers, signal });
-  if (!resp.ok || !resp.body) {
+  if (!resp.ok) {
     const detail = await resp.json().catch(() => ({}));
     throw new NdjsonError((detail as { detail?: string }).detail || `${failure} (${resp.status})`, resp.status);
+  }
+  if (!resp.body) {
+    // CapacitorHttp (Android) hands back a finished body and no readable
+    // stream. Treating that as a failure ("Jarvis could not answer (200)")
+    // discarded answers the server had already sent - every fast path, and the
+    // whole reply of a short turn.
+    const text = (await resp.text()).trim();
+    if (!text) return;
+    try {
+      onEvent(JSON.parse(text) as T);   // one finished object, as a fast path answers
+      return;
+    } catch {
+      // not a single value: NDJSON, one object per line
+    }
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        onEvent(JSON.parse(trimmed) as T);
+      } catch {
+        // a line that is not JSON is a comment or a partial: skip it, as the stream path does
+      }
+    }
+    return;
   }
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
@@ -2116,7 +2140,15 @@ export const api = {
             failure = event.error.trim();
             return;
           }
-          full = typeof event.reply === 'string' && event.reply.trim() ? event.reply.trim() : tokens.trim();
+          // A fast path (the time, the weather, a calendar answer, a sentence
+          // trigger) does not stream: it answers with one finished object whose
+          // words are in `message.content`, with no `reply` and no sentence
+          // envelopes. Reading only `reply` here threw those answers away - the
+          // phone transcribed the question, posted it, got a 200 and stayed
+          // silent. Prefer the explicit reply, then whatever streamed, then the
+          // finished object's own words.
+          const reply = typeof event.reply === 'string' ? event.reply.trim() : '';
+          full = reply || tokens.trim() || content.trim();
           const rest = typeof event.speech_rest === 'string' ? event.speech_rest.trim() : '';
           if (rest) options.onSentence({ text: rest, voice });
           else if (!spoke && full) options.onSentence({ text: full, voice });

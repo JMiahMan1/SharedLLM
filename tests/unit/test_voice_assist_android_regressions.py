@@ -63,3 +63,18 @@ def test_a_shortcut_that_cannot_start_the_service_still_reaches_the_assistant():
     assert RECEIVER.count("try {") >= 2, "both entry points must survive a refused foreground service"
     assert RECEIVER.count("startAssist(context)") >= 2
     assert "AssistActivity.class" in RECEIVER
+
+
+VOICE_CLIENT = (APP / "VoiceClient.java").read_text()
+
+
+def test_a_fast_path_answer_is_spoken_instead_of_dropped():
+    """The time, the weather and other fast paths answer once, with the words in
+    ``message.content`` and no ``reply``. Reading only ``reply`` meant the phone
+    transcribed the question, received a 200 and stayed silent."""
+    chat = _between(VOICE_CLIENT, "void chat(", "byte[] speak(")
+
+    assert 'optJSONObject("message")' in chat
+    assert 'optString("content", "")' in chat
+    assert "if (!spoken)" in chat, "the finished object's words must be spoken only when nothing streamed"
+    assert "spoken = true;" in chat

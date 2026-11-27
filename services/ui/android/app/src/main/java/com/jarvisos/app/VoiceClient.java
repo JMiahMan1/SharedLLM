@@ -126,6 +126,7 @@ final class VoiceClient {
             }
             BufferedReader reader = new BufferedReader(response.body().charStream());
             String reply = "";
+            boolean spoken = false;
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
@@ -138,12 +139,32 @@ final class VoiceClient {
                 }
                 if (chunk.optBoolean("speech") && chunk.optJSONObject("message") != null) {
                     String said = chunk.optJSONObject("message").optString("content", "");
-                    if (!said.trim().isEmpty()) stream.sentence(said.trim());
+                    if (!said.trim().isEmpty()) {
+                        stream.sentence(said.trim());
+                        spoken = true;
+                    }
                 }
                 if (chunk.optBoolean("done")) {
                     reply = chunk.optString("reply", reply);
                     String rest = chunk.optString("speech_rest", "");
-                    if (!rest.trim().isEmpty()) stream.sentence(rest.trim());
+                    if (!rest.trim().isEmpty()) {
+                        stream.sentence(rest.trim());
+                        spoken = true;
+                    } else if (reply.trim().isEmpty()) {
+                        // A fast path (the time, the weather, a sentence trigger) answers with one
+                        // finished object: done true and the words in message.content, with no reply
+                        // and no sentence envelopes. Without this the phone transcribed the question,
+                        // got a 200 and stayed silent.
+                        JSONObject message = chunk.optJSONObject("message");
+                        String content = message == null ? "" : message.optString("content", "");
+                        if (!content.trim().isEmpty()) {
+                            reply = content.trim();
+                            if (!spoken) {
+                                stream.sentence(reply);
+                                spoken = true;
+                            }
+                        }
+                    }
                 }
             }
             stream.done(reply);
