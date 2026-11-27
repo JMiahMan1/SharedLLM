@@ -78,6 +78,10 @@ let partialWatch: number | null = null;
 let partialBusy = false;
 /** Bumped when a take ends, so a slow partial cannot overwrite the real transcript. */
 let partialToken = 0;
+/** The words the last partial heard, and how much audio it covered, so the end of the
+ *  take does not pay for the same transcription twice. */
+let partialHeard = '';
+let partialCovered = 0;
 /** The 15 s cap on one take. Tracked, so take #1's timer cannot end take #2. */
 let hardCap: number | null = null;
 /** The Web Audio context behind the level meter; a WebView only allows a handful of them. */
@@ -312,11 +316,18 @@ async function partialListen() {
   if (blob.size < 6000) return;
   partialBusy = true;
   const token = partialToken;
+  // The chunks this request covers: the finished take compares against it to
+  // know whether it already has the words for exactly this audio.
+  const covered = chunks.length;
   try {
     const audioB64 = await blobToBase64(blob);
     const heard = await api.voiceListen(audioB64, blob.type || 'audio/webm');
     const text = withoutWake((heard?.text || '').trim());
-    if (token === partialToken && text) emit({ type: 'partial', text });
+    if (token === partialToken && text) {
+      emit({ type: 'partial', text });
+      partialHeard = text;
+      partialCovered = covered;
+    }
   } catch {
     // A partial is a convenience; the finished take still does the real work.
   } finally {
@@ -324,13 +335,21 @@ async function partialListen() {
   }
 }
 
-async function finishTurn(blob: Blob) {
+async function finishTurn(blob: Blob, covered: number) {
   let answered = false;
   try {
     setState('thinking');
-    const audioB64 = await blobToBase64(blob);
-    const heard = await api.voiceListen(audioB64, blob.type || 'audio/webm');
-    const text = (heard?.text || '').trim();
+    // The 1.5 s partials have usually already transcribed this exact audio, so a
+    // second round trip adds latency and a second Whisper run of the same bytes.
+    // Only reuse it when no new audio arrived after that partial asked.
+    let text = '';
+    if (partialHeard && partialCovered === covered) {
+      text = partialHeard;
+    } else {
+      const audioB64 = await blobToBase64(blob);
+      const heard = await api.voiceListen(audioB64, blob.type || 'audio/webm');
+      text = (heard?.text || '').trim();
+    }
     if (!withoutWake(text)) {
       emit({ type: 'error', text: "I didn't catch that. Try again after the tone." });
       return;
@@ -421,6 +440,9 @@ async function webStart() {
   }
   recorder = active;
   chunks = [];
+  // A new take's words are its own: last take's partial must never answer it.
+  partialHeard = '';
+  partialCovered = 0;
   discard = false;
   active.ondataavailable = (event) => {
     if (event.data && event.data.size > 0) chunks.push(event.data);
@@ -428,6 +450,7 @@ async function webStart() {
   active.onstop = () => {
     // Anything still in flight belongs to the take that just ended.
     partialToken += 1;
+    const covered = chunks.length;
     const blob = new Blob(chunks, { type: active.mimeType || 'audio/webm' });
     if (recorder === active) recorder = null;
     if (discard) {
@@ -447,7 +470,7 @@ async function webStart() {
       rearm();
       return;
     }
-    void finishTurn(blob);
+    void finishTurn(blob, covered);
   };
   active.start(250);  // periodic chunks: a WebView may send nothing until the end
   setState('listening');
