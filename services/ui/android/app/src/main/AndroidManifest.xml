@@ -647,24 +647,63 @@
         <service
             android:name=".AssistTileService"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher"
-            android:label="Jarvis"
+            android:icon="@drawable/ic_jarvis_tile"
+            android:label="Ask Jarvis"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
 
+        <!--
+            Every way a hardware button can ask Jarvis:
+
+            ASSIST               long-press Home, the assistant gesture
+            VOICE_COMMAND        Bluetooth headsets, car voice buttons, mappers
+            VOICE_SEARCH_HANDS_FREE  hands-free and lock-screen voice triggers
+
+            All of them open the real assistant screen; none of them starts a
+            microphone service, which Android 12+ refuses from a background trigger.
+        -->
         <activity
             android:name=".AssistActivity"
             android:excludeFromRecents="true"
             android:exported="true"
+            android:label="Ask Jarvis"
             android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
                 <action android:name="android.intent.action.ASSIST" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.speech.action.VOICE_SEARCH_HANDS_FREE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
+
+        <!-- Jarvis as the phone's Digital Assistant: what makes it appear in
+             Settings -> Default digital assistant and on a Samsung side button. -->
+        <service
+            android:name=".JarvisVoiceInteractionService"
+            android:exported="true"
+            android:label="Ask Jarvis"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/voice_interaction_service" />
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".JarvisVoiceInteractionSessionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
 
         <service
             android:name=".DropInService"

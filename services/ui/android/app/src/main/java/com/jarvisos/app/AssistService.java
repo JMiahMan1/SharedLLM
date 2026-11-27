@@ -561,8 +561,10 @@ public final class AssistService extends Service {
     }
 
     private void foreground() {
-        Intent open = new Intent(this, MainActivity.class);
-        open.putExtra("open", "/assistant");
+        // The notification opened nothing: it carried an extra key no reader has
+        // ("open" instead of PushNotifier.EXTRA_OPEN_PATH), and "/assistant" is not
+        // a page. Both fixed, so tapping it lands on the assistant screen.
+        Intent open = AssistActivity.askJarvis(this);
         PendingIntent pending = PendingIntent.getActivity(this, 0, open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new NotificationCompat.Builder(this, "voice_assistant")

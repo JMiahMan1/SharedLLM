@@ -32,6 +32,7 @@ import HaloBanner from '../components/presence/HaloBanner';
 import LocationBackgroundNotice from '../components/location/LocationBackgroundNotice';
 import { useLocation } from '../context/LocationContext';
 import VoiceAssistantOverlay from '../components/voice/VoiceAssistantOverlay';
+import { onVoiceAssistantRequested, takePendingVoiceRequest, voiceRequestedHere } from '../lib/voiceLaunch';
 import Modal from '../components/ui/Modal';
 import BentoBoxDashboard from '../components/dashboard/BentoBoxDashboard';
 import DashboardSettingsPanel from '../components/dashboard/DashboardSettingsPanel';
@@ -321,6 +322,28 @@ const Dashboard = () => {
   // "Path resolution failed" in front of the family. Workspaces stay reachable
   // to everyone through the toggleable Workspaces widget.
   const [voiceOpen, setVoiceOpen] = useState(false);
+
+  // Android's hardware triggers (Quick Settings tile, home-screen widget, a voice
+  // button, Jarvis as the Digital Assistant) and a `/?voice=1` address all ask for
+  // the assistant rather than for a page. Without this the trigger arrived, the app
+  // opened the dashboard, and nothing else happened - which read as a dead button.
+  useEffect(() => {
+    const open = () => setVoiceOpen(true);
+    const off = onVoiceAssistantRequested(open);
+    // A request made from a page that has no sheet (the header button on /media,
+    // a native trigger that raced the route change) is claimed here, once.
+    if (takePendingVoiceRequest() || voiceRequestedHere(window.location.search, window.location.hash)) {
+      open();
+      // Consumed: a reload or a back-navigation must not open it again.
+      try {
+        const hash = window.location.hash === '#assistant' ? '' : window.location.hash;
+        window.history.replaceState(null, '', window.location.pathname + hash);
+      } catch {
+        // A WebView that refuses history edits only reopens the sheet on reload.
+      }
+    }
+    return off;
+  }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const debouncedSearch = useDebounce(searchQuery, 300);

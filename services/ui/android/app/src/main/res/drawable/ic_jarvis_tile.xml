@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Quick Settings glyph.
+
+  The shade draws a tile icon as a monochrome mask, so a full-colour launcher
+  icon comes out as an unrecognisable blob - which is what the tile looked like
+  before this file. One flat shape instead: the rounded Jarvis head with its two
+  eyes and a smile, the same face the assistant screen shows.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- the head: a rounded squircle, outlined so the eyes read at 24dp -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M7.6,3.2h8.8c2.43,0 4.4,1.97 4.4,4.4v8.8c0,2.43 -1.97,4.4 -4.4,4.4h-8.8c-2.43,0 -4.4,-1.97 -4.4,-4.4v-8.8c0,-2.43 1.97,-4.4 4.4,-4.4z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.9"
+        android:strokeLineJoin="round" />
+
+    <!-- left eye -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M7.9,10.2a1.5,1.5 0 1,1 3,0a1.5,1.5 0 1,1 -3,0z" />
+
+    <!-- right eye -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M13.1,10.2a1.5,1.5 0 1,1 3,0a1.5,1.5 0 1,1 -3,0z" />
+
+    <!-- a small smile, so the glyph is friendly rather than a battery -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M9.3,15.1q2.7,1.6 5.4,0"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round" />
+</vector>

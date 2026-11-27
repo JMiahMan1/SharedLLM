@@ -127,12 +127,37 @@ public class JarvisAssistPlugin extends Plugin {
         try {
             openRoleRequest(call);
         } catch (Exception e) {
-            call.reject("Android would not open the assistant setting.");
+            // Not "no": the phone may still let the person choose Jarvis by hand.
+            openAssistantSettings(call);
         }
     }
 
-    /** Called by Capacitor when the role dialog closes, whichever way it went. */
-    public void roleResult(PluginCall call) {
+    /**
+     * Called by Capacitor when the role dialog closes, whichever way it went.
+     *
+     * The annotation and the ActivityResult parameter are both required: Capacitor 8
+     * looks the method up by name and only calls it when it is annotated, so the
+     * variant that took just a PluginCall was never invoked and "make Jarvis your
+     * assistant" stayed pending for ever.
+     */
+    @com.getcapacitor.annotation.ActivityCallback
+    public void roleResult(PluginCall call, androidx.activity.result.ActivityResult result) {
+        if (call != null) call.resolve();
+    }
+
+    /**
+     * Android's own picker (Settings -> Default digital assistant), which is where a
+     * Samsung side button, a long-press of Home and every other assistant key are
+     * assigned. Used when this phone will not hand out the assistant role directly.
+     */
+    private void openAssistantSettings(PluginCall call) {
+        try {
+            getContext().startActivity(new android.content.Intent(
+                            android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (Exception ignored) {
+            // Some builds hide that screen; nothing more can be opened for them.
+        }
         if (call != null) call.resolve();
     }
 
@@ -148,7 +173,9 @@ public class JarvisAssistPlugin extends Plugin {
         android.app.role.RoleManager roles =
                 (android.app.role.RoleManager) getContext().getSystemService(android.app.role.RoleManager.class);
         if (roles == null || !roles.isRoleAvailable(android.app.role.RoleManager.ROLE_ASSISTANT)) {
-            call.reject("This phone does not offer the assistant role.");
+            // No role dialog on this build (One UI in particular): send the person to
+            // the Digital Assistant picker instead of answering with a dead end.
+            openAssistantSettings(call);
             return;
         }
         if (roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)) {

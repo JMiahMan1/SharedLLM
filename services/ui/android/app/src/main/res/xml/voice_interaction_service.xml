@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Jarvis as the phone's Digital Assistant / Voice Input.
+
+  Referenced by the android.voice_interaction meta-data on
+  JarvisVoiceInteractionService. supportsAssist is what makes the app appear in
+  Settings -> Default digital assistant, which is the list a Samsung side button,
+  a long-press of Home and an Android TV remote all read.
+
+  No recognitionService: Jarvis does not host Android's own speech recogniser.
+  It opens its own screen and records there, so declaring one would promise a
+  system-level recogniser this app does not have.
+-->
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="com.jarvisos.app.JarvisVoiceInteractionSessionService"
+    android:settingsActivity="com.jarvisos.app.MainActivity"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="true" />

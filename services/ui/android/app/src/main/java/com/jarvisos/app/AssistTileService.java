@@ -23,9 +23,9 @@ public final class AssistTileService extends TileService {
         Tile tile = getQsTile();
         if (tile == null) return;
         tile.setLabel("Ask Jarvis");
-        // Without an icon the shade draws its own placeholder, which is what
-        // made this look like a strange button nobody recognised.
-        tile.setIcon(android.graphics.drawable.Icon.createWithResource(this, getApplicationInfo().icon));
+        // A flat monochrome glyph: the shade masks a tile icon to one colour, so the
+        // full-colour launcher icon used to arrive as an unrecognisable white blob.
+        tile.setIcon(android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_jarvis_tile));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             tile.setSubtitle("Tap to talk");
         }
