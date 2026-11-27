@@ -315,6 +315,7 @@
 [data-theme-scheme="light"] .border-white\/80 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .focus\:bg-black\/40:focus { background-color: var(--site-card-bg) !important; }
 [data-theme-scheme="light"] .focus\:border-slate-600\/50:focus { border-color: var(--color-border-soft) !important; }
+[data-theme-scheme="light"] .focus\:border-white\/25:focus { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .from-amber-950\/30 { --tw-gradient-from: color-mix(in srgb, oklch(96.2% 0.059 95.617) 60%, transparent); }
 [data-theme-scheme="light"] .from-black\/50 { --tw-gradient-from: color-mix(in srgb, var(--ht-surface) 60%, transparent); }
 [data-theme-scheme="light"] .from-black\/70 { --tw-gradient-from: color-mix(in srgb, var(--ht-surface) 70%, transparent); }
@@ -494,12 +495,16 @@
 [data-theme-scheme="light"] .text-teal-50 { color: oklch(51.1% 0.096 186.391) !important; }
 [data-theme-scheme="light"] .text-white { color: var(--site-text) !important; }
 [data-theme-scheme="light"] .text-white\/\[0\.06\] { color: color-mix(in srgb, var(--site-text) 6%, transparent) !important; }
+[data-theme-scheme="light"] .text-white\/40 { color: color-mix(in srgb, var(--site-text) 40%, transparent) !important; }
+[data-theme-scheme="light"] .text-white\/45 { color: color-mix(in srgb, var(--site-text) 45%, transparent) !important; }
 [data-theme-scheme="light"] .text-white\/50 { color: color-mix(in srgb, var(--site-text) 50%, transparent) !important; }
 [data-theme-scheme="light"] .text-white\/60 { color: color-mix(in srgb, var(--site-text) 60%, transparent) !important; }
+[data-theme-scheme="light"] .text-white\/65 { color: color-mix(in srgb, var(--site-text) 65%, transparent) !important; }
 [data-theme-scheme="light"] .text-white\/70 { color: color-mix(in srgb, var(--site-text) 70%, transparent) !important; }
 [data-theme-scheme="light"] .text-white\/75 { color: color-mix(in srgb, var(--site-text) 75%, transparent) !important; }
 [data-theme-scheme="light"] .text-white\/80 { color: color-mix(in srgb, var(--site-text) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-white\/90 { color: color-mix(in srgb, var(--site-text) 90%, transparent) !important; }
+[data-theme-scheme="light"] .text-white\/95 { color: color-mix(in srgb, var(--site-text) 95%, transparent) !important; }
 [data-theme-scheme="light"] .text-yellow-300 { color: oklch(55.4% 0.135 66.442) !important; }
 [data-theme-scheme="light"] .text-yellow-300\/80 { color: color-mix(in srgb, oklch(55.4% 0.135 66.442) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-yellow-400 { color: oklch(55.4% 0.135 66.442) !important; }

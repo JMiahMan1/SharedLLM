@@ -265,16 +265,35 @@ const web: JarvisAssistPlugin = {
  * phone that has not taken the newest APK yet simply gets the web turn - which
  * is why the microphone never silently does nothing.
  */
+/**
+ * The browser turn is the default everywhere, including inside the phone app.
+ *
+ * It records with MediaRecorder and talks to the gateway over plain HTTP, so it
+ * works in every WebView and cannot take the app down the way a microphone
+ * foreground service can (Android 12+ refuses to let one start from the
+ * background, and the exception lands in the app's process). The native service
+ * is kept for hands-free use only, and every native call is caught: a phone that
+ * says no must never be able to crash the app or leave the screen blank.
+ */
 export const JarvisAssist: JarvisAssistPlugin = {
-  start: (options) => (Capacitor.isNativePlatform() ? native.start(options) : web.start(options)),
-  stop: () => (Capacitor.isNativePlatform() ? native.stop() : web.stop()),
-  stopSpeaking: () => (Capacitor.isNativePlatform() ? native.stopSpeaking() : web.stopSpeaking()),
-  status: () => (Capacitor.isNativePlatform() ? native.status() : web.status()),
-  speak: (options) => (Capacitor.isNativePlatform() ? native.speak(options) : web.speak(options)),
-  setWakePhrase: (options) => (Capacitor.isNativePlatform() ? native.setWakePhrase(options) : web.setWakePhrase(options)),
-  assistantRole: () => (Capacitor.isNativePlatform() ? native.assistantRole() : web.assistantRole()),
+  start: (options) => {
+    if (options?.wake && Capacitor.isNativePlatform()) {
+      return native.start(options).catch(() => web.start());
+    }
+    return web.start();
+  },
+  stop: () => web.stop(),
+  stopSpeaking: () => web.stopSpeaking(),
+  status: () => web.status(),
+  speak: (options) => web.speak(options),
+  setWakePhrase: (options) =>
+    Capacitor.isNativePlatform() ? native.setWakePhrase(options).catch(() => undefined) : web.setWakePhrase(options),
+  assistantRole: () =>
+    Capacitor.isNativePlatform()
+      ? native.assistantRole().catch(() => ({ canHold: false, held: false }))
+      : web.assistantRole(),
   requestAssistantRole: () =>
-    Capacitor.isNativePlatform() ? native.requestAssistantRole() : web.requestAssistantRole(),
+    Capacitor.isNativePlatform() ? native.requestAssistantRole().catch(() => undefined) : web.requestAssistantRole(),
   addListener: (eventName, listenerFunc) =>
     Capacitor.isNativePlatform() ? native.addListener(eventName, listenerFunc) : web.addListener(eventName, listenerFunc),
 };
