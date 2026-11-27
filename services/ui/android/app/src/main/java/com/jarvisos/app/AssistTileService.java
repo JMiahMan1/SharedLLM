@@ -39,6 +39,9 @@ public final class AssistTileService extends TileService {
     @Override
     public void onClick() {
         super.onClick();
+        // A tile click is a user interaction, but a microphone foreground service
+        // still cannot be started from the background on Android 12+. Open the
+        // assistant instead: it is visible, so the service may start from there.
         Intent intent = new Intent(this, AssistActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -46,8 +49,9 @@ public final class AssistTileService extends TileService {
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
             startActivityAndCollapse(pending);
         } else {
-            //noinspection deprecation
-            startActivityAndCollapse(intent);
+            // Before 34 there is no PendingIntent overload, and the Intent one is
+            // deprecated (and gone from newer platform jars), so just start it.
+            startActivity(intent);
         }
     }
 }
