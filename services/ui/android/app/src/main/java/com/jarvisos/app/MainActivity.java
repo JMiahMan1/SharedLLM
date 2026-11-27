@@ -233,6 +233,7 @@ registerPlugin(CommsPlugin.class);
         // The web app may have missed a change while in the background.
         GuardPlugin.notifyLockedMode(this);
         offerTimeTile();
+        offerAssistTile();
         // Coming back to Jarvis is a good moment to look for a new version.
         NativeUpdater.checkSoon(this, 60_000L);
     }
@@ -260,6 +261,26 @@ registerPlugin(CommsPlugin.class);
      * prompt for the Screen time Quick Settings tile, so time left is one
      * swipe down from any app (Android 13+; older phones add it by hand).
      */
+    /**
+     * Offer the assistant tile the first time this phone runs the app. Android 13+
+     * can ask once; a tile that is not offered (or is declined) can always be
+     * added by hand from the shade.
+     */
+    private void offerAssistTile() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
+        try {
+            android.content.SharedPreferences p = GuardApi.prefs(this);
+            if (p.getBoolean("assist_tile_offered", false)) return;
+            p.edit().putBoolean("assist_tile_offered", true).apply();
+            StatusBarManager bar = getSystemService(StatusBarManager.class);
+            if (bar == null) return;
+            bar.requestAddTileService(new ComponentName(this, AssistTileService.class), "Jarvis",
+                    Icon.createWithResource(this, R.mipmap.ic_launcher), getMainExecutor(), result -> { });
+        } catch (Exception ignored) {
+            // No shortcut offered; the tile is still in the shade's edit list.
+        }
+    }
+
     private void offerTimeTile() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
         try {

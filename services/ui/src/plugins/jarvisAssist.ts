@@ -30,6 +30,10 @@ export interface JarvisAssistPlugin {
   speak(options: { text: string }): Promise<void>;
   /** The phrase that starts a turn when always-listening is on. */
   setWakePhrase(options: { phrase: string }): Promise<void>;
+  /** Whether this phone can make Jarvis its assistant, and whether it has. */
+  assistantRole(): Promise<{ canHold: boolean; held: boolean }>;
+  /** One tap: Android's own dialog for the assistant role (long-press home). */
+  requestAssistantRole(): Promise<void>;
   addListener(
     eventName: 'assist',
     listenerFunc: (event: AssistEvent) => void,
@@ -51,6 +55,10 @@ const web: JarvisAssistPlugin = {
   },
   async speak() {},
   async setWakePhrase() {},
+  async assistantRole() {
+    return { canHold: false, held: false };
+  },
+  async requestAssistantRole() {},
   async addListener() {
     return { remove: async () => {} };
   },
@@ -63,6 +71,9 @@ export const JarvisAssist: JarvisAssistPlugin = {
   status: () => (Capacitor.isNativePlatform() ? native.status() : web.status()),
   speak: (options) => (Capacitor.isNativePlatform() ? native.speak(options) : web.speak(options)),
   setWakePhrase: (options) => (Capacitor.isNativePlatform() ? native.setWakePhrase(options) : web.setWakePhrase(options)),
+  assistantRole: () => (Capacitor.isNativePlatform() ? native.assistantRole() : web.assistantRole()),
+  requestAssistantRole: () =>
+    Capacitor.isNativePlatform() ? native.requestAssistantRole() : web.requestAssistantRole(),
   addListener: (eventName, listenerFunc) =>
     Capacitor.isNativePlatform() ? native.addListener(eventName, listenerFunc) : web.addListener(eventName, listenerFunc),
 };

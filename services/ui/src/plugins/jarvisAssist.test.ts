@@ -21,4 +21,9 @@ describe('the assistant plugin without a native half', () => {
   it('says nothing out loud rather than failing', async () => {
     await expect(JarvisAssist.speak({ text: 'Hello.' })).resolves.toBeUndefined();
   });
+
+  it('says a browser cannot hold the assistant role, and does not fail trying', async () => {
+    await expect(JarvisAssist.assistantRole()).resolves.toEqual({ canHold: false, held: false });
+    await expect(JarvisAssist.requestAssistantRole()).resolves.toBeUndefined();
+  });
 });
