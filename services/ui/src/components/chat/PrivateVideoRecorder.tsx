@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, Loader2, MicOff, RefreshCw, RotateCcw, SendHorizontal, Square, Video, X } from 'lucide-react';
 import { formatDuration, RECORD_LIMIT_S, RECORDER_AUDIO_BPS, RECORDER_VIDEO_BPS, baseMime, recorderMimeType, recorderMustStop } from '../../lib/privateVideoMedia';
+import { GallerySaveToggle } from './GallerySaveToggle';
 
 type Facing = 'environment' | 'user';
 type Stage = 'ready' | 'recording' | 'review';
@@ -28,7 +29,8 @@ export default function PrivateVideoRecorder({
   onPhoto,
 }: {
   /** Encrypt and send the clip; `progress` reports the pieces sent. */
-  onSend: (clip: RecordedClip, progress: (done: number, count: number) => void) => Promise<void>;
+  /** `saveToGallery` is the review's switch, off unless the person turned it on. */
+  onSend: (clip: RecordedClip, progress: (done: number, count: number) => void, saveToGallery: boolean) => Promise<void>;
   onClose: () => void;
   /** Back to taking a photo (the camera), when the chat offers it. */
   onPhoto?: () => void;
@@ -48,6 +50,7 @@ export default function PrivateVideoRecorder({
   const [clip, setClip] = useState<RecordedClip | null>(null);
   const [reviewUrl, setReviewUrl] = useState('');
   const [sending, setSending] = useState<{ done: number; count: number } | null>(null);
+  const [toGallery, setToGallery] = useState(false);
   const [error, setError] = useState('');
   const [stoppedBy, setStoppedBy] = useState<'time' | 'size' | null>(null);
 
@@ -204,6 +207,7 @@ export default function PrivateVideoRecorder({
 
   const retake = () => {
     setClip(null);
+    setToGallery(false);
     setStoppedBy(null);
     setElapsed(0);
     setStage('ready');
@@ -214,7 +218,7 @@ export default function PrivateVideoRecorder({
     setSending({ done: 0, count: 0 });
     setError('');
     try {
-      await onSend(clip, (done, count) => setSending({ done, count }));
+      await onSend(clip, (done, count) => setSending({ done, count }), toGallery);
       setClip(null);
       onClose();
     } catch (e) {
@@ -287,6 +291,17 @@ export default function PrivateVideoRecorder({
           </p>
         )}
       </div>
+      {stage === 'review' && (
+        <div className="shrink-0 px-4 pt-2">
+          <GallerySaveToggle
+            checked={toGallery}
+            onChange={setToGallery}
+            what="this clip"
+            testId="private-video-gallery"
+            disabled={Boolean(sending)}
+          />
+        </div>
+      )}
       {stage === 'review' && (
         <p className="shrink-0 px-4 pt-2 text-center text-xs text-slate-300" data-testid="private-recorder-length">
           {formatDuration(clip?.duration ?? 0)}

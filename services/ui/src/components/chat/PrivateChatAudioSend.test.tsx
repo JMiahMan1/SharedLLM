@@ -113,6 +113,12 @@ async function posted(key: CryptoKey): Promise<PrivatePayload | null> {
   return openMessage(key, sealed);
 }
 
+/** The gallery record the app wrote, opened with the chat key. */
+async function galleryRecord(key: CryptoKey): Promise<{ op?: string; blobs?: string[] } | null> {
+  const sealed = addPrivateGalleryEntry.mock.calls.at(-1)?.[1] as string;
+  return sealed ? (await openMessage(key, sealed)) as never : null;
+}
+
 afterEach(() => {
   take = null;
   refuse = null;
@@ -156,7 +162,7 @@ describe('recording a voice note in private chat', () => {
     expect(screen.getByTestId('private-mode-photo').getAttribute('aria-pressed')).toBe('true');
   }, 30_000);
 
-  it('sends a sealed recording, says nothing in the clear, and keeps it in the gallery', async () => {
+  it('sends a sealed recording and says nothing in the clear', async () => {
     const { key, blob } = await openRecorder();
     fireEvent.click(screen.getByTestId('private-audio-start'));
     await act(async () => { take?.(new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'audio/webm;codecs=opus' }), 'audio/webm'); });
@@ -175,8 +181,26 @@ describe('recording a voice note in private chat', () => {
     expect(payload).toMatchObject({ t: 'audio', blob, mime: 'audio/webm', caption: 'listen to this', name: 'voice-note.webm' });
     expect(payload && 'sha256' in payload && payload.sha256).toHaveLength(64);
     expect(payload && 'duration' in payload && payload.duration).toBeGreaterThanOrEqual(1);
-    // And the gallery keeps it by the same blob, so it is one recording, not a copy.
+    // Nothing joined the shared gallery: a voice note belongs to the conversation
+    // it was sent in unless the box on the preview was ticked.
+    expect(addPrivateGalleryEntry).not.toHaveBeenCalled();
+  }, 40_000);
+
+  it('keeps a recording in the gallery only when the box was ticked', async () => {
+    const { key, blob } = await openRecorder();
+    fireEvent.click(screen.getByTestId('private-audio-start'));
+    await act(async () => { take?.(new Blob([new Uint8Array([5, 6, 7])], { type: 'audio/webm' }), 'audio/webm'); });
+    await screen.findByTestId('private-audio-preview');
+    // Off until somebody turns it on, and the words say what turning it on does.
+    const box = screen.getByTestId('private-audio-gallery') as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect(screen.getByTestId('private-audio-gallery').parentElement?.textContent).toMatch(/shared Encrypted Gallery/);
+    fireEvent.click(box);
+    fireEvent.click(screen.getByTestId('private-audio-send'));
+
     await waitFor(() => expect(addPrivateGalleryEntry).toHaveBeenCalled(), { timeout: 10_000 });
+    // The same blob the message names, so the gallery and the chat are one recording.
+    expect(await galleryRecord(key)).toMatchObject({ op: 'add', blobs: [blob] });
   }, 40_000);
 
   it('keeps the take when the send fails, so it can be tried again', async () => {

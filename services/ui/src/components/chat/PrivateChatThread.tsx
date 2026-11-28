@@ -782,10 +782,17 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
   };
 
   /**
-   * A picture, clip or voice note just sent goes into the Encrypted Gallery by
-   * itself. This runs after the message is posted, so a failure here must never
-   * look like a failure to send: it is reported, and the item is still in the
-   * chat (it can be added by hand from its bubble).
+   * Put something that was just sent into the Encrypted Gallery - but only when
+   * the person asked for it, with "Save to gallery" on the preview.
+   *
+   * Nothing is saved by default. A picture picked from the phone, a GIF from
+   * Giphy or the keyboard, a paste, or an ordinary chat send belongs to the
+   * conversation it was sent in; the shared gallery is a deliberate place for
+   * what a parent chose to keep. Anything can still be added later from its
+   * bubble.
+   *
+   * This runs after the message is posted, so a failure here must never look
+   * like a failure to send: it is reported, and the item is still in the chat.
    */
   const autoSaveToGallery = async (blob: string) => {
     try {
@@ -800,8 +807,11 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
    * Send picture bytes: encrypted here before anything leaves the device,
    * uploaded as an opaque blob (never a Talk file share), and the plaintext
    * copy overwritten with zeros once encrypted.
+   *
+   * `saveToGallery` comes from the "Save to gallery" switch on the preview, and
+   * is off unless the person turned it on.
    */
-  const sendImageBytes = async (plain: Uint8Array<ArrayBuffer>, mime: string, name?: string, takenAt?: number) => {
+  const sendImageBytes = async (plain: Uint8Array<ArrayBuffer>, mime: string, name?: string, takenAt?: number, saveToGallery = false) => {
     let blob = '';
     try {
       let sealed: Uint8Array<ArrayBuffer>;
@@ -821,16 +831,17 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
       if (blob) void api.deletePrivateBlob(token, blob).catch(() => {});
       throw error;
     }
-    await autoSaveToGallery(blob);
+    if (saveToGallery) await autoSaveToGallery(blob);
   };
 
   /**
    * Send a voice note. The take is encrypted in memory, the plaintext wiped,
    * and the sealed bytes uploaded as one opaque blob, exactly like a picture:
    * a recording is never written to disk, and the server learns only that a
-   * blob of some size exists.
+   * blob of some size exists. `saveToGallery` is the preview's switch, off
+   * unless the person turned it on.
    */
-  const sendAudioBytes = async (take: Blob, mime: string, duration: number, caption: string) => {
+  const sendAudioBytes = async (take: Blob, mime: string, duration: number, caption: string, saveToGallery = false) => {
     let blob = '';
     try {
       const plain = new Uint8Array(await take.arrayBuffer()) as Uint8Array<ArrayBuffer>;
@@ -862,7 +873,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
       if (blob) void api.deletePrivateBlob(token, blob).catch(() => {});
       throw error;
     }
-    await autoSaveToGallery(blob);
+    if (saveToGallery) await autoSaveToGallery(blob);
   };
 
   /**
@@ -871,8 +882,11 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
    * picture and the clip in 4 MiB pieces (lib/privateChatCrypto.ts), each its
    * own opaque blob. The message names them all inside its encryption. If
    * anything fails, what was uploaded is deleted again.
+   *
+   * `options.saveToGallery` is the preview's switch: a clip stays out of the
+   * shared gallery unless the person asked for it.
    */
-  const sendVideo = async (source: Blob, mime: string, options: { name?: string; takenAt?: number; duration?: number } = {}, onProgress?: (done: number, count: number) => void) => {
+  const sendVideo = async (source: Blob, mime: string, options: { name?: string; takenAt?: number; duration?: number; saveToGallery?: boolean } = {}, onProgress?: (done: number, count: number) => void) => {
     const uploaded: string[] = [];
     const upload = async (bytes: Uint8Array<ArrayBuffer>) => {
       const id = (await api.uploadPrivateBlob(token, bytes)).id;
@@ -911,7 +925,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
       await post(payload, [...sealed.chunks, poster]);
       onChanged();
       // A clip is in the gallery by its poster, which is what its tile and its comments name.
-      await autoSaveToGallery(payload.poster);
+      if (options.saveToGallery) await autoSaveToGallery(payload.poster);
     } catch (error) {
       for (const id of uploaded) void api.deletePrivateBlob(token, id).catch(() => {});
       throw error;
@@ -1537,10 +1551,10 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
       {audioOpen && (
         <PrivateAudioRecorder
           onClose={() => setAudioOpen(false)}
-          onSend={async (take, mime, duration, caption) => {
+          onSend={async (take, mime, duration, caption, saveToGallery) => {
             setSending(true);
             try {
-              await sendAudioBytes(take, mime, duration, caption);
+              await sendAudioBytes(take, mime, duration, caption, saveToGallery);
             } finally {
               setSending(false);
             }
@@ -1551,10 +1565,10 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
         <PrivateCamera
           onClose={() => setCamera(null)}
           onVideo={() => setCamera('video')}
-          onCapture={async (jpeg, takenAt) => {
+          onCapture={async (jpeg, takenAt, _edit, saveToGallery) => {
             setSending(true);
             try {
-              await sendImageBytes(jpeg, 'image/jpeg', undefined, takenAt);
+              await sendImageBytes(jpeg, 'image/jpeg', undefined, takenAt, saveToGallery === true);
             } finally {
               setSending(false);
             }
@@ -1565,10 +1579,10 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
         <PrivateVideoRecorder
           onClose={() => setCamera(null)}
           onPhoto={() => setCamera('photo')}
-          onSend={async (clip, progress) => {
+          onSend={async (clip, progress, saveToGallery) => {
             setSending(true);
             try {
-              await sendVideo(clip.blob, clip.mime, { takenAt: clip.takenAt, duration: clip.duration }, progress);
+              await sendVideo(clip.blob, clip.mime, { takenAt: clip.takenAt, duration: clip.duration, saveToGallery }, progress);
             } finally {
               setSending(false);
             }

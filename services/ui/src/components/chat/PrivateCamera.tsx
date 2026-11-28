@@ -3,6 +3,7 @@ import { Camera, Loader2, RefreshCw, RotateCcw, SendHorizontal, SlidersHorizonta
 import LazyPhotoEditor from '../photoEditor/LazyPhotoEditor';
 import type { EditRecipe } from '../../lib/photoEdit/recipe';
 import { MAX_ATTACHMENT_BYTES } from './chatModel';
+import { GallerySaveToggle } from './GallerySaveToggle';
 
 type Facing = 'environment' | 'user';
 
@@ -28,7 +29,8 @@ export default function PrivateCamera({
    * The JPEG bytes and when they were taken (seconds); the caller encrypts and zeroes them.
    * After an edit, `edit` carries the recipe and the original picture (still in memory only).
    */
-  onCapture: (jpeg: Uint8Array<ArrayBuffer>, takenAt: number, edit?: CapturedEdit) => Promise<void>;
+  /** `saveToGallery` is the preview's switch, off unless the person turned it on. */
+  onCapture: (jpeg: Uint8Array<ArrayBuffer>, takenAt: number, edit?: CapturedEdit, saveToGallery?: boolean) => Promise<void>;
   onClose: () => void;
   /** Switch to recording a video clip (PrivateVideoRecorder), when the chat offers it. */
   onVideo?: () => void;
@@ -41,6 +43,7 @@ export default function PrivateCamera({
   const [ready, setReady] = useState(false);
   const [captured, setCaptured] = useState(false);
   const [sending, setSending] = useState(false);
+  const [toGallery, setToGallery] = useState(false);
   const [error, setError] = useState('');
   /** The taken picture, while it is open in the editor. */
   const [editing, setEditing] = useState<Blob | null>(null);
@@ -137,7 +140,7 @@ export default function PrivateCamera({
     setError('');
     try {
       const blob = await still();
-      await onCapture(new Uint8Array(await blob.arrayBuffer()), takenAt());
+      await onCapture(new Uint8Array(await blob.arrayBuffer()), takenAt(), undefined, toGallery);
       wipe();
       onClose();
     } catch (e) {
@@ -196,6 +199,15 @@ export default function PrivateCamera({
       <div className={`flex shrink-0 items-center gap-2 px-3 pb-[max(1rem,var(--safe-bottom))] pt-3 ${captured ? 'flex-wrap justify-center' : 'justify-around'}`}>
         {captured ? (
           <>
+            <div className="w-full">
+              <GallerySaveToggle
+                checked={toGallery}
+                onChange={setToGallery}
+                what="this picture"
+                testId="private-camera-gallery"
+                disabled={sending}
+              />
+            </div>
             <button type="button" onClick={retake} disabled={sending} className="flex min-h-12 items-center gap-1.5 rounded-full bg-white/10 px-4 text-sm font-semibold text-white disabled:opacity-50" data-testid="private-camera-retake">
               <RotateCcw size={16} aria-hidden /> Retake
             </button>
@@ -239,7 +251,7 @@ export default function PrivateCamera({
           doneLabel="Send"
           onCancel={() => setEditing(null)}
           onAsIs={async () => {
-            await onCapture(new Uint8Array(await editing.arrayBuffer()), takenAt());
+            await onCapture(new Uint8Array(await editing.arrayBuffer()), takenAt(), undefined, toGallery);
             setEditing(null);
             wipe();
             onClose();
@@ -247,7 +259,7 @@ export default function PrivateCamera({
           onDone={async (result) => {
             // A still from the camera comes back as a JPEG; anything else would not be what the chat expects.
             if (result.mime !== 'image/jpeg') throw new Error('Could not make the edited picture.');
-            await onCapture(new Uint8Array(await result.blob.arrayBuffer()), takenAt(), { recipe: result.recipe, original: result.original });
+            await onCapture(new Uint8Array(await result.blob.arrayBuffer()), takenAt(), { recipe: result.recipe, original: result.original }, toGallery);
             setEditing(null);
             wipe();
             onClose();

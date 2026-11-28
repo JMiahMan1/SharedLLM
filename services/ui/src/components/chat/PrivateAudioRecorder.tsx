@@ -4,6 +4,7 @@ import { audioBaseType, isAudioMime } from '../../lib/privateChatCrypto';
 import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 import { audioLength } from './privateAudioTime';
 import { errorText } from './privateChatModel';
+import { GallerySaveToggle } from './GallerySaveToggle';
 
 /** The longest one take may run: five minutes is a long voice note and a small sealed blob. */
 export const MAX_AUDIO_TAKE_S = 300;
@@ -27,14 +28,16 @@ export default function PrivateAudioRecorder({
   onSend,
 }: {
   onClose: () => void;
-  /** Hand the take over: the caller encrypts it, posts it and closes this sheet. */
-  onSend: (blob: Blob, mime: string, duration: number, caption: string) => Promise<void>;
+  /** Hand the take over: the caller encrypts it, posts it and closes this sheet.
+   *  `saveToGallery` is the switch on the preview, off unless it was turned on. */
+  onSend: (blob: Blob, mime: string, duration: number, caption: string, saveToGallery: boolean) => Promise<void>;
 }) {
   const [take, setTake] = useState<{ blob: Blob; url: string; mime: string; duration: number } | null>(null);
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [caption, setCaption] = useState('');
-  const [sending, setSending] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [toGallery, setToGallery] = useState(false);
   const [problem, setProblem] = useState('');
   const startedAt = useRef(0);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -111,22 +114,23 @@ export default function PrivateAudioRecorder({
     releaseTake();
     setTake(null);
     setCaption('');
+    setToGallery(false);
     setSeconds(0);
     startedAt.current = 0;
   };
 
   const send = async () => {
-    if (!take || sending) return;
-    setSending(true);
+    if (!take || saving) return;
+    setSaving(true);
     try {
-      await onSend(take.blob, take.mime, take.duration, caption.trim());
+      await onSend(take.blob, take.mime, take.duration, caption.trim(), toGallery);
       discard();
       onClose();
     } catch (error) {
       // The take is kept, so a failed send can be tried again without re-recording.
       setProblem(errorText(error, 'Could not send the voice note'));
     } finally {
-      setSending(false);
+      setSaving(false);
     }
   };
 
@@ -217,20 +221,27 @@ export default function PrivateAudioRecorder({
                 className="glass-input mt-1 min-h-11 w-full resize-none text-base sm:text-sm"
               />
             </label>
+            <GallerySaveToggle
+              checked={toGallery}
+              onChange={setToGallery}
+              what="this voice note"
+              testId="private-audio-gallery"
+              disabled={saving}
+            />
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => void send()}
-                disabled={sending}
+                disabled={saving}
                 data-testid="private-audio-send"
                 className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-full bg-rose-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
               >
-                {sending ? <Loader2 size={16} className="animate-spin" /> : <SendHorizontal size={16} aria-hidden />} Send
+                {saving ? <Loader2 size={16} className="animate-spin" /> : <SendHorizontal size={16} aria-hidden />} Send
               </button>
               <button
                 type="button"
                 onClick={discard}
-                disabled={sending}
+                disabled={saving}
                 data-testid="private-audio-discard"
                 className="flex min-h-11 items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 text-sm font-semibold text-slate-200 disabled:opacity-50"
               >
