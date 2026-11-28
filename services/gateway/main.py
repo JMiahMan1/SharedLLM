@@ -5195,8 +5195,10 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
                 exec_payload = {
                     "user_context": creds.model_dump(),
                     "user": parsed["user"],
-                    "detail": parsed["detail"],
+                    "detail": parsed["detail"] or ("eta" if parsed["to"] or parsed["origin"] else None),
                     "to": parsed["to"],
+                    "origin": parsed["origin"],
+                    "mode": parsed["mode"],
                 }
                 svc_base = EXECUTION_SVC
             elif intent == "play_media":

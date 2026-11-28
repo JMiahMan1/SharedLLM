@@ -2158,15 +2158,38 @@ async def _run_single_tool(action: str, tool_data: dict, query: str, creds: Reso
 
             if action == "locationrequest":
                 # Fill only what the model left out (it may have chosen better).
+                # A model naming the ends of a journey "destination" and "from"
+                # is the commonest shape, and those keys used to be dropped, so
+                # "how long to the auction" became "where is Alex".
+                if not payload.get("to") and payload.get("destination"):
+                    payload["to"] = payload["destination"]
+                payload.pop("destination", None)
+                if not payload.get("origin"):
+                    payload["origin"] = payload.get("from") or payload.get("from_place")
+                payload.pop("from", None)
+                payload.pop("from_place", None)
+                if not payload.get("mode"):
+                    payload["mode"] = payload.get("travel_mode")
+                payload.pop("travel_mode", None)
                 parsed = parse_location_query(query, creds.user)
                 if not payload.get("user") and not payload.get("person"):
                     payload["user"] = parsed["user"]
                 if not payload.get("detail"):
                     payload["detail"] = parsed["detail"]
-                if payload.get("detail") == "eta" and not payload.get("to"):
-                    payload["to"] = parsed["to"] or "home"
-                if payload.get("detail") == "closest" and not payload.get("to"):
+                if not payload.get("to"):
                     payload["to"] = parsed["to"]
+                if not payload.get("origin"):
+                    payload["origin"] = parsed["origin"]
+                if not payload.get("mode"):
+                    payload["mode"] = parsed["mode"]
+                # An origin or a destination named without a detail is a
+                # journey: the person asked how long, not where somebody is.
+                if not payload.get("detail") and (payload.get("to") or payload.get("origin")):
+                    payload["detail"] = "eta"
+                # Only now, when no destination was named anywhere, is the
+                # old "home" default the right guess.
+                if payload.get("detail") == "eta" and not payload.get("to"):
+                    payload["to"] = "home"
 
             _ws_file_actions = {
                 "workspacefilereadrequest",

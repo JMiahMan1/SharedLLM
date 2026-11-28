@@ -87,6 +87,7 @@ from services.execution.schemas import (
     CodeSearchRequest,
     DeploymentRequest,
     DiagnosticRequest,
+    DocumentBroadcastRequest,
     DiscoverySyncRequest,
     DockerComposeRequest,
     DockerLogsRequest,
@@ -115,6 +116,7 @@ from services.execution.schemas import (
     MediaStatusRequest,
     MediaTransportRequest,
     NetworkDeviceScanRequest,
+    NightModeRequest,
     NoteRequest,
     OcrRequest,
     PodcastRenderRequest,
@@ -4085,13 +4087,13 @@ async def execute_calibre(req: CalibreRequest):
     return await calibre.handle_calibre(req)
 
 @app.post("/execute/composite/broadcast", response_model=ExecutionResult)
-async def execute_composite_broadcast(req):
+async def execute_composite_broadcast(req: DocumentBroadcastRequest):
     """Read a document from storage and broadcast as TTS to a media player."""
     log.info(f"[composite] broadcast: {getattr(req, 'input_path', '')} -> {getattr(req, 'entity_id', '')}")
     return await composite.handle_document_broadcast(req)
 
 @app.post("/execute/composite/night_mode", response_model=ExecutionResult)
-async def execute_composite_night_mode(req):
+async def execute_composite_night_mode(req: NightModeRequest):
     """Activate night mode: lights off, climate set, optional sleep sounds."""
     ctx = req.user_context
     log.info(f"[composite] night_mode for user={ctx.user}")

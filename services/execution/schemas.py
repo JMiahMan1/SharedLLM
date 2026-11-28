@@ -1491,13 +1491,45 @@ class ListVoicesRequest(BaseRequest):
 
 class LocationRequest(BaseRequest):
     """Request to query family location, HA zone matching, speed, dwell time, and travel telemetry."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_travel_aliases(cls, data: Any) -> Any:
+        """Keep a travel question whose origin is named, however it was named.
+
+        A model asked "how long to drive from the shop to home" reaches for
+        ``from``, ``from_place``, ``start`` or ``origin_place`` about equally
+        often, and ``extra="ignore"`` would silently drop every one of them -
+        leaving the call with no origin at all, which is how a place-to-place
+        question turned into "how long until Sam is home".
+        """
+        if isinstance(data, dict):
+            data = dict(data)
+            if not data.get("origin"):
+                for alias in ("from", "from_place", "start", "start_place", "origin_place"):
+                    if isinstance(data.get(alias), str) and data[alias].strip():
+                        data["origin"] = data[alias]
+                        break
+            if not data.get("destination"):
+                for alias in ("destination", "to_place", "end", "end_place"):
+                    if isinstance(data.get(alias), str) and data[alias].strip():
+                        data["destination"] = data[alias]
+                        break
+            if not data.get("mode") and isinstance(data.get("travel_mode"), str):
+                data["mode"] = data["travel_mode"]
+        return data
+
     user_context: UserContext | None = None
     user: str | None = Field(None, description="Person or user to locate (e.g. 'Alex', 'Sam', 'me')")
     person: str | None = Field(None, description="Alias for user")
     target: str | None = Field(None, description="Alias for user")
     detail: str | None = Field(None, description="Type of detail: 'summary', 'speed', 'dwell', 'frequented', 'cost', 'vehicle', 'eta' (how long until they get somewhere, e.g. 'when will Sam be home?'), or 'closest' (who can get to a place soonest, e.g. 'who is closest to the school?')")
     to: str | None = Field(None, description="For detail 'eta' or 'closest': the place, a Home Assistant zone name such as 'home', 'work' or 'school' (eta defaults to 'home')")
+    destination: str | None = Field(None, description="Alias for 'to'. Use it for 'how long to get to <place>'.")
+    origin: str | None = Field(None, description="Where the trip starts: a saved place, a zone, a street address or 'lat,lon'. Omit it to travel from the person's latest position.")
+    mode: str | None = Field(None, description="How they travel: 'driving' (default) or 'walking'.")
     hours: float | None = Field(24.0, description="Hours of history to analyze for telemetry (default: 24.0)")
+
 
 
 class DropInRequest(BaseRequest):

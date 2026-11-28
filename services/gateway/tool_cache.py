@@ -204,11 +204,20 @@ def _entry_key(tool: str, args: str, *, user: str, conversation: str, public: bo
     return f"{PREFIX}:conv:{_user_key(user)}:{_digest(conversation)}:{tool}:{_digest(args)}"
 
 
+# Millisecond fields are floats, and Redis keeps one hash value typed for good.
+# Choosing the command by looking at the value meant a first `source_ms` of 972.0
+# (a float whose `.is_integer()` is true) was written with HINCRBY, and the next
+# one with a real fraction - 12.5 - was refused: "hash value is not an integer".
+# That error marked the whole cache down, so every call went to its source for
+# 30 s. The command has to follow the field, never the number in it.
+FLOAT_STATS = frozenset({"source_ms", "saved_ms"})
+
+
 def _stat(tool: str, **fields: float) -> None:
     try:
         pipe = _redis().pipeline()
         for name, amount in fields.items():
-            if isinstance(amount, float) and not amount.is_integer():
+            if name in FLOAT_STATS or (isinstance(amount, float) and not amount.is_integer()):
                 pipe.hincrbyfloat(f"{PREFIX}:stats:{tool}", name, amount)
             else:
                 pipe.hincrby(f"{PREFIX}:stats:{tool}", name, int(amount))
