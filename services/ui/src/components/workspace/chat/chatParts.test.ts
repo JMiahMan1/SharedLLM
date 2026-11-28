@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { emptyTurn, foldEvent, toolLabel, toolSummary } from './chatParts';
+import {
+  emptyTurn,
+  foldEvent,
+  isDelegationTool,
+  missionIdFromInput,
+  missionIdFromOutput,
+  toolLabel,
+  toolPresentation,
+  toolSummary,
+} from './chatParts';
 import type { WorkspaceChatEvent } from '../../../types/api';
 
 const fold = (events: WorkspaceChatEvent[]) => events.reduce(foldEvent, emptyTurn());
@@ -41,5 +50,61 @@ describe('chat turn folding', () => {
   it('labels tools for people', () => {
     expect(toolLabel('WorkspaceSearchRequest')).toBe('Workspace search');
     expect(toolSummary({ user: 'x', query: 'sermon notes' })).toBe('sermon notes');
+  });
+
+  it('gives every cross-harness handoff its own name and kind', () => {
+    expect(toolPresentation('DelegateRavenRequest')).toMatchObject({
+      kind: 'delegation',
+      label: 'Raven mission handoff',
+      targetLabel: 'Raven Mission',
+    });
+    expect(toolPresentation('DelegateWorkspaceRequest')).toMatchObject({
+      kind: 'delegation',
+      label: 'Workspace handoff',
+      targetLabel: 'Workspace',
+    });
+    expect(toolPresentation('DelegateLookupRequest')).toMatchObject({
+      kind: 'delegation',
+      label: 'Lookup handoff',
+      targetLabel: 'Librarian',
+    });
+    expect(toolPresentation('DelegateSubagentRequest')).toMatchObject({
+      kind: 'subagent',
+      label: 'Explorer subagent',
+      targetLabel: 'Subagent',
+    });
+    expect(toolPresentation('DelegateNotifyRequest')).toMatchObject({
+      kind: 'delegation',
+      label: 'Notify handoff',
+      targetLabel: 'Notifications',
+    });
+    expect(toolLabel('DelegateRavenRequest')).toBe('Raven mission handoff');
+    expect(isDelegationTool('DelegateRavenRequest')).toBe(true);
+    expect(isDelegationTool('WorkspaceSearchRequest')).toBe(false);
+  });
+
+  it('finds heading mission ids from JSON, sentences, and tool arguments', () => {
+    expect(missionIdFromOutput('{"status":"SUCCESS","mission_id":42}')).toBe(42);
+    expect(missionIdFromOutput('Queued as mission #7.')).toBe(7);
+    expect(missionIdFromOutput('mission_id=13')).toBe(13);
+    expect(missionIdFromOutput('no mission here')).toBeNull();
+    expect(missionIdFromInput({ mission_id: 12 })).toBe(12);
+    expect(missionIdFromInput({ raven_mission_id: '19' })).toBe(19);
+    expect(missionIdFromInput({ id: 4 })).toBe(4);
+    expect(missionIdFromInput({ id: 'not-a-mission' })).toBeNull();
+  });
+
+  it('keeps mission ids on the tool card through the result', () => {
+    const turn = fold([
+      { type: 'tool_call', id: 's1', name: 'DelegateRavenRequest', input: { mission_id: 12 } },
+      { type: 'tool_result', id: 's1', output: 'Raven mission queued.' },
+    ]);
+    expect(turn.parts[0]).toMatchObject({ type: 'tool', mission_id: 12, status: 'done' });
+
+    const fromResult = fold([
+      { type: 'tool_call', id: 's2', name: 'WorkspaceSearchRequest', input: { query: 'x' } },
+      { type: 'tool_result', id: 's2', output: '{"mission_id":55}' },
+    ]);
+    expect(fromResult.parts[0]).toMatchObject({ type: 'tool', mission_id: 55, status: 'done' });
   });
 });

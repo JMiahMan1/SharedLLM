@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { AlertCircle, Bot, Brain, Check, ChevronRight, Loader2, Square, Wrench } from 'lucide-react';
+import { AlertCircle, ArrowUpRight, Bot, Brain, Check, ChevronRight, GitBranch, Loader2, Square, Wrench } from 'lucide-react';
 import MarkdownViewer from '../../MarkdownViewer';
 import { api } from '../../../services/api';
 import type { RavenMission, WorkspaceChatMessage, WorkspaceChatPart } from '../../../types/api';
 import { ASK_MODE_CHIPS, RESOLVED_MODE_LABEL } from './askModes';
-import { toolLabel, toolSummary, type LiveTurn } from './chatParts';
+import { missionIdFromInput, missionIdFromOutput, toolPresentation, toolSummary, type LiveTurn } from './chatParts';
+import RavenMissionDetail from '../../settings/RavenMissionDetail';
 
 const TERMINAL_MISSION = new Set(['completed', 'complete', 'failed', 'killed', 'cancelled', 'canceled', 'error']);
 
@@ -130,12 +131,13 @@ function Part({ part, active }: { part: WorkspaceChatPart; active: boolean }) {
   }
 }
 
-/** Thinking: open while it streams, folded to one line afterwards. */
+/** Thinking: open while it streams, folded to one readable line afterwards. */
 function ReasoningPart({ text, active }: { text: string; active: boolean }) {
   const [open, setOpen] = useState<boolean | null>(null);
   const isOpen = open ?? active;
+  const preview = text.trim().split('\n').find((line) => line.trim()) ?? '';
   return (
-    <div className="rounded-lg border border-white/5 bg-white/[0.03]">
+    <div className="rounded-lg border border-white/5 bg-white/[0.03]" data-testid="reasoning-part">
       <button
         type="button"
         onClick={() => setOpen(!isOpen)}
@@ -145,29 +147,47 @@ function ReasoningPart({ text, active }: { text: string; active: boolean }) {
         <ChevronRight size={12} className={`transition-transform ${isOpen ? 'rotate-90' : ''}`} />
         <Brain size={12} className={active ? 'animate-pulse text-fuchsia-300' : ''} />
         {active ? 'Thinking…' : 'Thought'}
+        {!isOpen && text.length > 0 && <span className="ml-auto text-[10px] text-slate-600">{text.length.toLocaleString()} chars</span>}
       </button>
-      {isOpen && <p className="whitespace-pre-wrap px-3 pb-2 text-[12px] italic leading-relaxed text-slate-400">{text}</p>}
+      {isOpen ? (
+        <div className="max-h-64 overflow-y-auto px-3 pb-2 custom-scrollbar">
+          <p className="whitespace-pre-wrap text-[12px] italic leading-relaxed text-slate-400">{text}</p>
+        </div>
+      ) : (
+        preview && <p className="truncate px-3 pb-2 text-[11px] italic text-slate-500">{preview}</p>
+      )}
     </div>
   );
 }
 
+function statusIcon(status: Extract<WorkspaceChatPart, { type: 'tool' }>['status']) {
+  if (status === 'running') return <Loader2 size={12} className="animate-spin text-sky-300" />;
+  if (status === 'done') return <Check size={12} className="text-emerald-300" />;
+  if (status === 'aborted') return <Square size={11} className="text-amber-300" />;
+  return <AlertCircle size={12} className="text-rose-300" />;
+}
+
 function ToolPart({ part }: { part: Extract<WorkspaceChatPart, { type: 'tool' }> }) {
   const [open, setOpen] = useState(false);
+  const presentation = toolPresentation(part.name);
+  if (presentation.kind !== 'tool') return <DelegationPart part={part} presentation={presentation} />;
+
   const summary = toolSummary(part.input);
-  const icon =
-    part.status === 'running' ? <Loader2 size={12} className="animate-spin text-sky-300" /> :
-    part.status === 'done' ? <Check size={12} className="text-emerald-300" /> :
-    part.status === 'aborted' ? <Square size={11} className="text-amber-300" /> :
-    <AlertCircle size={12} className="text-rose-300" />;
+  const missionId = part.mission_id ?? missionIdFromOutput(part.output) ?? missionIdFromInput(part.input);
   return (
     <div className="rounded-lg border border-white/10 bg-black/30" data-testid="tool-part">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px]">
         <ChevronRight size={12} className={`shrink-0 text-slate-500 transition-transform ${open ? 'rotate-90' : ''}`} />
         <Wrench size={12} className="shrink-0 text-slate-400" />
-        <span className="shrink-0 font-medium text-slate-200">{toolLabel(part.name)}</span>
+        <span className="shrink-0 font-medium text-slate-200">{presentation.label}</span>
         {summary && <span className="truncate font-mono text-[11px] text-slate-500">{summary}</span>}
-        <span className="ml-auto shrink-0">{icon}</span>
+        <span className="ml-auto shrink-0">{statusIcon(part.status)}</span>
       </button>
+      {missionId != null && (
+        <div className="px-2.5 pb-1.5">
+          <MissionLink missionId={missionId} />
+        </div>
+      )}
       {open && (
         <div className="space-y-2 border-t border-white/5 px-3 py-2">
           <pre className="max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-slate-400">{JSON.stringify(part.input, null, 2)}</pre>
@@ -177,6 +197,66 @@ function ToolPart({ part }: { part: Extract<WorkspaceChatPart, { type: 'tool' }>
         </div>
       )}
     </div>
+  );
+}
+
+/** A cross-harness handoff: who took the work, what it was, and where it lives. */
+function DelegationPart({
+  part,
+  presentation,
+}: {
+  part: Extract<WorkspaceChatPart, { type: 'tool' }>;
+  presentation: ReturnType<typeof toolPresentation>;
+}) {
+  const [open, setOpen] = useState(false);
+  const summary = toolSummary(part.input);
+  const missionId = part.mission_id ?? missionIdFromOutput(part.output) ?? missionIdFromInput(part.input);
+  return (
+    <div className={`rounded-lg border ${presentation.tone}`} data-testid="delegation-part">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px]">
+        <ChevronRight size={12} className={`shrink-0 opacity-60 transition-transform ${open ? 'rotate-90' : ''}`} />
+        {presentation.kind === 'subagent' ? <Bot size={12} className="shrink-0" /> : <GitBranch size={12} className="shrink-0" />}
+        <span className="shrink-0 font-semibold">{presentation.label}</span>
+        {presentation.targetLabel && (
+          <span className="shrink-0 rounded border border-current/30 bg-black/20 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider opacity-80">
+            {presentation.targetLabel}
+          </span>
+        )}
+        {summary && <span className="truncate font-mono text-[11px] opacity-70">{summary}</span>}
+        <span className="ml-auto shrink-0">{statusIcon(part.status)}</span>
+      </button>
+      {missionId != null && (
+        <div className="px-2.5 pb-1.5">
+          <MissionLink missionId={missionId} />
+        </div>
+      )}
+      {open && (
+        <div className="space-y-2 border-t border-current/10 px-3 py-2">
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] opacity-80">{JSON.stringify(part.input, null, 2)}</pre>
+          {part.output !== undefined && (
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 font-mono text-[11px] opacity-90">{part.output}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A clean, clickable way into the Raven mission a tool result points at. */
+function MissionLink({ missionId }: { missionId: number }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        data-testid="mission-link"
+        className="inline-flex items-center gap-1 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-200 hover:bg-indigo-500/20"
+      >
+        <ArrowUpRight size={11} /> Open mission #{missionId}
+      </button>
+      <RavenMissionDetail missionId={open ? missionId : null} onClose={() => setOpen(false)} />
+    </>
   );
 }
 
@@ -219,6 +299,9 @@ function MissionPart({ missionId }: { missionId: number }) {
       {mission?.last_llm_reply && (
         <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-[11px] text-slate-300">{mission.last_llm_reply}</p>
       )}
+      <div className="mt-2">
+        <MissionLink missionId={missionId} />
+      </div>
     </div>
   );
 }
