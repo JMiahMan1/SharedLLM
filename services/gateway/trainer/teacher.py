@@ -35,6 +35,7 @@ import pathlib
 import re
 import time
 from collections import Counter
+from contextlib import suppress
 from typing import Any
 
 from services.gateway.trainer import runner
@@ -433,6 +434,23 @@ async def write_lessons(*, user_id: str = "default", limit: int = 20, dry_run: b
                 "goal": _short(goal, 300),
                 "written_at": payload["metadata"]["indexed_at"],
             }
+            # Record the verified worked example as a positive SIM rule so a
+            # later harness can retrieve it, and so the proposer sees which
+            # approach actually solved this task.
+            with suppress(dream_mod.RagError):
+                await dream_mod.sim_record(
+                    scope="system",
+                    user_id="default",
+                    harness="raven",
+                    category="teacher_lesson",
+                    signature=f"teacher::{trace.get('task_kind') or ''}::{goal[:120]}",
+                    rationale="A strong teacher model solved this task and its trace was verified.",
+                    edit_or_rule=payload["metadata"]["rule"],
+                    observed_outcome="the teacher's trace passed verification",
+                    outcome_status="improved",
+                    model=str(trace.get("model") or ""),
+                    domain=goal[:200],
+                )
         written_goals.append(goal)
         written.append({"id": trace_id, "lesson_id": payload["metadata"]["id"], "rule": payload["metadata"]["rule"]})
     if not dry_run and written:

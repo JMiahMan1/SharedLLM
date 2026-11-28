@@ -450,9 +450,21 @@ async def run_pass(*, fetch: Fetch = _identity_get, user_id: str = "default", wr
     config = scrub_mod.ScrubConfig(names=tuple(names), names_loaded=True)
 
     state = read_state()
+    done: dict[str, Any] = {"examined": 0, "lessons": [], "infrastructure": 0, "by_kind": {}}
+    # Proposer context: read the full SIM ledger (including retired/regressed
+    # fixes) before writing another avoid-lesson, so a failed approach is not
+    # proposed again under a new id.
+    try:
+        sim_history = await dream_mod.sim_history(user_id)
+        done["sim_problems"] = sim_history.get("count", 0)
+        done["sim_retired"] = [
+            p.get("problem_id") for p in sim_history.get("problems") or [] if p.get("status") == "retired"
+        ]
+    except dream_mod.RagError as exc:
+        done.setdefault("errors", []).append(f"sim history: {exc}")
     listing = await fetch(f"/api/raven/missions?limit={MAX_MISSIONS_PER_PASS}")
     new = [m for m in listing if is_failed(m) and str(m.get("id")) not in state["seen"]]
-    done: dict[str, Any] = {"examined": len(new), "lessons": [], "infrastructure": 0, "by_kind": {}}
+    done["examined"] = len(new)
     written = 0
     for item in new:
         mission = await fetch(f"/api/raven/missions/{item['id']}")
@@ -502,6 +514,25 @@ async def run_pass(*, fetch: Fetch = _identity_get, user_id: str = "default", wr
             entry.pop("pending", None)
             entry["confidence"] = payload["metadata"]["confidence"]
             entry["written_at"] = payload["metadata"]["indexed_at"]
+            # Selector: this exact failure was observed on this mission's model.
+            # It is a negative lesson, so the next proposer sees that the fix
+            # implied by the avoid-lesson already failed once.
+            try:
+                await dream_mod.sim_record(
+                    scope="system",
+                    user_id="default",
+                    harness="raven",
+                    category=f"raven_failure_{kind}",
+                    signature=f"{finding.get('tool') or 'mission'}::{kind}::{finding['evidence'][:120]}",
+                    rationale=f"A Raven mission failed with `{kind}`: {finding['evidence'][:240]}",
+                    edit_or_rule=f"When a mission is about to {kind.replace('_', ' ')}, {_ADVICE[kind]}.",
+                    observed_outcome=str(mission.get("error_summary") or finding["evidence"])[:300],
+                    outcome_status="regressed",
+                    model=str(mission.get("model") or ""),
+                    domain=goal[:200],
+                )
+            except dream_mod.RagError as exc:
+                done.setdefault("errors", []).append(f"sim: {exc}")
             written += 1
             done["lessons"].append(key)
     write_state(state)

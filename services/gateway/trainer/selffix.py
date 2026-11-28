@@ -177,7 +177,7 @@ def _gate_output(result: dict[str, Any] | None) -> str:
 
 
 
-def build_repair_prompt(path: str, source: str, error: str, test_output: str = "") -> str:
+def build_repair_prompt(path: str, source: str, error: str, test_output: str = "", sim_hints: str = "") -> str:
     """The repair instruction: whole file out, nothing else, keep the interface."""
     parts = [
         f"Fix the bug in `{path}`. Reply with ONLY the complete corrected file inside one "
@@ -188,6 +188,12 @@ def build_repair_prompt(path: str, source: str, error: str, test_output: str = "
         "",
         f"The error was:\n{error.strip() or '(no traceback given)'}",
     ]
+    if sim_hints.strip():
+        parts += [
+            "",
+            "Lessons from earlier repairs (shared System and this user's own; apply only when relevant):",
+            sim_hints.strip(),
+        ]
     if test_output.strip():
         parts += ["", f"The test run said:\n{test_output.strip()[:MAX_TEST_OUTPUT]}"]
     parts += ["", f"Current contents of `{path}`:", "```python", source, "```"]
@@ -215,6 +221,63 @@ async def _ask(
     )
     result.model = completion.model
     return completion.text
+
+
+async def _record_repair_learning(
+    result: RepairResult, sim_items: list[dict[str, Any]], *, passed: bool
+) -> None:
+    """Attribute a repair to SIM and keep the accepted/failed fix for next time."""
+    try:
+        from services.gateway.trainer import sim as sim_mod
+
+        observed = (
+            f"pytest passed after {result.attempts} attempt(s) with {result.model or 'the local model'}"
+            if passed
+            else (result.final_error or "the pytest gate still failed")[:300]
+        )
+        await sim_mod.record_injected_outcomes(
+            sim_items,
+            success=passed,
+            model=result.model,
+            harness="workspace",
+            observed_outcome=observed,
+        )
+        signature = f"{result.path}::{result.initial_error.splitlines()[0][:160]}"
+        if passed:
+            await sim_mod.record_success_lesson(
+                user_id="default",
+                harness="workspace",
+                category="selffix_repair",
+                signature=signature,
+                rationale="The pytest gate rejected the original file; this repair passed it.",
+                rule=(
+                    f"When repairing `{result.path}` after `{result.initial_error.splitlines()[0][:120]}`, "
+                    "return the whole file and keep every existing definition; that is what the gate accepted."
+                ),
+                observed_outcome=observed,
+                model=result.model,
+                domain=str(result.initial_error or "")[:200],
+            )
+        else:
+            await sim_mod.record_failure_lesson(
+                user_id="default",
+                harness="workspace",
+                category="selffix_failure",
+                signature=signature,
+                rationale=(
+                    "A whole-file repair was attempted and the pytest gate still failed, so the "
+                    "same rewrite approach must not be proposed again unchanged."
+                ),
+                rule=(
+                    f"For `{result.path}` failing with `{result.initial_error.splitlines()[0][:120]}`, "
+                    "a whole-file rewrite did not pass the gate; inspect the assertion or change approach."
+                ),
+                observed_outcome=observed,
+                model=result.model,
+                domain=str(result.initial_error or "")[:200],
+            )
+    except Exception as exc:  # SIM is never allowed to fail a repair
+        log.debug("[selffix] SIM outcome skipped: %s", exc)
 
 
 async def repair_workspace(
@@ -275,6 +338,20 @@ async def repair_workspace(
 
         result.model = await llm_mod.resolve_model(await get_llm_settings())
 
+    sim_items: list[dict[str, Any]] = []
+    sim_block = ""
+    try:
+        from services.gateway.trainer import sim as sim_mod
+
+        sim_block, sim_items = await sim_mod.context_for_turn(
+            user_id=str(user or "default"),
+            harness="workspace",
+            query=f"{path}: {str(error_text or '')[:500]}",
+            model=result.model,
+        )
+    except Exception as exc:
+        log.debug("[selffix] SIM query skipped: %s", exc)
+
     result.initial_error = str(error_text)[:MAX_TEST_OUTPUT]
     current = original
     context = result.initial_error
@@ -284,7 +361,7 @@ async def repair_workspace(
         result.attempts = attempt
         # The first attempt sees the file as it is on disk; a later attempt sees
         # the candidate that just failed the tests, so it can build on it.
-        prompt = build_repair_prompt(path, current, context, test_output)
+        prompt = build_repair_prompt(path, current, context, test_output, sim_hints=sim_block)
         if len(prompt) > REPAIR_CONTEXT_CHARS:
             result.final_error = (
                 f"the repair prompt is {len(prompt):,} characters, over the "
@@ -334,6 +411,7 @@ async def repair_workspace(
             result.tests_passed = True
             result.status = "repaired"
             result.final_error = ""
+            await _record_repair_learning(result, sim_items, passed=True)
             return result
         if gate["outcome"] == "error":
             result.final_error = (
@@ -359,4 +437,5 @@ async def repair_workspace(
 
     if not result.message:
         result.message = "no attempt produced a file the tests accept"
+    await _record_repair_learning(result, sim_items, passed=False)
     return result

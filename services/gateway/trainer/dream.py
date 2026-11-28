@@ -49,6 +49,9 @@ class RagRejected(RagError):
 #: shown in the backlog but never written into ``system_learnings``: a lesson
 #: saying "the GPU was busy" would teach every later mission something false.
 INFRASTRUCTURE_KINDS = frozenset({"hardware_busy", "host_busy", "model_unavailable"})
+#: Advice about the SIM ledger itself (a retired fix) is shown to a person but is
+#: not a behavioural lesson for the model.
+NON_LESSON_KINDS = frozenset({"sim_retired"})
 
 
 async def request(
@@ -128,6 +131,122 @@ async def validate(lesson_id: str, passed: bool, evidence: str, *, user_id: str 
         params={"user_id": user_id},
         body={"lesson_id": lesson_id, "passed": passed, "evidence": evidence[:500]},
     )
+
+
+async def sim_history(
+    user_id: str = "default", *, harness: str | None = None, include_retired: bool = True
+) -> dict[str, Any]:
+    """The full SIM ledger, including retired/regressed attempts.
+
+    Proposers read this before drafting anything so they understand why a rule
+    exists and never re-propose a fix that already failed.
+    """
+    params: dict[str, Any] = {"user_id": user_id, "include_retired": str(include_retired).lower(), "limit": 500}
+    if harness:
+        params["harness"] = harness
+    return await request("GET", "/rag/sim/history", params=params, timeout=30.0)
+
+
+async def sim_record(
+    *,
+    scope: str,
+    user_id: str,
+    harness: str,
+    category: str,
+    signature: str,
+    rationale: str,
+    edit_or_rule: str,
+    observed_outcome: str,
+    outcome_status: str,
+    model: str = "",
+    domain: str = "",
+) -> dict[str, Any]:
+    """Record one SIM problem + attempt through the RAG ledger."""
+    return await request(
+        "POST",
+        "/rag/sim/record",
+        body={
+            "scope": scope, "user_id": user_id, "harness": harness,
+            "category": category, "signature": signature, "rationale": rationale,
+            "edit_or_rule": edit_or_rule, "observed_outcome": observed_outcome,
+            "outcome_status": outcome_status, "model": model, "domain": domain,
+        },
+        timeout=30.0,
+    )
+
+
+async def sim_outcome(
+    problem_id: str,
+    *,
+    observed_outcome: str,
+    outcome_status: str,
+    model: str = "",
+    harness: str = "",
+) -> dict[str, Any]:
+    """Selector hook: attribute an outcome to the active model family."""
+    return await request(
+        "POST",
+        "/rag/sim/outcome",
+        body={
+            "problem_id": problem_id,
+            "observed_outcome": observed_outcome[:500],
+            "outcome_status": outcome_status,
+            "model": model,
+            "harness": harness,
+        },
+        timeout=30.0,
+    )
+
+
+async def consolidate_sim() -> dict[str, Any]:
+    """Selector hook: promote portable winners, mark model-specific, retire regressions."""
+    return await request("POST", "/rag/sim/consolidate", timeout=60.0)
+
+
+async def record_eval_outcomes(report: dict[str, Any] | None, *, user_id: str = "default", limit: int = 20) -> int:
+    """Record each evaluated case's result against the model that ran it.
+
+    The selector half of the proposer-selector loop: a case that keeps failing
+    becomes a negative lesson (so no proposer repeats it), and a case that now
+    passes is evidence for the rule that was active. Best-effort per case.
+    """
+    if not report:
+        return 0
+    model = str(report.get("model") or "")
+    written = 0
+    for case in [c for c in report.get("cases") or [] if isinstance(c, dict)][: max(0, limit)]:
+        if case.get("infrastructure_error"):
+            continue
+        case_id = str(case.get("id") or case.get("title") or "")[:180]
+        if not case_id:
+            continue
+        passed = bool(case.get("passed"))
+        title = str(case.get("title") or case_id)[:180]
+        try:
+            await sim_record(
+                scope="system",
+                user_id="default",
+                harness="raven",
+                category="eval_case",
+                signature=case_id,
+                rationale=f"The curriculum case `{title}` is used to tell whether a model has learned this.",
+                edit_or_rule=(
+                    f"For `{title}`, the verified approach is the one the case checks."
+                    if passed
+                    else f"For `{title}`, do not repeat the approach that failed this case."
+                ),
+                observed_outcome=str(case.get("error") or ("passed" if passed else "failed"))[:300],
+                outcome_status="improved" if passed else "regressed",
+                model=model,
+            )
+            written += 1
+        except RagError as exc:
+            log.debug("[trainer.dream] SIM case outcome skipped for %s: %s", case_id, exc)
+    try:
+        await consolidate_sim()
+    except RagError as exc:
+        log.debug("[trainer.dream] SIM consolidation skipped: %s", exc)
+    return written
 
 
 def _proposal_id(kind: str, detail: str) -> str:
@@ -318,6 +437,64 @@ def proposals_from_failures(report: dict[str, Any] | None, *, limit: int = 6) ->
     return sorted(proposals, key=lambda p: (-p["priority"], p["title"]))[:limit]
 
 
+def proposals_from_sim(history: dict[str, Any] | None, *, limit: int = 6) -> list[dict[str, Any]]:
+    """What the SIM ledger says to verify next, and which fixes to never retry.
+
+    ``history`` is the full ledger (retired rows included). A retired rule is
+    surfaced with its rationale and observed outcome so the proposer sees *why*
+    an earlier edit is gone instead of proposing it again; a candidate with
+    repeated attempts needs a real evaluation, not another rewrite.
+    """
+    if not history:
+        return []
+    problems = [p for p in history.get("problems") or [] if isinstance(p, dict)]
+    proposals: list[dict[str, Any]] = []
+    for problem in problems:
+        status = str(problem.get("status") or "")
+        pid = str(problem.get("problem_id") or "")
+        rule = str(problem.get("edit_or_rule") or "")
+        attempts = problem.get("attempts") or []
+        if status == "retired":
+            proposals.append(
+                _proposal(
+                    "sim_retired",
+                    f"Never re-propose retired SIM fix {pid}",
+                    f"This fix was tried and retired: {rule[:180]}. Observed: "
+                    f"{str(problem.get('observed_outcome') or '')[:180]}. Do not propose it again; "
+                    "change the approach or the root cause first.",
+                    priority=7,
+                    evidence=[pid],
+                    action="Read the retired attempt history before drafting a replacement.",
+                )
+            )
+        elif status == "candidate" and len(attempts) >= 2:
+            proposals.append(
+                _proposal(
+                    "sim_validate",
+                    f"Prove the recurring SIM rule {pid}",
+                    f"The rule has {len(attempts)} recorded attempt(s) but is still unverified: "
+                    f"{rule[:200]}",
+                    priority=6,
+                    evidence=[pid],
+                    action="Run the situation the rule addresses and record improved/regressed.",
+                )
+            )
+        elif status == "model_specific":
+            proposals.append(
+                _proposal(
+                    "sim_portability",
+                    f"Check the model-specific SIM rule {pid} on another family",
+                    f"This rule helped {', '.join(problem.get('verified_models') or []) or 'one family'} "
+                    f"and regressed on {', '.join(problem.get('regressed_models') or []) or 'another'}. "
+                    "Do not inject it there; verify a narrower version if it should be shared.",
+                    priority=5,
+                    evidence=[pid],
+                    action="Keep the rule family-scoped unless a narrower rule proves portable.",
+                )
+            )
+    return sorted(proposals, key=lambda p: (-p["priority"], p["title"]))[:limit]
+
+
 def merge_proposals(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """De-duplicate proposals by id, keeping the highest priority."""
     merged: dict[str, dict[str, Any]] = {}
@@ -376,7 +553,11 @@ def lesson_payload(proposal: dict[str, Any], *, user_id: str = "default") -> dic
 
 def is_lesson_worthy(proposal: dict[str, Any]) -> bool:
     """Only a proposal about the model's knowledge may become a lesson."""
-    return not proposal.get("infrastructure") and proposal.get("kind") not in INFRASTRUCTURE_KINDS
+    return (
+        not proposal.get("infrastructure")
+        and proposal.get("kind") not in INFRASTRUCTURE_KINDS
+        and proposal.get("kind") not in NON_LESSON_KINDS
+    )
 
 
 async def ingest_proposals(

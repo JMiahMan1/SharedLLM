@@ -3162,11 +3162,53 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     stream_event = events.event
     _flush_reasoning = events.flush
 
+    # Two-tier Self-Improvement Memory: shared System SIM (admin rules filtered
+    # by the caller's role) plus exactly this caller's User SIM. Raven appends
+    # the block to its system context; it is never written to the static
+    # single-turn prefix (this path has no prompt-cache contract).
+    sim_items: list[dict] = []
+    try:
+        from services.gateway.trainer import sim as sim_mem
+
+        sim_block, sim_items = await sim_mem.context_for_turn(
+            user_id=str(rag_user or "default"),
+            harness="raven",
+            query=query,
+            model=selected_model,
+            is_admin=bool(getattr(creds, "is_admin", False)),
+            k=8,
+        )
+        if sim_block:
+            full_system += (
+                "\n\n[Self-Improvement Memory]\n"
+                "Shared System lessons and this user's own lessons. Apply one only when its "
+                "situation matches this mission; a retired or regressed fix is never shown.\n"
+                f"{sim_block}"
+            )
+    except Exception as e:
+        log.debug(f"[AgentLoop] SIM query skipped: {e}")
+
     async def _record_loop_probe(iter_num: int, goal: str, outcome: str, directive: str) -> None:
         """Persist a structured, pullable record of a detected no-progress loop
         to raven:mission:loopstate:{mission_id} so an operator (or Raven on a
         resumed run) can inspect exactly what was looping and what the last error
         was. Best-effort: failures are logged, never raised."""
+        try:
+            from services.gateway.trainer import sim as sim_mem
+
+            await sim_mem.record_failure_lesson(
+                user_id=str(rag_user or "default"),
+                harness="raven",
+                category="loop_stall",
+                signature=f"{goal}::{outcome}",
+                rationale=f"The mission repeated `{goal}` with the same outcome ({outcome}).",
+                rule=directive,
+                observed_outcome=outcome,
+                model=selected_model,
+                domain=str(query or "")[:200],
+            )
+        except Exception as e:
+            log.debug(f"[AgentLoop] SIM loop-stall record skipped: {e}")
         if not mission_id:
             return
         try:
@@ -3346,6 +3388,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     exec_data = None
     ans = ""
     successful_tool_calls = 0
+    # SIM: a tool error awaiting a successful retry (the correction is the lesson).
+    _sim_pending_tool_error: tuple[str, str] | None = None
     # Queue of tool calls remaining from a batched inference (a proven command
     # chain). One LLM inference can enqueue many steps; each subsequent turn runs
     # one queued step WITHOUT a new inference, so the whole chain costs a single
@@ -5538,6 +5582,21 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     # instantly. Treating LINT_ERRORS as a failure keeps the
                     # verification gate real.
                     if isinstance(exec_data, dict) and exec_data.get("status") not in ("ERROR", "LINT_ERRORS"):
+                        if _sim_pending_tool_error is not None:
+                            try:
+                                from services.gateway.trainer import sim as sim_mem
+
+                                await sim_mem.record_tool_recovery(
+                                    user_id=str(rag_user or "default"),
+                                    harness="raven",
+                                    action=_sim_pending_tool_error[0],
+                                    error=_sim_pending_tool_error[1],
+                                    model=selected_model,
+                                    query=query,
+                                )
+                            except Exception as e:
+                                log.debug(f"[AgentLoop] SIM tool recovery skipped: {e}")
+                            _sim_pending_tool_error = None
                         successful_tool_calls += 1
                         _consecutive_no_tool = 0
                         sig = action_signature(action_name, payload)
@@ -5581,6 +5640,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                         "message": lint_feedback,
                                         "file_path": file_path,
                                     }
+                                    _sim_pending_tool_error = (
+                                        str(action or lookup_action or "tool"),
+                                        lint_feedback,
+                                    )
                                     # Retroactively un-count this write: it produced lint
                                     # errors so it is not a successful tool execution.
                                     successful_tool_calls -= 1
@@ -5600,6 +5663,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         sig = action_signature(action_name, payload)
                         _recent_actions.append((sig, False))
                         _loop_history.append((sig, False, error_digest(exec_data)))
+                        if isinstance(exec_data, dict):
+                            _sim_pending_tool_error = (
+                                str(action or lookup_action or "tool"),
+                                str(exec_data.get("message") or exec_data.get("error") or error_digest(exec_data)),
+                            )
                         if len(_recent_actions) > 12:
                             _recent_actions = _recent_actions[-12:]
                         if lookup_action == "workspaceshellrequest" and isinstance(payload, dict):
@@ -6007,6 +6075,28 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     if mission_id and full_audit_log:
         await _persist_audit_checkpoint()
+
+    # Attribute the mission's result to the SIM rules that were injected. A
+    # failure here is what retires a bad rule; a success is what makes a fix
+    # portable across model families after enough evidence.
+    if sim_items:
+        try:
+            from services.gateway.trainer import sim as sim_mem
+
+            _failed = bool(
+                (isinstance(exec_data, dict) and exec_data.get("status") == "ERROR")
+                or str(ans or "").strip().lower().startswith("error")
+                or re.search(r"\b(failed|could not|unable to|cannot)\b", str(ans or "").lower())
+            )
+            await sim_mem.record_injected_outcomes(
+                sim_items,
+                success=not _failed,
+                model=selected_model,
+                harness="raven",
+                observed_outcome=str(ans or "")[:300],
+            )
+        except Exception as e:
+            log.debug(f"[AgentLoop] SIM outcome record skipped: {e}")
 
     # Clear checkpoint on successful completion
     await _clear_checkpoint()

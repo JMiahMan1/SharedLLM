@@ -4683,6 +4683,13 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
         last_msg = body["messages"][-1]
         query = last_msg.get("content") if isinstance(last_msg, dict) else str(last_msg)
 
+    if not query and "/v1/chat/completions" in str(request.url) and isinstance(body.get("messages"), list) and body["messages"]:
+        # A client-driven OpenAI tool loop can end on an assistant tool_calls
+        # message (null/empty content) or an empty tool result. Jarvis does not
+        # need a human query for the passthrough, so do not reject the request
+        # before the gate gets a chance to forward it.
+        query = "[OpenAI client tool request]"
+
     if not query:
         return JSONResponse({"status": "ERROR", "message": "No query provided."}, status_code=400)
 
@@ -4770,7 +4777,13 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
         if he.status_code == 401:
             msg = "Authentication failed. Please log in or provide a valid API key."
             if is_openai:
-                return _make_openai_response(msg, selected_model, "unauthorized")
+                # A streaming OpenAI client treats HTTP 200 + an error body as a
+                # protocol violation and resets the connection (ECONNRESET in
+                # OpenCode). Authentication failures must be a real HTTP 401.
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": {"message": msg, "type": "authentication_error"}},
+                )
             return _make_ollama_response(msg, selected_model, "unauthorized")
         raise he
     except Exception as e:
@@ -4780,6 +4793,41 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
             return _make_openai_response(msg, selected_model, "degraded")
         return _make_ollama_response(msg, selected_model, "degraded")
     log.info(f"Chat request from {user_id} query='{query}'")
+
+    # Secure OpenAI client-tool passthrough. Gate (all required): the OpenAI
+    # route, a real Identity-verified API key, caller-owned tools or the explicit
+    # passthrough/opencode opt-in, no Jarvis agentic modes, and a concrete local
+    # model (never the virtual household aliases).
+    presented_key = _presented_api_key(request) or str(body.get("api_key") or "")
+    try:
+        from services.gateway import openai_passthrough
+
+        if openai_passthrough.should_passthrough(
+            request=request,
+            body=body,
+            presented_key=presented_key,
+            selected_model=selected_model,
+            explicit_model=explicit_model,
+            is_openai=is_openai,
+            voice_context=voice_context,
+        ):
+            passthrough_settings = await get_all_settings()
+            local_base = str(passthrough_settings.get("llm_local_url") or LLM_URL or "")
+            if local_base:
+                log.info(
+                    "[ChatHandler] OpenAI client-tool passthrough -> %s (model=%s source=%s)",
+                    openai_passthrough.completions_url(local_base),
+                    selected_model,
+                    openai_passthrough.request_source(request),
+                )
+                return await openai_passthrough.forward_chat_completion(
+                    request,
+                    body,
+                    base_url=local_base,
+                    selected_model=selected_model,
+                )
+    except Exception as exc:
+        log.warning(f"[ChatHandler] OpenAI passthrough skipped: {exc}")
 
     # Teaching a voice at the satellite assigned to that person: every request from
     # that satellite while the session is open is a take, not a command.
@@ -12648,6 +12696,7 @@ async def _run_workspace_turn(
         workspace_id=workspace_id,
         workspace_context=await _workspace_context(workspace_id, creds, mode),
         event_callback=event_callback,
+        harness="workspace",
     )
     return {
         "status": "SUCCESS",

@@ -139,6 +139,11 @@ missions dispatch directly from the agent loop.
 | In-mission context | Redis checkpoint + `_compact_conversation` | during the loop | the same mission |
 | Workspace journal | `raven_memory.md` in each workspace | `_persist_learning` (appends the same lesson) and the mission itself | the next mission in that workspace |
 
+The two-tier **Self-Improvement Memory (SIM)** adds model-family-aware,
+problem-grouped lessons on top of these stores. See
+[`docs/SIM_MEMORY.md`](SIM_MEMORY.md) for System vs User SIM, portability, the
+three harnesses, prompt-cache safety and the RAG/gateway APIs.
+
 ### Write path
 
 1. **Reflection**: after successful tool calls, `raven_reflection_prompt`

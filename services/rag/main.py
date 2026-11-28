@@ -34,7 +34,7 @@ from typing import Any, Literal
 import redis
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from services.common.entity_ids import usable_entity_id as _usable_entity_id
 from services.common.rag_collections import (
@@ -48,6 +48,7 @@ from services.common.rag_collections import (
 from services.common.secrets import secret_matches
 from services.config import INTERNAL_SECRET
 from services.rag import db, topics
+from services.rag import sim as sim_store
 from services.rag.schemas import IngestRequest, SearchRequest, SearchResponse, SearchResultItem
 from services.rag.store import VectorStoreAdapter, build_adapter
 from services.shared.info_endpoint import info_router
@@ -3408,6 +3409,156 @@ async def get_mission(mission_id: str):
 
 
 START_TIME = time.time()
+
+
+# ---------------------------------------------------------------------------
+# Self-Improvement Memory (SIM)
+#
+# System SIM is shared by every user and harness; User SIM is isolated to the
+# exact caller. The gateway is the only caller: it forwards a caller's identity
+# only after authentication, and it never crosses a user boundary. These
+# endpoints are therefore internal-secret protected like every other RAG route.
+# ---------------------------------------------------------------------------
+
+
+class SimRecordRequest(BaseModel):
+    scope: Literal["system", "user"] = "user"
+    user_id: str = "default"
+    harness: Literal["raven", "workspace", "satellite"]
+    category: str = "general"
+    signature: str = ""
+    rationale: str = ""
+    edit_or_rule: str = ""
+    predicted_outcome: str = ""
+    observed_outcome: str = ""
+    outcome_status: Literal["pending", "improved", "neutral", "regressed"] = "pending"
+    requires_admin: bool = False
+    tags: list[str] = Field(default_factory=list)
+    model: str = ""
+    model_family: str = ""
+    domain: str = ""
+    round: int = 0
+
+
+class SimQueryRequest(BaseModel):
+    user_id: str = "default"
+    harness: Literal["raven", "workspace", "satellite"] = "satellite"
+    query: str = ""
+    model: str = ""
+    model_family: str = ""
+    is_admin: bool = False
+    k: int = 8
+
+
+class SimOutcomeRequest(BaseModel):
+    problem_id: str | None = None
+    attempt_id: str | None = None
+    observed_outcome: str = ""
+    outcome_status: Literal["improved", "neutral", "regressed"]
+    model: str = ""
+    model_family: str = ""
+    harness: str = ""
+    domain: str = ""
+    round: int = 0
+
+
+@app.post("/rag/sim/record", dependencies=[Depends(require_internal)])
+async def sim_record(req: SimRecordRequest):
+    try:
+        problem = sim_store.record(_conn(), **req.model_dump())
+        return {"status": "SUCCESS", "problem": problem}
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/rag/sim/query", dependencies=[Depends(require_internal)])
+async def sim_query(req: SimQueryRequest):
+    try:
+        results = sim_store.query(
+            _conn(),
+            user_id=req.user_id,
+            harness=req.harness,
+            query=req.query,
+            model=req.model,
+            model_family=req.model_family,
+            is_admin=req.is_admin,
+            k=req.k,
+            embed_fn=embed if embedder is not None else None,
+        )
+        return {"status": "SUCCESS", "count": len(results), "results": results}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/rag/sim/outcome", dependencies=[Depends(require_internal)])
+async def sim_outcome(req: SimOutcomeRequest):
+    try:
+        problem = sim_store.record_outcome(_conn(), **req.model_dump())
+        return {"status": "SUCCESS", "problem": problem}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/rag/sim/problems", dependencies=[Depends(require_internal)])
+async def sim_problems(
+    scope: Literal["system", "user"] | None = None,
+    user_id: str | None = None,
+    harness: Literal["raven", "workspace", "satellite"] | None = None,
+    status: str | None = None,
+    include_retired: bool = False,
+    category: str | None = None,
+    is_admin: bool = False,
+    limit: int = Query(default=200, ge=1, le=1000),
+):
+    try:
+        problems = sim_store.list_problems(
+            _conn(),
+            scope=scope,
+            user_id=user_id,
+            harness=harness,
+            status=status,
+            include_retired=include_retired,
+            category=category,
+            is_admin=is_admin,
+            limit=limit,
+        )
+        return {"status": "SUCCESS", "count": len(problems), "problems": problems}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/rag/sim/history", dependencies=[Depends(require_internal)])
+async def sim_history(
+    user_id: str = "default",
+    harness: Literal["raven", "workspace", "satellite"] | None = None,
+    include_retired: bool = True,
+    is_admin: bool = False,
+    limit: int = Query(default=500, ge=1, le=2000),
+):
+    """Full history for proposer agents, including retired/regressed attempts."""
+    try:
+        return {
+            "status": "SUCCESS",
+            **sim_store.history(
+                _conn(), user_id=user_id, harness=harness,
+                include_retired=include_retired, is_admin=is_admin, limit=limit,
+            ),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/rag/sim/consolidate", dependencies=[Depends(require_internal)])
+async def sim_consolidate():
+    try:
+        report = sim_store.consolidate(_conn())
+        return {"status": "SUCCESS", **report}
+    except Exception as exc:  # pragma: no cover - defensive
+        log.error(f"SIM consolidation failed: {exc}")
+        raise HTTPException(status_code=500, detail="SIM consolidation failed") from exc
+
 
 
 @app.get("/health")

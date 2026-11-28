@@ -2485,7 +2485,7 @@ def _assistant_persona() -> str:
         return ""
 
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False, context_sections: dict[str, int] | None = None, budget_path: str = "chat", priority: int | None = None, persona: bool = False, book_chapter: str = "") -> str:
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False, context_sections: dict[str, int] | None = None, budget_path: str = "chat", priority: int | None = None, persona: bool = False, book_chapter: str = "", harness: str = "satellite") -> str:
     """Answer ``query`` in at most MAX_TURNS tool calls plus one closing turn.
 
     ``book_chapter`` is a chapter the gateway read for this question
@@ -2518,6 +2518,24 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             MAX_RAG_CONTEXT_CHARS,
         )
     rag_context = _truncate_rag_context(rag_context)
+    # Self-Improvement Memory: shared System SIM + only this caller's User SIM.
+    # The block is inserted into the per-request question below, NEVER into the
+    # static system message or the single-turn tool guide, so alpaca's cached
+    # KV prefix stays warm across every voice/chat turn.
+    sim_items: list[dict] = []
+    sim_block = ""
+    try:
+        from services.gateway.trainer import sim as sim_mem
+
+        sim_block, sim_items = await sim_mem.context_for_turn(
+            user_id=str(getattr(creds, "user", "") or "default"),
+            harness=harness,
+            query=query,
+            model=model,
+            is_admin=bool(getattr(creds, "is_admin", False)),
+        )
+    except Exception as exc:  # SIM can never fail a turn
+        log.debug("[_single_turn_inference] SIM query skipped: %s", exc)
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
     single_turn_guide = hub_tool_guide(load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE))
     if grounded:
@@ -2566,6 +2584,11 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     if retry:
         context_parts.append(retry)
     context_parts.append(f"Retrieved Context:\n{rag_context}")
+    if sim_block:
+        context_parts.append(
+            "Self-Improvement Memory (shared System + your own User lessons; use only "
+            f"when relevant to this question):\n{sim_block}"
+        )
     if book_chapter.strip():
         context_parts.append(book_chapter.strip())
     question = "[Context for this question]\n" + "\n\n".join(context_parts) + f"\n\n[Question]\n{query}"
@@ -2632,6 +2655,40 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     #: Tools called in this turn, and whether an answer claiming an action with none was sent back once.
     tools_called = 0
     nudged = False
+    #: A tool error that has not yet been followed by a successful retry; when a
+    #: later call succeeds, the correction is the reusable part.
+    pending_tool_error: tuple[str, str] | None = None
+
+    async def _record_sim_result(result_text: str, *, success: bool) -> None:
+        if not sim_items:
+            return
+        try:
+            from services.gateway.trainer import sim as sim_mem
+
+            await sim_mem.record_injected_outcomes(
+                sim_items,
+                success=success,
+                model=model,
+                harness=harness,
+                observed_outcome=(str(result_text or "")[:300] or "the turn completed"),
+            )
+        except Exception as exc:
+            log.debug("[_single_turn_inference] SIM outcome skipped: %s", exc)
+
+    async def _record_tool_recovery(action_name: str, error_text: str) -> None:
+        try:
+            from services.gateway.trainer import sim as sim_mem
+
+            await sim_mem.record_tool_recovery(
+                user_id=str(getattr(creds, "user", "") or "default"),
+                harness=harness,
+                action=action_name,
+                error=error_text,
+                model=model,
+                query=query,
+            )
+        except Exception as exc:
+            log.debug("[_single_turn_inference] SIM tool recovery skipped: %s", exc)
     gate = None
     if speech_stream and chunk_callback and not event_callback:
         from services.gateway.speech_stream import SpeechGate
@@ -2785,6 +2842,16 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         else:
             tool_result = await _execute_single_tool(action, tool_data, query, creds, workspace_id=workspace_id)
         log.info(f"[_single_turn_inference] Tool result: {tool_result[:300] if tool_result else 'empty'}")
+        try:
+            from services.gateway.trainer import sim as sim_mem
+
+            if sim_mem.looks_like_tool_error(tool_result):
+                pending_tool_error = (action, str(tool_result or ""))
+            elif pending_tool_error is not None:
+                await _record_tool_recovery(*pending_tool_error)
+                pending_tool_error = None
+        except Exception as exc:
+            log.debug("[_single_turn_inference] SIM error classification skipped: %s", exc)
         if re.sub(r'[\s_]+', '', str(action or '')).lower() in DEVICE_TOOLS:
             device_runs.append((action, tool_result or ""))
 
@@ -2809,6 +2876,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             try:
                 res_obj = json.loads(tool_result)
                 if isinstance(res_obj, dict) and res_obj.get("message"):
+                    await _record_sim_result(str(res_obj["message"]), success=pending_tool_error is None)
                     return res_obj["message"]
             except Exception:
                 pass
@@ -2833,7 +2901,9 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                                           else (gate.feed if gate is not None else chunk_callback), tool_result)
             if gate is not None:
                 await gate.end_call()
-            return honest_reply(query, closing, device_runs)
+            final_answer = honest_reply(query, closing, device_runs)
+            await _record_sim_result(final_answer, success=pending_tool_error is None)
+            return final_answer
 
     # Final answer processing: strip JSON/thinking artifacts for clean natural language
     log.info(f"[_single_turn_inference] Final answer length: {len(ans)} chars, preview: {ans[:200]}")
@@ -2844,7 +2914,13 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         try:
             res_obj = json.loads(tool_result)
             if isinstance(res_obj, dict) and res_obj.get("message"):
+                await _record_sim_result(str(res_obj["message"]), success=pending_tool_error is None)
                 return res_obj["message"]
         except Exception:
+            await _record_sim_result(tool_result, success=pending_tool_error is None)
             return tool_result
+    await _record_sim_result(
+        cleaned,
+        success=pending_tool_error is None and not re.search(r"\b(failed|error|cannot|unable)\b", cleaned.lower()),
+    )
     return cleaned
