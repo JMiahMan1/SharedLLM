@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, FlaskConical, Image as ImageIcon, Play, RefreshCcw, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useAuth } from '../../context/AuthContext';
 import { errorText } from '../../lib/errorText';
 import {
   benchmarkLine,
@@ -13,6 +14,7 @@ import {
   summariseCatalog,
 } from '../../lib/trainer';
 import { api } from '../../services/api';
+import SimMemoryCard from './SimMemoryCard';
 import TeacherTracesCard from './TeacherTracesCard';
 
 const BUCKET_CHOICES = ['repair', 'writing', 'vision', 'workspace', 'memory', 'protocol', 'tools', 'teacher', 'raven_failures'];
@@ -24,6 +26,7 @@ const BUCKET_CHOICES = ['repair', 'writing', 'vision', 'workspace', 'memory', 'p
  */
 export default function TrainerPane() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [selectedBuckets, setSelectedBuckets] = useState<string[]>([]);
   const [limit, setLimit] = useState(12);
 
@@ -90,6 +93,7 @@ export default function TrainerPane() {
           benchmarksQuery.isError ? errorText(benchmarksQuery.error, 'The benchmark results could not be read') : ''
         }
       />
+      <SimMemoryCard isAdmin={Boolean(user?.is_admin)} />
       <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>

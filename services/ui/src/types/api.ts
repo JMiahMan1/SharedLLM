@@ -4691,7 +4691,7 @@ export interface AccountAuditEvent {
 export type WorkspaceChatPart =
   | { type: 'text'; text: string; step?: number | string }
   | { type: 'reasoning'; text: string; step?: number | string }
-  | { type: 'tool'; id: string; name: string; input: Record<string, unknown>; output?: string; status: 'running' | 'done' | 'error' | 'aborted' }
+  | { type: 'tool'; id: string; name: string; input: Record<string, unknown>; output?: string; status: 'running' | 'done' | 'error' | 'aborted'; mission_id?: number }
   | { type: 'mission'; mission_id: number; status?: string }
   | { type: 'error'; text: string };
 
@@ -6107,4 +6107,52 @@ export interface SignInResetPreview {
   re_enrol: ReEnrolItem[];
   third_party: ThirdPartyCredential[];
   last_reset: SignInResetResult | null;
+}
+
+// ── Self-Improvement Memory (SIM) ────────────────────────────────────────────
+// The two-tier ledger every harness reads: System SIM is shared, User SIM is
+// owned by one person. Lifecycle statuses describe cross-model portability.
+export type SimScope = 'system' | 'user';
+export type SimHarness = 'raven' | 'workspace' | 'satellite';
+export type SimStatus = 'candidate' | 'verified' | 'portable' | 'model_specific' | 'retired';
+
+/** One problem-grouped lesson, as GET /api/trainer/sim/problems returns it. */
+export interface SimProblem {
+  problem_id: string;
+  scope: SimScope;
+  user_id: string;
+  harness: SimHarness;
+  category: string;
+  signature: string;
+  rationale: string;
+  edit_or_rule: string;
+  predicted_outcome: string;
+  observed_outcome: string;
+  outcome_status: string;
+  status: SimStatus;
+  requires_admin: boolean;
+  tags: string[];
+  verified_models: string[];
+  regressed_models: string[];
+  family_stats?: Record<string, { wins?: number; losses?: number }>;
+  model: string;
+  model_family: string;
+  retrieval_count: number;
+  updated_at: number;
+}
+
+export interface SimProblemsResponse {
+  status: string;
+  count: number;
+  problems: SimProblem[];
+}
+
+/** What POST /api/trainer/sim/consolidate changed. */
+export interface SimConsolidateResponse {
+  status: string;
+  checked: number;
+  updated: number;
+  promoted: string[];
+  model_specific: string[];
+  retired: string[];
 }

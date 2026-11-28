@@ -10,6 +10,12 @@ import type {
 import type { CameraInfo, CameraRecordings } from '../lib/cameras';
 import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApps, HubDevice, HubVoiceSettings, NotifyLevel, TtsVoices, VoiceAdminOverview, VoiceCalibration, WhisperModeSettings } from '../types/api';
 import type {
+  SimConsolidateResponse,
+  SimHarness,
+  SimProblemsResponse,
+  SimScope,
+} from '../types/api';
+import type {
   GardenPlant, GardenSpecies, GardenLocation, GardenProfile,
   GardenTodaySummary, GardenCareLog, GardenCareRule,
   GardenAssignBody, GardenStreaks, GardenNoticeTest, GardenSkylightOptions,
@@ -5568,6 +5574,38 @@ export const api = {
   async trainerBenchmarks(): Promise<TrainerBenchmarks> {
     const resp = await apiClient.get('/api/trainer/benchmarks', { timeout: 30_000 });
     return resp.data;
+  },
+
+  /**
+   * Self-Improvement Memory: the lessons every harness reads. Omitting `scope`
+   * asks for System SIM (admin-filtered) and the caller's User SIM together.
+   */
+  async trainerSimProblems(
+    params: { scope?: SimScope; harness?: SimHarness; status?: string; include_retired?: boolean } = {},
+  ): Promise<SimProblemsResponse> {
+    const resp = await apiClient.get('/api/trainer/sim/problems', {
+      params: {
+        ...(params.scope ? { scope: params.scope } : {}),
+        ...(params.harness ? { harness: params.harness } : {}),
+        ...(params.status ? { status: params.status } : {}),
+        ...(params.include_retired ? { include_retired: true } : {}),
+      },
+    });
+    return { status: 'SUCCESS', count: 0, problems: [], ...resp.data };
+  },
+
+  /** Admin-only: promote portable winners, mark model-specific rules, retire regressions. */
+  async trainerSimConsolidate(): Promise<SimConsolidateResponse> {
+    const resp = await apiClient.post('/api/trainer/sim/consolidate', {}, { timeout: 120_000 });
+    const data = resp.data ?? {};
+    return {
+      status: data.status ?? 'SUCCESS',
+      checked: Number(data.checked ?? 0),
+      updated: Number(data.updated ?? 0),
+      promoted: Array.isArray(data.promoted) ? data.promoted : [],
+      model_specific: Array.isArray(data.model_specific) ? data.model_specific : [],
+      retired: Array.isArray(data.retired) ? data.retired : [],
+    };
   },
 
   /** Teacher traces: imported, scrubbed, and how the local model does on their tasks. */

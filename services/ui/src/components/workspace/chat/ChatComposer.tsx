@@ -70,22 +70,42 @@ export default function ChatComposer({
         </ul>
       )}
 
-      <div role="group" aria-label="Response mode" className="flex gap-1 rounded-lg bg-black/40 p-0.5">
+      <div role="group" aria-label="Harness mode" className="flex gap-1 rounded-lg bg-black/40 p-0.5">
         {ASK_MODES.map((m) => (
           <button
             key={m.id}
             type="button"
             onClick={() => setMode(m.id)}
             aria-pressed={mode === m.id}
-            title={m.blurb}
-            className={`flex-1 rounded-md px-2 text-[11px] font-medium transition-colors ${compact ? 'min-h-8' : 'min-h-9'} ${
+            aria-label={`${m.label}: ${m.blurb}`}
+            title={m.hint}
+            data-testid={`ask-mode-${m.id}`}
+            className={`min-w-0 flex-1 rounded-md px-1.5 text-[11px] font-medium transition-colors sm:px-2 ${compact ? 'min-h-8' : 'min-h-9'} ${
               mode === m.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-white/10 hover:text-slate-200'
             }`}
           >
-            {m.label}
+            <span className="sm:hidden">{m.shortLabel}</span>
+            <span className="hidden truncate sm:inline">{m.label}</span>
           </button>
         ))}
       </div>
+
+      {!compact && (
+        <div
+          className="hidden flex-wrap items-center gap-1.5 text-[10px] leading-tight sm:flex"
+          data-testid="ask-mode-hint"
+        >
+          <span className="text-slate-400">{askModeMeta(mode).hint}</span>
+          {askModeMeta(mode).capabilities.map((capability) => (
+            <span
+              key={capability}
+              className="rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-slate-500"
+            >
+              {capability}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="flex items-end gap-2">
         <textarea
