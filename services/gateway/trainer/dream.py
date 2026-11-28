@@ -19,6 +19,7 @@ from typing import Any
 
 import aiohttp
 
+from services.common.http import get_client
 from services.gateway.config import INTERNAL_SECRET, RAG_SVC
 
 log = logging.getLogger("gateway.trainer.dream")
@@ -69,14 +70,16 @@ async def request(
     a 5xx or a connection failure raises :class:`RagUnavailable`.
     """
     try:
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=timeout)
-        ) as client, client.request(
+        # Reuse the pooled client instead of opening (and closing) a session per
+        # SIM/RAG call; the short keep-alive means a dormant trainer does not
+        # hold a dead connection.
+        async with get_client().request(
             method,
             f"{RAG_SVC}{path}",
             params=params,
             json=body,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=timeout),
         ) as resp:
             text = await resp.text()
             status = resp.status

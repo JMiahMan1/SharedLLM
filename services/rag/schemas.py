@@ -9,10 +9,12 @@ from services.common.rag_collections import canonical_collection
 class SearchRequest(BaseModel):
     """A hybrid dense-vector + BM25 search over one RAG collection.
 
-    ``query`` is bounded because ``_bm25_search`` hands the *entire* query to
-    FTS5 as one quoted phrase, and FTS5's cost for a phrase grows superlinearly
-    with its length. Measured against the production index (4,184 rows) inside
-    a container with a 6 GiB cgroup limit:
+    ``query`` is bounded because ``_bm25_search`` will tokenize it and hand the
+    tokens to FTS5, and a query with thousands of tokens still costs far more
+    than a short one; FTS5 phrase cost also grows superlinearly with length.
+    The measurements below are from the original single-phrase construction,
+    against the production index (4,184 rows) inside a container with a 6 GiB
+    cgroup limit:
 
     ==================  ========  =========
     query length        wall time  memory Δ
@@ -40,9 +42,8 @@ class SearchRequest(BaseModel):
         ...,
         max_length=MAX_QUERY_CHARS,
         description=(
-            "Search text. At most 2000 characters: FTS5 evaluates the query as a "
-            "single phrase and cost grows superlinearly, so a longer query is "
-            "refused instead of being answered from a truncated version."
+            "Search text. At most 2000 characters: a longer query is refused "
+            "instead of being answered from a truncated version."
         ),
     )
     user_id: str = Field(..., description="The user to filter results for")
@@ -60,7 +61,14 @@ class SearchRequest(BaseModel):
             "Drop hits whose cosine similarity to the query is below this. The vector index "
             "always returns its k nearest rows, however unrelated, so without a floor every "
             "collection answers every question. A keyword-index hit is kept whatever its "
-            "similarity: BM25 matched the whole query as a phrase."
+            "similarity: BM25 matched a query token."
+        ),
+    )
+    rerank: bool = Field(
+        default=True,
+        description=(
+            "Re-score the over-fetched hits with the cross-encoder when it is loaded. "
+            "Pass false for an ultra-low-latency probe that can trade accuracy for time."
         ),
     )
 

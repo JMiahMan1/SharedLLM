@@ -127,7 +127,7 @@ def test_a_normal_search_still_validates_on_the_http_path(monkeypatch):
 
     assert resp.status_code != 422, "a realistic query was refused by the bound"
     assert len(seen) == 1, "validation passed but the handler did not embed the query"
-    assert seen[0][0].startswith("What did Macduff")
+    assert seen[0][0].removeprefix("search_query: ").startswith("What did Macduff")
 
     # Either 500 (validation passed, handler then failed on unset globals) or a
     # successful response, but never the 422 that means the bound is too tight.

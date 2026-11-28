@@ -186,7 +186,7 @@ class _FakeSession:
 
 def _rag_answers(monkeypatch, status: int, text: str) -> None:
     monkeypatch.setattr(
-        dream.aiohttp, "ClientSession", lambda **kwargs: _FakeSession(_FakeResponse(status, text))
+        dream, "get_client", lambda: _FakeSession(_FakeResponse(status, text))
     )
 
 

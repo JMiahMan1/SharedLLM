@@ -51,6 +51,11 @@ from services.common.sim_memory import (
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]{2,}")
 
+#: How many rows without a cached vector may be embedded on one query. This
+#: keeps the first query after a migration bounded while still letting the
+#: ledger heal itself instead of requiring an offline backfill job.
+EMBEDDING_BACKFILL_PER_QUERY = 8
+
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create the SIM tables (idempotent; safe on an existing database)."""
@@ -76,17 +81,58 @@ def _json_list(value: Any) -> list[str]:
     return [str(v).strip().lower() for v in loaded if str(v).strip()] if isinstance(loaded, list) else []
 
 
+def _json_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return {str(k): v for k, v in value.items()}
+    if not value:
+        return {}
+    try:
+        loaded = json.loads(str(value))
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return {str(k): v for k, v in loaded.items()}
+
+
 def _json_dump(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+def _embedding_vector(value: Any) -> list[float] | None:
+    """Decode a cached JSON vector, tolerating legacy or corrupt values."""
+    if isinstance(value, (list, tuple)):
+        loaded: Any = value
+    else:
+        if value is None or value == "":
+            return None
+        try:
+            loaded = json.loads(str(value))
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(loaded, (list, tuple)) or not loaded:
+        return None
+    try:
+        return [float(v) for v in loaded]
+    except (TypeError, ValueError):
+        return None
+
+
+def _row_to_dict(
+    row: sqlite3.Row | None, *, include_embedding: bool = False
+) -> dict[str, Any] | None:
     if row is None:
         return None
     item = dict(row)
     for key in ("tags", "verified_models", "regressed_models"):
         item[key] = _json_list(item.get(key))
+    item["family_stats"] = _json_dict(item.get("family_stats"))
     item["requires_admin"] = bool(item.get("requires_admin"))
+    # The vector is an implementation detail used by ``query``; never ship a
+    # 768-float blob in list/history responses.
+    cached = item.pop("embedding", None)
+    if include_embedding and cached:
+        item["_cached_embedding"] = cached
     return item
 
 
@@ -113,6 +159,8 @@ def record(
     model_family: str = "",
     domain: str = "",
     round: int = 0,
+    embedding: Sequence[float] | None = None,
+    embed_fn: Callable[[list[str]], list[list[float]]] | None = None,
 ) -> dict[str, Any]:
     """Record (or regroup) a problem and append an attempt.
 
@@ -150,6 +198,30 @@ def record(
     existing = conn.execute(
         "SELECT * FROM sim_problems WHERE problem_id = ?", [problem_id]
     ).fetchone()
+
+    # Cache the vector for exactly the text retrieval scores. Computing it on
+    # write (rather than re-embedding the whole ledger on every query) is what
+    # keeps SIM queries fast as the table grows.
+    cached_embedding: str | None = None
+    if embedding is not None:
+        cached_embedding = _json_dump([float(value) for value in embedding])
+    elif embed_fn is not None:
+        try:
+            cached_embedding = _json_dump(
+                [float(value) for value in embed_fn([f"{edit_or_rule} {rationale}"])[0]]
+            )
+        except Exception:
+            cached_embedding = None
+    if existing is not None and cached_embedding is None:
+        text_unchanged = (
+            str(existing["edit_or_rule"]) == edit_or_rule
+            and str(existing["rationale"]) == rationale
+        )
+        if text_unchanged:
+            try:
+                cached_embedding = existing["embedding"]
+            except IndexError:  # row predates the embedding column
+                cached_embedding = None
     if existing is None:
         conn.execute(
             """
@@ -158,8 +230,9 @@ def record(
                 rationale, edit_or_rule, predicted_outcome, observed_outcome,
                 outcome_status, status, requires_admin, tags, verified_models,
                 regressed_models, model, model_family, domain, round,
-                retrieval_count, created_at, updated_at, last_used_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                retrieval_count, created_at, updated_at, last_used_at,
+                embedding, family_stats
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             [
                 problem_id, scope, owner, harness, category, signature,
@@ -167,7 +240,7 @@ def record(
                 outcome_status, STATUS_CANDIDATE, int(bool(requires_admin)),
                 _json_dump(clean_tags), _json_dump([]), _json_dump([]),
                 str(model or ""), family, str(domain or ""), int(round or 0),
-                0, now, now, None,
+                0, now, now, None, cached_embedding, _json_dump({}),
             ],
         )
     else:
@@ -185,7 +258,7 @@ def record(
                 model_family = CASE WHEN ? != 'unknown' THEN ? ELSE model_family END,
                 domain = CASE WHEN ? != '' THEN ? ELSE domain END,
                 round = CASE WHEN ? > 0 THEN ? ELSE round END,
-                updated_at = ?
+                embedding = ?, updated_at = ?
             WHERE problem_id = ?
             """,
             [
@@ -197,7 +270,7 @@ def record(
                 family, family,
                 str(domain or ""), str(domain or ""),
                 int(round or 0), int(round or 0),
-                now, problem_id,
+                cached_embedding, now, problem_id,
             ],
         )
     attempt_id = "sim-attempt-" + uuid.uuid4().hex[:16]
@@ -256,6 +329,42 @@ def _derive_status(verified: list[str], regressed: list[str]) -> str:
     return STATUS_CANDIDATE
 
 
+def _family_counts(stats: dict[str, Any], family: str) -> tuple[int, int]:
+    entry = stats.get(family) or {}
+    if not isinstance(entry, dict):
+        return 0, 0
+    return int(entry.get("wins") or 0), int(entry.get("losses") or 0)
+
+
+def _family_is_regressed(wins: int, losses: int) -> bool:
+    """Whether a family's record is bad enough to stop injecting the rule.
+
+    A single regression on a family that has never worked stays decisive (the
+    existing ledger contract). A family with at least two wins is protected
+    from one noisy failure: it takes more losses than wins, or a losing
+    majority, to demote it.
+    """
+    if wins == 0 and losses >= 1:
+        return True
+    if losses >= 2 and losses > wins:
+        return True
+    return losses >= 2 and (losses / (wins + losses)) > 0.5
+
+
+def _families_from_stats(stats: dict[str, Any]) -> tuple[list[str], list[str]]:
+    verified: list[str] = []
+    regressed: list[str] = []
+    for family in stats:
+        wins, losses = _family_counts(stats, family)
+        if wins == 0 and losses == 0:
+            continue
+        if _family_is_regressed(wins, losses):
+            regressed.append(family)
+        elif wins >= 1:
+            verified.append(family)
+    return verified, regressed
+
+
 def record_outcome(
     conn: sqlite3.Connection,
     *,
@@ -311,20 +420,30 @@ def record_outcome(
         )
     verified = _json_list(problem.get("verified_models"))
     regressed = _json_list(problem.get("regressed_models"))
+    stats = _json_dict(problem.get("family_stats"))
+    # Seed the counters from the legacy columns so rows written before
+    # family_stats existed keep their proven/regressed history.
+    for verified_family in verified:
+        stats.setdefault(verified_family, {"wins": 1, "losses": 0})
+    for regressed_family in regressed:
+        stats.setdefault(regressed_family, {"wins": 0, "losses": 2})
     if family != "unknown":
+        entry = stats.setdefault(family, {"wins": 0, "losses": 0})
+        if not isinstance(entry, dict):
+            entry = {"wins": 0, "losses": 0}
+            stats[family] = entry
         if outcome_status == OUTCOME_IMPROVED:
-            if family not in verified:
-                verified.append(family)
-            regressed = [f for f in regressed if f != family]
+            entry["wins"] = int(entry.get("wins") or 0) + 1
         elif outcome_status == OUTCOME_REGRESSED:
-            if family not in regressed:
-                regressed.append(family)
-            verified = [f for f in verified if f != family]
+            entry["losses"] = int(entry.get("losses") or 0) + 1
+    if stats:
+        verified, regressed = _families_from_stats(stats)
     status = _derive_status(verified, regressed)
     conn.execute(
         """
         UPDATE sim_problems SET observed_outcome = ?, outcome_status = ?,
-            verified_models = ?, regressed_models = ?, status = ?,
+            verified_models = ?, regressed_models = ?, family_stats = ?,
+            status = ?,
             model = CASE WHEN ? != '' THEN ? ELSE model END,
             model_family = CASE WHEN ? != 'unknown' THEN ? ELSE model_family END,
             updated_at = ?
@@ -332,7 +451,8 @@ def record_outcome(
         """,
         [
             str(observed_outcome or ""), outcome_status,
-            _json_dump(verified), _json_dump(regressed), status,
+            _json_dump(verified), _json_dump(regressed), _json_dump(stats),
+            status,
             str(model or ""), str(model or ""),
             family, family,
             now, problem_id,
@@ -423,6 +543,7 @@ def query(
     is_admin: bool = False,
     k: int = 8,
     embed_fn: Callable[[list[str]], list[list[float]]] | None = None,
+    query_embedding: Sequence[float] | None = None,
 ) -> list[dict[str, Any]]:
     """Hybrid retrieval over System SIM + exactly this caller's User SIM.
 
@@ -443,19 +564,48 @@ def query(
         """,
         [int(bool(is_admin)), owner],
     ).fetchall()
-    items = [item for row in rows if (item := _row_to_dict(row)) is not None]
+    items = [
+        item
+        for row in rows
+        if (item := _row_to_dict(row, include_embedding=True)) is not None
+    ]
     q_tokens = _tokens(query)
-    if embed_fn is not None and query.strip() and items:
+    q_vec: Sequence[float] | None = query_embedding
+    if q_vec is None and embed_fn is not None and query.strip() and items:
         try:
-            texts = [query] + [f"{item.get('edit_or_rule', '')} {item.get('rationale', '')}" for item in items]
-            vectors = embed_fn(texts)
-            if len(vectors) == len(texts):
+            vectors = embed_fn([query])
+            if vectors:
                 q_vec = vectors[0]
-                for item, vec in zip(items, vectors[1:], strict=False):
-                    item["_embedding"] = max(0.0, _cosine(q_vec, vec))
         except Exception:
             # Embeddings are an optional signal; lexical/tag retrieval is enough.
-            pass
+            q_vec = None
+    if q_vec is not None:
+        for item in items:
+            vector = _embedding_vector(item.pop("_cached_embedding", None))
+            if vector is not None:
+                item["_embedding"] = max(0.0, _cosine(q_vec, vector))
+        # Backfill a bounded number of rows that predate the embedding column
+        # (or were written without an embedder). This is a one-time cost per
+        # row, never a full-table re-embed on every query.
+        missing = [item for item in items if "_embedding" not in item][:EMBEDDING_BACKFILL_PER_QUERY]
+        if missing:
+            try:
+                backfill_vectors = embed_fn(
+                    [f"{item.get('edit_or_rule', '')} {item.get('rationale', '')}" for item in missing]
+                )
+            except Exception:
+                backfill_vectors = []
+            if backfill_vectors and len(backfill_vectors) == len(missing):
+                for item, vector in zip(missing, backfill_vectors, strict=False):
+                    item["_embedding"] = max(0.0, _cosine(q_vec, vector))
+                    conn.execute(
+                        "UPDATE sim_problems SET embedding = ? WHERE problem_id = ?",
+                        [_json_dump([float(value) for value in vector]), item["problem_id"]],
+                    )
+                conn.commit()
+    else:
+        for item in items:
+            item.pop("_cached_embedding", None)
     scored: list[tuple[tuple[int, float, int, int], dict[str, Any]]] = []
     for item in items:
         status = str(item.get("status") or STATUS_CANDIDATE).lower()
@@ -478,10 +628,10 @@ def query(
         lexical = (overlap / max(1, len(q_tokens))) if q_tokens else 0.0
         embedding = max(0.0, float(item.pop("_embedding", 0.0)))
         relevance = lexical * 6.0 + tag_hits * 2.0 + embedding * 4.0
-        # Relevance is the gate; portability is only a tie-breaker. A satellite
-        # turn must never receive a rule with zero lexical/tag/embedding overlap,
-        # however portable that rule happens to be.
-        if q_tokens and relevance <= 0.0 and harness == "satellite":
+        # Relevance is the gate; portability is only a tie-breaker. No harness
+        # may receive a rule with zero lexical/tag/embedding overlap, however
+        # portable that rule happens to be.
+        if q_tokens and relevance <= 0.0:
             continue
         priority = status_priority(item, family)
         matched_flag = 1 if (not q_tokens or relevance > 0.0) else 0
