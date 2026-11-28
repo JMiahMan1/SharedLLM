@@ -91,10 +91,13 @@ def test_every_entity_text_is_embedded_once_in_order(tmp_path):
 
     recorded = _recorded()
     assert len(recorded) == 301
-    assert recorded[0].startswith("Device:")
-    assert recorded[1].startswith("Device:")
-    assert recorded[299].startswith("Device:")
-    assert recorded[-1].startswith("Last home hub sync (homehub) for default")
+    # nomic-embed-text documents carry the task prefix; the entity text itself
+    # must still arrive once, in order, immediately after it.
+    documents = [text.removeprefix("search_document: ") for text in recorded]
+    assert documents[0].startswith("Device:")
+    assert documents[1].startswith("Device:")
+    assert documents[299].startswith("Device:")
+    assert documents[-1].startswith("Last home hub sync (homehub) for default")
 
 
 def test_a_small_sync_still_lands_in_one_batch(tmp_path):

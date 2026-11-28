@@ -131,6 +131,34 @@ async def test_an_unrouted_question_sends_no_search_at_all(hub):
     assert sections == {}
 
 
+async def test_parallel_searches_keep_the_collection_order(monkeypatch, hub):
+    """I/O runs concurrently, but prompt sections stay in routing order."""
+    import asyncio
+
+    class SlowSession(_Session):
+        async def post(self, url, json=None, **kwargs):
+            if url.endswith("/rag/search"):
+                coll = json["collection_name"]
+                # The first collection answers slowest, so a completion-order
+                # implementation would put it last.
+                await asyncio.sleep(0.05 if coll == "home_devices" else 0.0)
+            return await super().post(url, json=json, **kwargs)
+
+    session = SlowSession({
+        "home_devices": [_hit("FIRST-MARKER device")],
+        "nextcloud_files": [_hit("SECOND-MARKER file")],
+    })
+    monkeypatch.setattr(
+        orchestrator, "_collections_for_query",
+        lambda *a, **k: ["home_devices", "nextcloud_files"],
+    )
+    with patch("services.gateway.main.shared_http_client", return_value=session):
+        context = await orchestrator._fetch_rag_context(
+            "turn on the porch light", "u", None, include_curriculum=False,
+        )
+    assert context.index("FIRST-MARKER") < context.index("SECOND-MARKER")
+
+
 async def test_each_search_asks_for_a_few_hits_above_the_floor(hub):
     session = _Session({"home_devices": [_hit("Device: Porch Light (ID: light.porch)")]})
     await _fetch(session, "turn on the porch light")

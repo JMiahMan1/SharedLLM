@@ -9,7 +9,7 @@ import re
 import shlex
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, cast
 
@@ -17,7 +17,6 @@ import aiohttp
 import redis.asyncio as redis
 
 from services.common.backend_health import BackendUnavailable, is_unreachable
-from services.common.http import INTERNAL_KEEPALIVE_S
 from services.gateway import local_ai
 from services.gateway.artifacts import create_artifact as create_artifact_record
 from services.gateway.config import (
@@ -33,14 +32,14 @@ from services.gateway.config import (
     STORAGE_SVC,
     WORKSPACE_RUNTIME_SVC,
 )
-from services.gateway.mission_discipline import Discipline
+from services.gateway.http_client import get_http_client, shared_http_client
 from services.gateway.llm_providers import (
     BaseLLMProvider,
     StreamingThinkingFilter,
     get_provider,
     strip_thinking_blocks,
 )
-from services.gateway.http_client import get_http_client, shared_http_client
+from services.gateway.mission_discipline import Discipline
 from services.gateway.prompts import PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION, load_prompt
 from services.gateway.schemas import ResolvedCredentials
 from services.gateway.studio import actions as studio_actions
@@ -3388,8 +3387,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     exec_data = None
     ans = ""
     successful_tool_calls = 0
-    # SIM: a tool error awaiting a successful retry (the correction is the lesson).
-    _sim_pending_tool_error: tuple[str, str] | None = None
+    # SIM: a tool error awaiting a successful retry (the correction is the
+    # lesson). The third item is the rejected payload, so the recovery can
+    # record the concrete argument-key/shape difference.
+    _sim_pending_tool_error: tuple[str, str, Any] | None = None
     # Queue of tool calls remaining from a batched inference (a proven command
     # chain). One LLM inference can enqueue many steps; each subsequent turn runs
     # one queued step WITHOUT a new inference, so the whole chain costs a single
@@ -5593,6 +5594,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                     error=_sim_pending_tool_error[1],
                                     model=selected_model,
                                     query=query,
+                                    failed_args=_sim_pending_tool_error[2],
+                                    working_args=payload,
                                 )
                             except Exception as e:
                                 log.debug(f"[AgentLoop] SIM tool recovery skipped: {e}")
@@ -5643,6 +5646,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                     _sim_pending_tool_error = (
                                         str(action or lookup_action or "tool"),
                                         lint_feedback,
+                                        payload,
                                     )
                                     # Retroactively un-count this write: it produced lint
                                     # errors so it is not a successful tool execution.
@@ -5667,6 +5671,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             _sim_pending_tool_error = (
                                 str(action or lookup_action or "tool"),
                                 str(exec_data.get("message") or exec_data.get("error") or error_digest(exec_data)),
+                                payload,
                             )
                         if len(_recent_actions) > 12:
                             _recent_actions = _recent_actions[-12:]
@@ -6083,10 +6088,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         try:
             from services.gateway.trainer import sim as sim_mem
 
+            # Real failure signals only. A finished answer that says "fixed the
+            # failing test" or explains an error is a success, not a regression.
             _failed = bool(
-                (isinstance(exec_data, dict) and exec_data.get("status") == "ERROR")
-                or str(ans or "").strip().lower().startswith("error")
-                or re.search(r"\b(failed|could not|unable to|cannot)\b", str(ans or "").lower())
+                (isinstance(exec_data, dict) and exec_data.get("status") in ("ERROR", "LINT_ERRORS"))
+                or not str(ans or "").strip()
+                or sim_mem.looks_like_tool_error(ans)
             )
             await sim_mem.record_injected_outcomes(
                 sim_items,

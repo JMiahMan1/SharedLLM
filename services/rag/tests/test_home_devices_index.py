@@ -187,7 +187,8 @@ def test_a_moved_row_is_not_re_embedded_by_the_next_sync(conn):
 
     _sync({"entities": [_entity("light.porch", area_id="Porch")], "source": "homehub"}, user_id="sam")
 
-    assert len(embedded) == 1 and embedded[0].startswith("Last home hub sync")
+    assert len(embedded) == 1
+    assert embedded[0].removeprefix("search_document: ").startswith("Last home hub sync")
 
 
 def test_the_old_name_still_finds_the_devices(conn):
