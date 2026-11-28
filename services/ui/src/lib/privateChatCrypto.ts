@@ -108,6 +108,8 @@ export type PrivatePayload =
   | { t: 'text'; text: string; preview?: LinkPreview; quote?: Quote }
   /** `sent_at` / `taken_at` are seconds since the epoch, inside the encryption (older pictures have neither). */
   | { t: 'image'; blob: string; mime: string; name?: string; caption?: string; sent_at?: number; taken_at?: number; sha256?: string }
+  /** A voice note recorded in the chat: one encrypted blob, played in place. */
+  | AudioPayload
   /**
    * A picture added straight to the gallery (never a chat message): kept as a
    * sealed gallery entry, not in the thread. The original bytes are in the blob
@@ -215,6 +217,26 @@ export interface VideoPayload {
   name?: string;
   sent_at?: number;
   taken_at?: number;
+}
+
+/**
+ * A voice note recorded in the chat. One encrypted blob, like a picture: the
+ * server sees the blob id and nothing about what was said. `duration` is what
+ * the recorder measured (absent for an app that could not).
+ */
+export interface AudioPayload {
+  t: 'audio';
+  /** The encrypted blob holding the recording. */
+  blob: string;
+  /** One of AUDIO_TYPES (parameters such as `;codecs=opus` are dropped): how it is played. */
+  mime: string;
+  /** Length in seconds, from the recorder. */
+  duration?: number;
+  name?: string;
+  caption?: string;
+  sent_at?: number;
+  taken_at?: number;
+  sha256?: string;
 }
 
 export interface AddedPicture {
@@ -533,6 +555,7 @@ export async function openMessage(key: CryptoKey, raw: string | null | undefined
     }
     if (payload?.t === 'added' && typeof payload.blob === 'string' && typeof payload.mime === 'string') return readAdded(payload, stamp);
     if (payload?.t === 'video') return readVideo(payload, stamp);
+    if (payload?.t === 'audio') return readAudio(payload as unknown as Record<string, unknown>, stamp);
     if (payload?.t === 'comment' && typeof payload.blob === 'string' && typeof payload.text === 'string' && payload.text.trim()) {
       const sentAt = stamp(payload.sent_at);
       return { t: 'comment', blob: payload.blob, text: payload.text, ...(sentAt ? { sent_at: sentAt } : {}) };
@@ -621,6 +644,35 @@ function isSha256(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 }
 
+/** The longest voice note the chat will accept, in seconds (a day: a recording that long is a mistake). */
+export const MAX_AUDIO_SECONDS = 86_400;
+
+/**
+ * A voice note, or null when it is not the right shape. The type is checked
+ * against its base form, so a recorder that says `audio/webm;codecs=opus` is
+ * accepted and stored as `audio/webm`: a parameter is a hint about the codec,
+ * not a different kind of file, and the player is told the clean type.
+ */
+function readAudio(raw: Record<string, unknown>, stamp: (value: unknown) => number | undefined): AudioPayload | null {
+  if (typeof raw.blob !== 'string' || !BLOB_ID.test(raw.blob)) return null;
+  if (typeof raw.mime !== 'string') return null;
+  const mime = audioBaseType(raw.mime);
+  if (!AUDIO_TYPES.has(mime)) return null;
+  const out: AudioPayload = { t: 'audio', blob: raw.blob, mime };
+  const duration = raw.duration;
+  if (typeof duration === 'number' && Number.isFinite(duration) && duration > 0) {
+    out.duration = Math.min(Math.floor(duration), MAX_AUDIO_SECONDS);
+  }
+  if (typeof raw.name === 'string' && raw.name) out.name = raw.name.slice(0, 500);
+  if (typeof raw.caption === 'string' && raw.caption) out.caption = raw.caption.slice(0, 2000);
+  const sentAt = stamp(raw.sent_at);
+  const takenAt = stamp(raw.taken_at);
+  if (sentAt) out.sent_at = sentAt;
+  if (takenAt) out.taken_at = takenAt;
+  if (isSha256(raw.sha256)) out.sha256 = raw.sha256;
+  return out;
+}
+
 /** An added picture's entry, keeping only fields of the right shape. */
 function readAdded(raw: AddedPicture, stamp: (value: unknown) => number | undefined): AddedPicture {
   const text = (value: unknown, max = 500) => (typeof value === 'string' && value ? value.slice(0, max) : undefined);
@@ -665,6 +717,40 @@ export async function decryptBytes(key: CryptoKey, data: Uint8Array<ArrayBuffer>
 
 /** Only these picture types are shown (decrypted into an object URL of that type). */
 export const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif']);
+
+// --- Voice notes ----------------------------------------------------------------
+
+/**
+ * The audio types a voice note may carry. A recorder reports what the browser
+ * actually made (`audio/webm;codecs=opus` on Android, `audio/mp4` on iOS), so
+ * the type is compared and stored without its parameters.
+ */
+export const AUDIO_TYPES = new Set([
+  'audio/webm',
+  'audio/ogg',
+  'audio/mp4',
+  'audio/mpeg',
+  'audio/wav',
+  'audio/aac',
+  'audio/3gpp',
+  'audio/x-m4a',
+]);
+
+/** The type without its parameters, lower-cased: `Audio/WebM; codecs=opus` is `audio/webm`. */
+export function audioBaseType(mime: string): string {
+  const base = String(mime || '').split(';')[0].trim().toLowerCase();
+  // Some Androids report the OGG family as `application/ogg`, and a few recorders as `audio/opus`.
+  if (base === 'application/ogg') return 'audio/ogg';
+  if (base === 'audio/opus') return 'audio/ogg';
+  if (base === 'audio/x-wav' || base === 'audio/wave') return 'audio/wav';
+  if (base === 'audio/m4a') return 'audio/x-m4a';
+  return base;
+}
+
+/** Whether a recording can be sent: its base type is one the player is told to expect. */
+export function isAudioMime(mime: string): boolean {
+  return AUDIO_TYPES.has(audioBaseType(mime));
+}
 
 // --- Video clips ----------------------------------------------------------------
 
@@ -889,11 +975,17 @@ export class PrivateVault {
     return decryptBytes(this.need(), data);
   }
 
-  /** A decrypted picture as an object URL, revoked on lock. */
+  /**
+   * A decrypted picture or voice note as an object URL, revoked on lock. The
+   * type is kept only when it is one we expect: an unknown type would be handed
+   * to a player that cannot use it, and `application/octet-stream` at least
+   * says so instead of guessing.
+   */
   async pictureUrl(data: Uint8Array<ArrayBuffer>, mime: string): Promise<string> {
     const plain = await decryptBytes(this.need(), data);
     if (!this.key) throw new Error('The chat is locked.');
-    const url = URL.createObjectURL(new Blob([plain], { type: IMAGE_TYPES.has(mime) ? mime : 'application/octet-stream' }));
+    const type = IMAGE_TYPES.has(mime) ? mime : isAudioMime(mime) ? audioBaseType(mime) : 'application/octet-stream';
+    const url = URL.createObjectURL(new Blob([plain], { type }));
     this.urls.add(url);
     return url;
   }

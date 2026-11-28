@@ -361,6 +361,43 @@ function KeepsakePicture({ keepsake, blob, mime, alt }: { keepsake: Keepsake; bl
   return <img src={url} alt={alt} className="mt-1 max-h-80 w-auto max-w-full rounded-lg object-contain" data-testid="keepsake-picture" {...noSave} />;
 }
 
+/** One encrypted voice note from the backup, played here and forgotten when it leaves. */
+function KeepsakeVoice({ keepsake, payload }: { keepsake: Keepsake; payload: Record<string, unknown> }) {
+  const blob = typeof payload.blob === 'string' ? payload.blob : '';
+  const data = keepsake.blobs.get(blob);
+  const mime = typeof payload.mime === 'string' ? payload.mime : '';
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    let made: string | null = null;
+    if (!data) return;
+    void decryptBlob(keepsake.key, data)
+      .then((plain) => {
+        if (!live) return;
+        made = URL.createObjectURL(new Blob([plain], { type: pictureType(mime) }));
+        setUrl(made);
+      })
+      .catch(() => live && setFailed(true));
+    return () => {
+      live = false;
+      if (made) URL.revokeObjectURL(made);
+    };
+  }, [keepsake, data, mime]);
+  if (failed || !data) return <p className="text-xs italic text-slate-400">This voice note is not in the backup.</p>;
+  const length = typeof payload.duration === 'number' && payload.duration > 0 ? ` (${Math.round(payload.duration)} s)` : '';
+  const caption = typeof payload.caption === 'string' ? payload.caption : '';
+  return (
+    <div>
+      {url
+        ? <audio src={url} controls controlsList="nodownload noplaybackrate" preload="metadata" className="mt-1 w-full max-w-sm" data-testid="keepsake-voice" {...noSave} />
+        : <div className="h-12 w-full max-w-sm animate-pulse rounded-lg bg-white/5" aria-label="Opening voice note" />}
+      <p className="mt-1 text-xs text-slate-400">Voice note{length}</p>
+      {caption && <p className="mt-1 whitespace-pre-wrap break-words text-sm text-white">{caption}</p>}
+    </div>
+  );
+}
+
 function KeepsakeClip({ keepsake, payload }: { keepsake: Keepsake; payload: Record<string, unknown> }) {
   const [url, setUrl] = useState<string | null>(null);
   const [state, setState] = useState<'idle' | 'opening' | 'failed'>('idle');
@@ -410,6 +447,7 @@ function MessageBody({ keepsake, message }: { keepsake: Keepsake; message: Keeps
     );
   }
   if (p.t === 'video') return <KeepsakeClip keepsake={keepsake} payload={p} />;
+  if (p.t === 'audio' && typeof p.blob === 'string') return <KeepsakeVoice keepsake={keepsake} payload={p} />;
   return <p className="text-sm italic text-slate-400">Something this version cannot show.</p>;
 }
 
@@ -552,7 +590,9 @@ function KeepsakeView({
               {keepsake.gallery.length === 0 && <p className="col-span-full text-sm text-slate-400">No pictures added straight to the gallery.</p>}
               {keepsake.gallery.map((item) => (
                 <figure key={item.id} className="min-w-0 rounded-xl border border-white/10 bg-white/[0.04] p-1.5">
-                  <KeepsakePicture keepsake={keepsake} blob={item.payload.blob} mime={item.payload.mime} alt={String(item.payload.name || 'Picture')} />
+                  {item.payload.t === 'audio'
+                    ? <KeepsakeVoice keepsake={keepsake} payload={item.payload as unknown as Record<string, unknown>} />
+                    : <KeepsakePicture keepsake={keepsake} blob={item.payload.blob} mime={item.payload.mime} alt={String(item.payload.name || 'Picture')} />}
                   <figcaption className="mt-1 truncate text-xs text-slate-400">
                     {dayLabel(typeof item.payload.taken_at === 'number' ? item.payload.taken_at : item.at)}
                   </figcaption>

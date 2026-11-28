@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Check, CheckSquare, ImageMinus, ImagePlus, Images, Loader2, MessageSquare, Play, Trash2, X } from 'lucide-react';
+import { Check, CheckSquare, ImageMinus, ImagePlus, Images, Loader2, MessageSquare, Mic, Play, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { isSealedMessage, type PrivateVault } from '../../lib/privateChatCrypto';
@@ -114,9 +114,13 @@ export default function PrivateGallery({
   const items = useMemo(() => withEdits(inGallery(everything, membership.members), edits), [everything, membership.members, edits]);
   const [filter, setFilter] = useState<GalleryFilter>('all');
   const videoCount = useMemo(() => items.filter((item) => item.video).length, [items]);
+  const audioCount = useMemo(() => items.filter((item) => item.audio).length, [items]);
+  const photoCount = items.length - videoCount - audioCount;
   // A filter with nothing left in it falls back to everything.
   const effectiveFilter: GalleryFilter =
-    (filter === 'videos' && videoCount === 0) || (filter === 'photos' && videoCount === items.length) ? 'all' : filter;
+    (filter === 'videos' && videoCount === 0) || (filter === 'photos' && photoCount === 0) || (filter === 'audio' && audioCount === 0)
+      ? 'all'
+      : filter;
   const shown = useMemo(() => filterGallery(items, effectiveFilter), [items, effectiveFilter]);
   const days = useMemo(() => groupByDay(shown), [shown]);
   const [chosen, setChosen] = useState<string | undefined>(initialBlob);
@@ -245,7 +249,8 @@ export default function PrivateGallery({
   const editGate = usePhotoEditGate({ maxBytes: MAX_ATTACHMENT_BYTES, doneLabel: 'Save', asIsLabel: 'Use the original' });
   const [editBusy, setEditBusy] = useState('');
   const editPicture = async (item: GalleryItem) => {
-    if (item.video || editBusy) return;
+    // Only pictures are edited: a clip and a voice note have nothing to re-render.
+    if (item.video || item.audio || editBusy) return;
     setEditBusy(item.blob);
     let source: Blob;
     let recipe: EditRecipe | null;
@@ -308,8 +313,10 @@ export default function PrivateGallery({
 
   const filters: Array<{ value: GalleryFilter; label: string; count: number }> = [
     { value: 'all', label: 'All', count: items.length },
-    { value: 'photos', label: 'Photos', count: items.length - videoCount },
+    { value: 'photos', label: 'Photos', count: photoCount },
     { value: 'videos', label: 'Videos', count: videoCount },
+    // Only offered when there is one, so a chat of pictures is not cluttered with an empty tab.
+    ...(audioCount ? [{ value: 'audio' as GalleryFilter, label: 'Audio', count: audioCount }] : []),
   ];
 
   return (
@@ -700,7 +707,8 @@ function Tile({
   // A gallery can hold years of pictures: only the ones near the screen are fetched and decrypted.
   const [ref, near] = useNearScreen<HTMLButtonElement>();
   const shown = shownPicture(item);
-  const { url, failed } = usePrivatePicture(token, shown.blob, shown.mime, vault, near);
+  // A voice note has no picture to decode: its tile is drawn, and nothing is fetched until it is played.
+  const { url, failed } = usePrivatePicture(token, shown.blob, shown.mime, vault, near && !item.audio);
   const [loadedUrl, setLoadedUrl] = useState('');
   const loaded = Boolean(url) && loadedUrl === url;
   const when = item.entryId ? `taken ${stampLabel(item.when)}` : stampLabel(item.at);
@@ -730,7 +738,7 @@ function Tile({
       onPointerLeave={() => window.clearTimeout(holdTimer.current)}
       onPointerCancel={() => window.clearTimeout(holdTimer.current)}
       onContextMenu={(event) => event.preventDefault()}
-      aria-label={`${item.video ? 'Video' : 'Photo'} from ${item.actorName || 'the chat'}, ${when}${item.edit ? ', edited' : ''}${item.video?.duration ? `, ${formatDuration(item.video.duration)}` : ''}${item.comments.length ? `, ${item.comments.length} comments` : ''}`}
+      aria-label={`${item.video ? 'Video' : item.audio ? 'Voice note' : 'Photo'} from ${item.actorName || 'the chat'}, ${when}${item.edit ? ', edited' : ''}${item.video?.duration ? `, ${formatDuration(item.video.duration)}` : ''}${item.audio?.duration ? `, ${formatDuration(item.audio.duration)}` : ''}${item.comments.length ? `, ${item.comments.length} comments` : ''}`}
       aria-pressed={selecting ? selected : undefined}
       style={{ flex: `${fill ? 1 : 0} 1 ${width}px`, backgroundColor: placeholderTint(item.blob) }}
       className={`group relative block h-full min-w-0 overflow-hidden rounded-md transition-transform duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 ${
@@ -740,14 +748,31 @@ function Tile({
       data-blob={item.blob}
       data-edited={item.edit ? 'true' : undefined}
     >
-      {!loaded && !failed && (
+      {!loaded && !failed && !item.audio && (
         <span
           className="absolute inset-0 motion-safe:animate-[pg-shimmer_1.6s_linear_infinite]"
           style={{ backgroundImage: 'linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.08) 50%, transparent 70%)', backgroundSize: '200% 100%' }}
           aria-hidden
         />
       )}
-      {url ? (
+      {item.audio ? (
+        <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/20 p-2 text-white" data-testid="private-gallery-audio-tile">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/40 ring-1 ring-white/30" aria-hidden>
+            <Mic size={15} />
+          </span>
+          {/* A flat line of bars: a waveform would claim to be this recording's, which was never decoded. */}
+          <span className="flex h-3 items-end gap-[2px]" aria-hidden>
+            {[3, 6, 4, 8, 5, 9, 4, 7, 3, 6].map((height, index) => (
+              <span key={index} className="w-[2px] rounded-full bg-white/60" style={{ height: `${height}px` }} />
+            ))}
+          </span>
+          {(item.audio.duration ?? 0) > 0 && (
+            <span className="text-[10px] font-semibold tabular-nums drop-shadow" data-testid="private-gallery-audio-duration">
+              {formatDuration(item.audio.duration ?? 0)}
+            </span>
+          )}
+        </span>
+      ) : url ? (
         <img
           src={url}
           alt=""

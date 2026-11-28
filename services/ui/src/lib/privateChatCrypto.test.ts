@@ -21,6 +21,10 @@ import {
   toBase64,
   unlockKey,
   WrongPasswordError,
+  AUDIO_TYPES,
+  audioBaseType,
+  isAudioMime,
+  MAX_AUDIO_SECONDS,
   type ChatKeyInfo,
   type PasswordChangeBody,
   type PrivatePayload,
@@ -361,4 +365,89 @@ describe('a text message with a link preview', () => {
     } as unknown as PrivatePayload);
     expect(await openMessage(key, sneaky)).toEqual({ t: 'text', text: 'hi', preview: { url: 'https://example.com', title: 'x', kind: 'link' } });
   }, 30_000);
+});
+
+describe('a voice note', () => {
+  const BLOB = 'a'.repeat(32);
+
+  it('round-trips and keeps its length, caption and hash', async () => {
+    const made = await newChatSecrets('nine nine nine nine');
+    const sha = 'b'.repeat(64);
+    const wire = await sealMessage(made.key, {
+      t: 'audio', blob: BLOB, mime: 'audio/webm', duration: 12.7, caption: 'listen to this', name: 'voice-note.webm', sha256: sha,
+    });
+    expect(await openMessage(made.key, wire)).toEqual({
+      t: 'audio', blob: BLOB, mime: 'audio/webm', duration: 12, caption: 'listen to this', name: 'voice-note.webm', sha256: sha,
+    });
+  }, 60_000);
+
+  it('plays a recorder\'s parameterised type as its base type', () => {
+    expect(audioBaseType('audio/webm;codecs=opus')).toBe('audio/webm');
+    expect(audioBaseType('Audio/OGG; codecs=opus')).toBe('audio/ogg');
+    expect(audioBaseType('application/ogg')).toBe('audio/ogg');
+    expect(audioBaseType('audio/opus')).toBe('audio/ogg');
+    expect(audioBaseType('audio/x-wav')).toBe('audio/wav');
+    expect(audioBaseType('audio/m4a')).toBe('audio/x-m4a');
+    expect(isAudioMime('audio/webm;codecs=opus')).toBe(true);
+    // A video is not a voice note, whatever a name claims.
+    expect(isAudioMime('video/mp4')).toBe(false);
+    expect(isAudioMime('audio/mp4')).toBe(true);
+    for (const type of ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/aac', 'audio/3gpp', 'audio/x-m4a']) {
+      expect(AUDIO_TYPES.has(type)).toBe(true);
+    }
+  });
+
+  it('opens what another phone recorded with its codec parameters', async () => {
+    const made = await newChatSecrets('ten ten ten ten');
+    const wire = await sealMessage(made.key, { t: 'audio', blob: BLOB, mime: 'audio/webm;codecs=opus' } as unknown as PrivatePayload);
+    expect(await openMessage(made.key, wire)).toEqual({ t: 'audio', blob: BLOB, mime: 'audio/webm' });
+  }, 60_000);
+
+  it('refuses a type it cannot play, a blob id that is not one, and a bad hash', async () => {
+    const made = await newChatSecrets('eleven eleven eleven');
+    const bad = async (payload: Record<string, unknown>) =>
+      openMessage(made.key, await sealMessage(made.key, { t: 'audio', blob: BLOB, ...payload } as unknown as PrivatePayload));
+    expect(await bad({ mime: 'video/mp4' })).toBeNull();
+    expect(await bad({ mime: 'application/pdf' })).toBeNull();
+    expect(await bad({ mime: 'audio/webm', blob: 'not-a-blob' })).toBeNull();
+    expect(await bad({ mime: 'audio/webm', sha256: 'nope' })).toEqual({ t: 'audio', blob: BLOB, mime: 'audio/webm' });
+  }, 60_000);
+
+  it('bounds a length, a name and a caption nobody sane sent', async () => {
+    const made = await newChatSecrets('twelve twelve twelve');
+    const wire = await sealMessage(made.key, {
+      t: 'audio', blob: BLOB, mime: 'audio/webm', duration: 10 * 24 * 3600, name: 'n'.repeat(900), caption: 'c'.repeat(5000),
+    });
+    const opened = (await openMessage(made.key, wire)) as Extract<PrivatePayload, { t: 'audio' }>;
+    expect(opened.duration).toBe(MAX_AUDIO_SECONDS);
+    expect(opened.name).toHaveLength(500);
+    expect(opened.caption).toHaveLength(2000);
+  }, 60_000);
+
+  it('ignores a length that is not a positive number', async () => {
+    const made = await newChatSecrets('thirteen thirteen');
+    for (const duration of [-4, 0, Number.NaN, Infinity, '9']) {
+      const wire = await sealMessage(made.key, { t: 'audio', blob: BLOB, mime: 'audio/webm', duration } as unknown as PrivatePayload);
+      expect(await openMessage(made.key, wire)).toEqual({ t: 'audio', blob: BLOB, mime: 'audio/webm' });
+    }
+  }, 60_000);
+
+  it('gives an audio blob a playable URL type, not a download', async () => {
+    const made = await newChatSecrets('fourteen fourteen');
+    const vault = new PrivateVault();
+    expect(await vault.unlock('fourteen fourteen', v2Info(made))).toBe(true);
+    const sealed = await encryptBytes(made.key, new Uint8Array([1, 2, 3]));
+    const made2: Blob[] = [];
+    const spy = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      made2.push(blob as Blob);
+      return 'blob:voice-note';
+    });
+    const url = await vault.pictureUrl(sealed, 'audio/webm;codecs=opus');
+    spy.mockRestore();
+    expect(url).toBe('blob:voice-note');
+    // A player reads the type from the blob: without it the browser downloads the note instead.
+    expect(made2[0].type).toBe('audio/webm');
+    expect(new Uint8Array(await made2[0].arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+    vault.lock();
+  }, 60_000);
 });

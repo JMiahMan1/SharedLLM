@@ -62,6 +62,34 @@
     return holder;
   }
 
+  /**
+   * A voice note from the encrypted blob, played in the page. Its type comes
+   * from the payload so the browser plays it rather than saving a download.
+   */
+  async function voiceNote(keepsake, payload) {
+    const holder = el('div');
+    const blob = keepsake.blobs.get(payload.blob);
+    if (!blob) {
+      holder.appendChild(el('p', { class: 'gone', text: 'Voice note not in the backup' }));
+      return holder;
+    }
+    try {
+      const plain = await decryptBlob(keepsake.key, blob);
+      const url = URL.createObjectURL(new Blob([plain], { type: pictureType(payload.mime) }));
+      urls.push(url);
+      const audio = el('audio', { src: url, controls: '', playsinline: '', preload: 'metadata' });
+      audio.style.maxWidth = '100%';
+      audio.setAttribute('controlsList', 'nodownload');
+      holder.appendChild(audio);
+      const length = typeof payload.duration === 'number' && payload.duration > 0 ? `${Math.round(payload.duration)} s` : '';
+      holder.appendChild(el('div', { class: 'who', text: `Voice note${length ? ` (${length})` : ''}` }));
+      if (payload.caption) holder.appendChild(el('p', { text: String(payload.caption) }));
+    } catch {
+      holder.appendChild(el('p', { class: 'gone', text: 'This voice note could not be opened' }));
+    }
+    return holder;
+  }
+
   async function clip(keepsake, payload) {
     const holder = el('div');
     if (payload.poster) holder.appendChild(await picture(keepsake, payload.poster, 'image/jpeg', 'Video'));
@@ -93,6 +121,7 @@
       return box;
     }
     if (p.t === 'video') return clip(keepsake, p);
+    if (p.t === 'audio') return voiceNote(keepsake, p);
     if (p.t === 'comment') return el('p', { text: `On a picture: ${p.text}` });
     return el('p', { class: 'gone', text: 'Something this page cannot show' });
   }
@@ -128,8 +157,13 @@
       main.appendChild(el('h2', { text: `Gallery (${keepsake.gallery.length})` }));
       const grid = el('div', { class: 'grid' });
       for (const item of keepsake.gallery) {
-        const tile = el('div', { class: 'pic' }, [await picture(keepsake, item.payload.blob, item.payload.mime, item.payload.name)]);
-        tile.appendChild(el('div', { class: 'who', text: `${item.payload.name || ''} ${when(item.payload.taken_at || item.at, false)}`.trim() }));
+        const kept = item.payload;
+        const tile = el('div', { class: 'pic' }, [
+          kept.t === 'audio'
+            ? await voiceNote(keepsake, kept)
+            : await picture(keepsake, kept.blob, kept.mime, kept.name),
+        ]);
+        tile.appendChild(el('div', { class: 'who', text: `${kept.name || ''} ${when(kept.taken_at || item.at, false)}`.trim() }));
         grid.appendChild(tile);
       }
       main.appendChild(grid);

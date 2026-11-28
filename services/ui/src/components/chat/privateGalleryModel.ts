@@ -9,6 +9,7 @@ import type { EditRecipe } from '../../lib/photoEdit/recipe';
 import {
   MAX_GALLERY_MARK_BLOBS,
   type AddedPicture,
+  type AudioPayload,
   type GalleryEdit,
   type GalleryMark,
   type GalleryStart,
@@ -33,6 +34,8 @@ export interface GalleryItem {
   messageId: number;
   /** A video clip sent in the chat: `blob` is then its poster frame (what the tile shows and comments name). */
   video?: VideoPayload;
+  /** A voice note sent in the chat: `blob` is the recording itself. */
+  audio?: AudioPayload;
   /** The gallery entry, for a picture added straight to the gallery. */
   entryId?: string;
   blob: string;
@@ -149,6 +152,24 @@ export function buildGallery(
         actorName,
         comments: [],
       });
+    } else if (payload.t === 'audio') {
+      // A voice note is one blob, placed by when it was sent, like a picture.
+      const at = seconds(payload.sent_at) ?? talkAt;
+      items.set(payload.blob, {
+        messageId: message.id,
+        audio: payload,
+        blob: payload.blob,
+        mime: payload.mime,
+        ...(payload.name ? { name: payload.name } : {}),
+        ...(payload.caption ? { caption: payload.caption } : {}),
+        at,
+        ...(seconds(payload.taken_at) ? { takenAt: seconds(payload.taken_at) } : {}),
+        when: at,
+        own,
+        actorName,
+        comments: [],
+        ...(payload.sha256 ? { sha256: payload.sha256 } : {}),
+      });
     } else if (payload.t === 'comment') {
       comments.push({ blob: payload.blob, messageId: message.id, text: payload.text, at: seconds(payload.sent_at) ?? talkAt, own, actorName });
     }
@@ -186,19 +207,23 @@ export function buildGallery(
   return list.sort((a, b) => b.when - a.when || b.messageId - a.messageId || (b.entryId ?? '').localeCompare(a.entryId ?? ''));
 }
 
-/** The encrypted blobs a gallery item is made of (what deleting it deletes): a picture's one, or a clip's pieces and poster. */
+/** The encrypted blobs a gallery item is made of (what deleting it deletes): a picture's or voice note's one, or a clip's pieces and poster. */
 export function itemBlobs(item: GalleryItem): string[] {
   return item.video ? [...item.video.chunks, item.video.poster] : [item.blob];
 }
 
-/** "3 photos", "1 video", "3 photos, 2 videos". */
+/** "3 photos", "1 video", "3 photos, 2 videos, 1 voice note". */
 export function countLabel(items: GalleryItem[]): string {
   const videos = items.filter((item) => item.video).length;
-  const photos = items.length - videos;
+  const notes = items.filter((item) => item.audio).length;
+  const photos = items.length - videos - notes;
   const word = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
-  if (!videos) return word(photos, 'photo');
-  if (!photos) return word(videos, 'video');
-  return `${word(photos, 'photo')}, ${word(videos, 'video')}`;
+  const parts: string[] = [];
+  if (photos) parts.push(word(photos, 'photo'));
+  if (videos) parts.push(word(videos, 'video'));
+  if (notes) parts.push(word(notes, 'voice note'));
+  // An empty gallery still says what it is a gallery of, so the heading is never blank.
+  return parts.join(', ') || '0 photos';
 }
 
 /** The gallery by day, newest day first, each labelled like the chat's day separators. */
@@ -219,12 +244,13 @@ export function stampLabel(at: number): string {
   return new Date(at * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-/** What the gallery is showing: everything, only photos, or only videos. */
-export type GalleryFilter = 'all' | 'photos' | 'videos';
+/** What the gallery is showing: everything, only photos, only videos, or only voice notes. */
+export type GalleryFilter = 'all' | 'photos' | 'videos' | 'audio';
 
 export function filterGallery(items: GalleryItem[], filter: GalleryFilter): GalleryItem[] {
-  if (filter === 'photos') return items.filter((item) => !item.video);
+  if (filter === 'photos') return items.filter((item) => !item.video && !item.audio);
   if (filter === 'videos') return items.filter((item) => item.video);
+  if (filter === 'audio') return items.filter((item) => item.audio);
   return items;
 }
 
@@ -397,7 +423,7 @@ interface Sent {
   blob: string;
   /** When the server got it (seconds); undefined for one not stored yet. */
   at?: number;
-  /** A clip, or a picture that can never animate (JPEG, HEIC). */
+  /** A clip, a voice note, or a picture that can never animate (JPEG, HEIC). */
   still: boolean;
 }
 
@@ -409,6 +435,8 @@ function sentPictures(messages: TalkMessage[], opened: Record<string, Opened>): 
     if (!payload || payload === 'unreadable') continue;
     if (payload.t === 'image') sent.set(payload.blob, { blob: payload.blob, at: seconds(message.timestamp), still: !mayAnimate(payload.mime) });
     else if (payload.t === 'video') sent.set(payload.poster, { blob: payload.poster, at: seconds(message.timestamp), still: true });
+    // A voice note never animates, so it is always a member from the start (and can be taken out).
+    else if (payload.t === 'audio') sent.set(payload.blob, { blob: payload.blob, at: seconds(message.timestamp), still: true });
   }
   return sent;
 }
