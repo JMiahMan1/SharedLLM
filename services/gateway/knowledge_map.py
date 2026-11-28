@@ -73,7 +73,10 @@ TOOL_AREAS: dict[str, str] = {
     "ExecutionLogRequest": "system", "StorageIndexRequest": "system",
     "NetworkDeviceScanRequest": "system", "ControlPlaneRequest": "system",
 }
-_PREFIX_AREAS = (("Workspace", "workspace"), ("Studio", "workspace"), ("Stl", "workspace"))
+_PREFIX_AREAS = (
+    ("Workspace", "workspace"), ("Studio", "workspace"), ("Stl", "workspace"),
+    ("Delegate", "workspace"),
+)
 
 #: Longest one-line purpose, so the map stays an index and not a second guide.
 PURPOSE_MAX_CHARS = 72
@@ -119,12 +122,15 @@ def single_turn_tools() -> dict[str, str]:
         tools[name] = desc
     tools.update(tr.SINGLE_TURN_ONLY_DESCRIPTIONS)
     tools.update(tr.SINGLE_TURN_GARDEN_TOOLS)
+    tools.update({spec["name"]: spec["description"] for spec in tr.DELEGATION_TOOL_SCHEMAS})
     return tools
 
 
 def raven_tools() -> dict[str, str]:
     """``{tool name: description}`` for every tool Raven's agent loop dispatches."""
-    return {name: desc for name, _svc, _m, _p, _ws, desc, _hint in tr._RAVEN_TOOL_TABLE}
+    tools = {name: desc for name, _svc, _m, _p, _ws, desc, _hint in tr._RAVEN_TOOL_TABLE}
+    tools.update({spec["name"]: spec["description"] for spec in tr.DELEGATION_TOOL_SCHEMAS})
+    return tools
 
 
 def _listed(tools: dict[str, str], *, is_admin: bool) -> dict[str, str]:
