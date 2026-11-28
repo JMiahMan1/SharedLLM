@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import PasswordField from '../ui/PasswordField';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { BellRing, Camera, Heart, Check, CheckCheck, CheckSquare, Fingerprint, ImageMinus, ImagePlus, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, Pencil, Reply, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
+import { BellRing, Camera, Heart, Check, CheckCheck, CheckSquare, Fingerprint, ImageMinus, ImagePlus, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, Mic, Pencil, Reply, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -20,6 +20,8 @@ import { linkPreviewsOn, readLinkPreview, type LinkPreview } from '../../lib/pri
 import PrivateChatSecurity from './PrivateChatSecurity';
 import PrivateCamera from './PrivateCamera';
 import PrivateVideoRecorder from './PrivateVideoRecorder';
+import PrivateAudioRecorder from './PrivateAudioRecorder';
+import { PrivateAudioBubble } from './PrivateAudio';
 import { PrivateVideoBubble, PrivateVideoPlayer } from './PrivateVideo';
 import PrivateGallery from './PrivateGallery';
 import { commandOf, galleryCommand } from './privateGalleryModel';
@@ -414,6 +416,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
   const [securityOpen, setSecurityOpen] = useState(false);
   // The in-app camera: a photo, or a video clip (the two share one button and switch modes).
   const [camera, setCamera] = useState<'photo' | 'video' | null>(null);
+  const [audioOpen, setAudioOpen] = useState(false);
   // A picked or recorded clip on its way: its encrypted pieces sent so far.
   const [videoSending, setVideoSending] = useState<{ done: number; count: number } | null>(null);
   // The gallery, opened on one picture (a comment's) or on the grid.
@@ -779,6 +782,21 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
   };
 
   /**
+   * A picture, clip or voice note just sent goes into the Encrypted Gallery by
+   * itself. This runs after the message is posted, so a failure here must never
+   * look like a failure to send: it is reported, and the item is still in the
+   * chat (it can be added by hand from its bubble).
+   */
+  const autoSaveToGallery = async (blob: string) => {
+    try {
+      await recordMembership(token, vault, 'add', [blob]);
+      await refetchGallery();
+    } catch (error) {
+      toast.error(errorText(error, 'Sent, but could not add it to the gallery'));
+    }
+  };
+
+  /**
    * Send picture bytes: encrypted here before anything leaves the device,
    * uploaded as an opaque blob (never a Talk file share), and the plaintext
    * copy overwritten with zeros once encrypted.
@@ -803,6 +821,48 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
       if (blob) void api.deletePrivateBlob(token, blob).catch(() => {});
       throw error;
     }
+    await autoSaveToGallery(blob);
+  };
+
+  /**
+   * Send a voice note. The take is encrypted in memory, the plaintext wiped,
+   * and the sealed bytes uploaded as one opaque blob, exactly like a picture:
+   * a recording is never written to disk, and the server learns only that a
+   * blob of some size exists.
+   */
+  const sendAudioBytes = async (take: Blob, mime: string, duration: number, caption: string) => {
+    let blob = '';
+    try {
+      const plain = new Uint8Array(await take.arrayBuffer()) as Uint8Array<ArrayBuffer>;
+      let sealed: Uint8Array<ArrayBuffer>;
+      let sha256 = '';
+      try {
+        sha256 = await sha256Hex(plain);
+        sealed = await vault.encrypt(plain);
+      } finally {
+        plain.fill(0);
+      }
+      blob = (await api.uploadPrivateBlob(token, sealed)).id;
+      await post(
+        {
+          t: 'audio',
+          blob,
+          mime,
+          ...(duration > 0 ? { duration } : {}),
+          ...(caption ? { caption } : {}),
+          name: takeFileLabel(mime),
+          sent_at: Math.floor(Date.now() / 1000),
+          taken_at: Math.floor((Date.now() - duration * 1000) / 1000),
+          sha256,
+        },
+        [blob],
+      );
+      onChanged();
+    } catch (error) {
+      if (blob) void api.deletePrivateBlob(token, blob).catch(() => {});
+      throw error;
+    }
+    await autoSaveToGallery(blob);
   };
 
   /**
@@ -850,6 +910,8 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
       };
       await post(payload, [...sealed.chunks, poster]);
       onChanged();
+      // A clip is in the gallery by its poster, which is what its tile and its comments name.
+      await autoSaveToGallery(payload.poster);
     } catch (error) {
       for (const id of uploaded) void api.deletePrivateBlob(token, id).catch(() => {});
       throw error;
@@ -992,6 +1054,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
 
   // Comments name a picture by its blob; a video's comments name its poster.
   const videoPosters = new Set(Object.values(opened).flatMap((p) => (p !== 'unreadable' && p.t === 'video' ? [p.poster] : [])));
+  const voiceNotes = new Set(Object.values(opened).flatMap((p) => (p !== 'unreadable' && p.t === 'audio' ? [p.blob] : [])));
 
   // The message whose sheet is open: a readable text message, mine or the other parent's.
   const sheetMessage = visible.find((m, index) => String(m.id ?? index) === selected);
@@ -1134,11 +1197,11 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
           const selectable = textual && messageId !== null && picking === null;
           const bursting = playing !== null && messageId !== null && playing.messageId === messageId;
           // A picture or clip: held, it starts picking for the gallery; while picking, a tap picks it.
-          const mediaBlob = payload && payload !== 'unreadable' ? (payload.t === 'image' ? payload.blob : payload.t === 'video' ? payload.poster : null) : null;
+          const mediaBlob = payload && payload !== 'unreadable' ? (payload.t === 'image' || payload.t === 'audio' ? payload.blob : payload.t === 'video' ? payload.poster : null) : null;
           const picked = mediaBlob !== null && (picking?.includes(mediaBlob) ?? false);
           const quote = textual && payload.t === 'text' ? payload.quote : undefined;
           const quoted = quote ? opened[String(quote.m)] : undefined;
-          const quotedKind = quoted && quoted !== 'unreadable' && quoted.t === 'video' ? 'video' : 'photo';
+          const quotedKind = quoted && quoted !== 'unreadable' && quoted.t === 'video' ? 'video' : quoted && quoted !== 'unreadable' && quoted.t === 'audio' ? 'voice note' : 'photo';
           const command = commandOf(payload);
           return (
             <div key={key}>
@@ -1216,7 +1279,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
                       data-testid="private-comment-bubble"
                     >
                       <span className="mb-0.5 flex items-center gap-1 text-[11px] font-semibold opacity-80">
-                        <MessageSquare size={11} aria-hidden /> {videoPosters.has(payload.blob) ? 'On a video' : 'On a photo'}
+                        <MessageSquare size={11} aria-hidden /> {videoPosters.has(payload.blob) ? 'On a video' : voiceNotes.has(payload.blob) ? 'On a voice note' : 'On a photo'}
                       </span>
                       {payload.text}
                     </button>
@@ -1231,6 +1294,15 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
                     />
                   ) : payload.t === 'video' ? (
                     <PrivateVideoBubble token={token} video={payload} vault={vault} onOpen={() => setWatching({ video: payload, message, own })} />
+                  ) : payload.t === 'audio' ? (
+                    <>
+                      {quote && (
+                        <span className="mb-1 flex items-center gap-1 text-[11px] font-semibold opacity-80" data-testid="private-quote">
+                          <Reply size={11} aria-hidden /> {quoted && quoted !== 'unreadable' ? `Answering a ${quotedKind}` : 'Answering a picture'}
+                        </span>
+                      )}
+                      <PrivateAudioBubble token={token} payload={payload} vault={vault} />
+                    </>
                   ) : null}
                   {bursting && playing && <ReactionBurst key={playing.id} emoji={playing.emoji} onDone={burstDone} />}
                   {mediaBlob && picking && (
@@ -1392,6 +1464,16 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
         >
           <Camera size={18} />
         </button>
+        <button
+          type="button"
+          onClick={() => setAudioOpen(true)}
+          disabled={sending}
+          aria-label="Record an encrypted voice note"
+          data-testid="private-audio-open"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 disabled:opacity-50"
+        >
+          <Mic size={18} />
+        </button>
         <textarea
           value={text}
           onChange={(event) => setText(event.target.value)}
@@ -1452,6 +1534,19 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
       {beloved && belovedAllowed && <BelovedPage token={token} vault={vault} onClose={() => setBeloved(false)} onAddToHome={onAddBelovedToHome} />}
       {pickGate.element}
       {resendGate.element}
+      {audioOpen && (
+        <PrivateAudioRecorder
+          onClose={() => setAudioOpen(false)}
+          onSend={async (take, mime, duration, caption) => {
+            setSending(true);
+            try {
+              await sendAudioBytes(take, mime, duration, caption);
+            } finally {
+              setSending(false);
+            }
+          }}
+        />
+      )}
       {camera === 'photo' && (
         <PrivateCamera
           onClose={() => setCamera(null)}
@@ -1593,12 +1688,18 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
   );
 }
 
-/** The encrypted blobs a message is made of: a picture's one, or a clip's pieces and its poster. */
+/** The encrypted blobs a message is made of: a picture's or a voice note's one, or a clip's pieces and its poster. */
 function blobsOf(payload: Opened | undefined): string[] {
   if (!payload || payload === 'unreadable') return [];
-  if (payload.t === 'image') return [payload.blob];
+  if (payload.t === 'image' || payload.t === 'audio') return [payload.blob];
   if (payload.t === 'video') return [...payload.chunks, payload.poster];
   return [];
+}
+
+/** A name for a voice note's take, so a saved copy says what it is even when a player ignores the type. */
+function takeFileLabel(mime: string): string {
+  const ext: Record<string, string> = { 'audio/mp4': 'm4a', 'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/aac': 'aac', 'audio/3gpp': '3gp', 'audio/x-m4a': 'm4a' };
+  return `voice-note.${ext[mime] ?? 'webm'}`;
 }
 
 function Receipt({ read }: { read: boolean }) {

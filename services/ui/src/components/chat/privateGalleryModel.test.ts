@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TalkMessage } from './chatModel';
+import type { AudioPayload } from '../../lib/privateChatCrypto';
 import {
   buildGallery,
   clampAspect,
@@ -386,5 +387,66 @@ describe('gallery records on the server', () => {
     expect(startRecords([])).toHaveLength(1);
     expect(startRecords([])[0].kept).toEqual([]);
     expect(markRecords('add', [])).toEqual([]);
+  });
+});
+
+describe('a voice note in the gallery', () => {
+  const BLOB = 'c'.repeat(32);
+  const note = (extra: Partial<AudioPayload> = {}): AudioPayload => ({
+    t: 'audio', blob: BLOB, mime: 'audio/webm', duration: 14, caption: 'listen to this', name: 'voice-note.webm', ...extra,
+  });
+
+  it('sits beside the pictures, known by the recording itself', () => {
+    const items = buildGallery(
+      [msg(1, 'sam', day(2026, 11, 1, 9)), msg(2, 'alex', day(2026, 11, 1, 10))],
+      { '1': { t: 'image', blob: 'pic', mime: 'image/jpeg' }, '2': note() },
+      me,
+    );
+    // Newest first, like the pictures: the note came a minute after the photo.
+    expect(items.map((i) => i.blob)).toEqual([BLOB, 'pic']);
+    const recording = items[0];
+    expect(recording).toMatchObject({ messageId: 2, mime: 'audio/webm', caption: 'listen to this', name: 'voice-note.webm', own: true, at: day(2026, 11, 1, 10) });
+    expect(recording.audio?.duration).toBe(14);
+    expect(recording.video).toBeUndefined();
+    // Nothing to show means nothing to decrypt: the tile draws an icon instead of an image.
+    expect(itemBlobs(recording)).toEqual([BLOB]);
+    expect(inGallery(items, new Set([BLOB]))).toEqual([recording]);
+    expect(inGallery(items, new Set(['somebody-elses']))).toEqual([]);
+  });
+
+  it('is counted as a voice note, not as a photo', () => {
+    const items = buildGallery(
+      [msg(1, 'sam', day(2026, 11, 1)), msg(2, 'sam', day(2026, 11, 2)), msg(3, 'sam', day(2026, 11, 3)), msg(4, 'sam', day(2026, 11, 4))],
+      {
+        '1': { t: 'image', blob: 'a', mime: 'image/jpeg' },
+        '2': note(),
+        '3': note({ blob: 'd'.repeat(32), caption: undefined }),
+        '4': { t: 'video', mime: 'video/mp4', size: 10, duration: 2, poster: 'p', chunks: ['1'.repeat(32)], clip: 'AAAAAAAAAAAAAAAAAAAAAA==', chunk_bytes: 10 },
+      },
+      me,
+    );
+    expect(countLabel(items)).toBe('1 photo, 1 video, 2 voice notes');
+    expect(countLabel(items.filter((i) => i.audio))).toBe('2 voice notes');
+    expect(countLabel(items.filter((i) => i.audio).slice(0, 1))).toBe('1 voice note');
+  });
+
+  it('has its own filter, and is never one of the photos', () => {
+    const items = buildGallery(
+      [msg(1, 'sam', day(2026, 11, 1)), msg(2, 'sam', day(2026, 11, 2)), msg(3, 'sam', day(2026, 11, 3))],
+      { '1': { t: 'image', blob: 'a', mime: 'image/jpeg' }, '2': note(), '3': note({ blob: 'd'.repeat(32) }) },
+      me,
+    );
+    expect(filterGallery(items, 'audio').map((i) => i.blob)).toEqual(['d'.repeat(32), BLOB]);
+    expect(filterGallery(items, 'photos').map((i) => i.blob)).toEqual(['a']);
+    expect(filterGallery(items, 'all')).toHaveLength(3);
+  });
+
+  it('carries the comments left on it', () => {
+    const items = buildGallery(
+      [msg(1, 'sam', day(2026, 11, 1)), msg(2, 'alex', day(2026, 11, 1, 11), { message: 'On a voice note: that was lovely' } as never)],
+      { '1': note(), '2': { t: 'comment', text: 'that was lovely', blob: BLOB } },
+      me,
+    );
+    expect(items[0].comments.map((c) => c.text)).toEqual(['that was lovely']);
   });
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
-import { ChevronLeft, ChevronRight, ImageMinus, Loader2, MapPin, MessageSquare, Pencil, Play, SendHorizontal, Trash2, Undo2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ImageMinus, Loader2, MapPin, MessageSquare, Mic, Pencil, Play, SendHorizontal, Trash2, Undo2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { PrivateVault } from '../../lib/privateChatCrypto';
@@ -211,7 +211,7 @@ export default function PrivateGalleryViewer({
   const [playingBlob, setPlayingBlob] = useState('');
   const playing = Boolean(item?.video) && playingBlob === item?.blob;
   const clip = usePrivateVideo(token, playing && item?.video ? item.video : null, vault);
-  const kind = item?.video ? 'video' : 'photo';
+  const kind = item?.video ? 'video' : item?.audio ? 'voice note' : 'photo';
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [showComments, setShowComments] = useState(true);
@@ -258,7 +258,7 @@ export default function PrivateGalleryViewer({
       className="fixed inset-0 z-[90] flex flex-col bg-black"
       role="dialog"
       aria-modal="true"
-      aria-label={item.video ? 'Video' : 'Photo'}
+      aria-label={item.video ? 'Video' : item.audio ? 'Voice note' : 'Photo'}
       data-testid="private-gallery-viewer"
       {...noSave}
     >
@@ -315,7 +315,7 @@ export default function PrivateGalleryViewer({
         >
           <Play size={17} className="ml-0.5" />
         </button>
-        {!item.video && onEdit && (
+        {!item.video && !item.audio && onEdit && (
           <button
             type="button"
             onClick={() => onEdit(item)}
@@ -399,6 +399,29 @@ export default function PrivateGalleryViewer({
                 </span>
               )}
             </button>
+          ) : item.audio && url ? (
+            // A voice note plays here, decrypted in memory: no download, no picture to show.
+            <div className="flex w-full max-w-md flex-col items-center gap-3 px-3" data-testid="private-gallery-audio">
+              <span className="flex h-20 w-20 items-center justify-center rounded-full bg-white/10 text-white ring-1 ring-white/20" aria-hidden>
+                <Mic size={30} />
+              </span>
+              <audio
+                src={url}
+                controls
+                preload="metadata"
+                controlsList="nodownload noplaybackrate"
+                aria-label="Voice note"
+                data-testid="private-gallery-audio-player"
+                className="w-full"
+                {...noSave}
+              />
+              {(item.audio.duration ?? 0) > 0 && (
+                <p className="text-xs tabular-nums text-slate-400" data-testid="private-gallery-audio-duration">
+                  {formatDuration(item.audio.duration ?? 0)}
+                </p>
+              )}
+              {item.caption && <p className="text-center text-sm text-slate-200">{item.caption}</p>}
+            </div>
           ) : url ? (
             <img
               src={url}
@@ -452,7 +475,7 @@ export default function PrivateGalleryViewer({
             <p className="min-w-0 flex-1 text-xs text-slate-300">
               Edited{item.edit.own ? ' by you' : item.edit.byName ? ` by ${item.edit.byName}` : ''}. The original is kept.
             </p>
-            {onEdit && (
+            {!item.audio && onEdit && (
               <button
                 type="button"
                 onClick={() => onEdit(item)}

@@ -235,7 +235,7 @@ button.quiet{background:transparent;border:1px solid #334155;color:var(--text)}
 .error{color:#fda4af;font-size:14px}.day{text-align:center;color:var(--muted);font-size:13px;margin:18px 0 6px}
 .msg{max-width:85%;margin:6px 0;padding:8px 12px;border-radius:16px;background:var(--card);border:1px solid var(--line);overflow-wrap:anywhere}
 .msg.right{margin-left:auto;background:#4c0519;border-color:#881337}.who{font-size:12px;color:var(--muted)}
-.msg img,.pic img{display:block;max-width:100%;border-radius:10px;margin-top:6px}.chips{font-size:14px;margin-top:4px}
+.msg img,.pic img{display:block;max-width:100%;border-radius:10px;margin-top:6px}.msg audio,.pic audio{display:block;width:100%;max-width:100%;margin-top:6px}.chips{font-size:14px;margin-top:4px}
 .gone{font-style:italic;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
 .pic{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px;font-size:13px}
 .love{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0}

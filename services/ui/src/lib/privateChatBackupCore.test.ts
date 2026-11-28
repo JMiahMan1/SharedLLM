@@ -9,11 +9,13 @@ import {
   describeBeloved,
   openBackup,
   readBackupHeader,
+  pictureType,
   readKeepsake,
   type BackupHeader,
   type OpenedBackup,
 } from './privateChatBackupCore.js';
 import { memoizePbkdf2 } from '../test/pbkdf2Memo';
+import { buildKeepsakePage, keepsakePageScript } from './privateChatBackupFile';
 
 // Each opening derives the chat password at 600,000+ iterations; reuse them.
 memoizePbkdf2();
@@ -267,5 +269,35 @@ describe('a backup of several chunks', () => {
     for (const changed of [join(c1, c0, last), join(c0, last), join(c0, c0, c1, last), join(c0, c1), join(c0, c1, last.slice(0, 10))]) {
       expect((await refused(changed, FIXTURE.v2.password)).code).toBe('tampered');
     }
+  });
+});
+
+/** The whole page, rendered (it only needs the backup bytes to hold them). */
+async function keepsakePageHtml(): Promise<string> {
+  return (await buildKeepsakePage(new Blob([new Uint8Array([1, 2, 3])]))).text();
+}
+
+describe('a voice note kept in a backup', () => {
+  it('comes back with its own type, so it plays instead of downloading', () => {
+    for (const type of ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/aac', 'audio/3gpp', 'audio/x-m4a']) {
+      expect(pictureType(type)).toBe(type);
+    }
+    // A recorder's parameterised type is the same file without the parameters.
+    expect(pictureType('audio/webm;codecs=opus')).toBe('audio/webm');
+    // A photo still comes back as a photo, and anything unknown stays an opaque download.
+    expect(pictureType('image/jpeg')).toBe('image/jpeg');
+    expect(pictureType('video/mp4')).toBe('application/octet-stream');
+    expect(pictureType(undefined)).toBe('application/octet-stream');
+  });
+
+  it('is drawn in the saved page as a player, not as a picture', async () => {
+    const script = keepsakePageScript();
+    // The page runs one script: if this name is missing, every voice note in a keepsake is a blank box.
+    expect(script).toContain('async function voiceNote');
+    expect(script).toContain("if (p.t === 'audio') return voiceNote(keepsake, p);");
+    expect(script).toContain("kept.t === 'audio'");
+    expect(script).toContain('This voice note could not be opened');
+    // And the page is allowed to play a blob: URL, or the browser refuses the recording.
+    expect(await keepsakePageHtml()).toContain('media-src blob:');
   });
 });

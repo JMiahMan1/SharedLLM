@@ -44,6 +44,8 @@ const TOKEN_PATTERN = /^[A-Za-z0-9]{4,64}$/;
 const BLOB_PATTERN = /^[0-9a-f]{32}$/;
 const FENCE = '```jarvis-envelope';
 const IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif'];
+/** The types a voice note may be, so a kept recording plays instead of downloading as a file. */
+const AUDIO_MIMES = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/aac', 'audio/3gpp', 'audio/x-m4a'];
 const VIDEO_MIMES = ['video/mp4', 'video/webm', 'video/quicktime', 'video/3gpp'];
 /** Beloved's kinds in the order a keepsake shows them, with a heading for each. */
 const BELOVED_SECTIONS = [
@@ -647,7 +649,12 @@ async function decryptBlob(key, blob) {
 }
 
 function pictureType(mime) {
-  return IMAGE_MIMES.includes(mime) ? mime : 'application/octet-stream';
+  if (IMAGE_MIMES.includes(mime)) return mime;
+  // A voice note is decrypted into a blob that has to play, so its own type
+  // comes back with it; anything else stays an opaque download.
+  const base = typeof mime === 'string' ? mime.split(';')[0].trim().toLowerCase() : '';
+  if (AUDIO_MIMES.includes(base)) return base;
+  return 'application/octet-stream';
 }
 
 /** A video clip from its pieces, each checked for its place in the clip (privateChatCrypto.ts decryptVideo). */
@@ -737,6 +744,7 @@ export {
   BackupError,
   CHUNK_BYTES,
   IMAGE_MIMES,
+  AUDIO_MIMES,
   VIDEO_MIMES,
   belongsTo,
   decryptBlob,
