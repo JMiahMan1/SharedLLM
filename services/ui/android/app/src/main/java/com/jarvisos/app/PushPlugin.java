@@ -178,8 +178,40 @@ public class PushPlugin extends Plugin {
 
     /** A notification was tapped: tell JS where to go (kept until it listens). */
     void open(String path) {
+        // Kept as well as announced. A tap that starts the app cold opens the
+        // page before the bundle has attached its listener, and a WebView
+        // reload loses it again, so the page asks for it on mount.
+        hold(path);
         JSObject data = new JSObject();
         data.put("path", path);
         notifyListeners("open", data, true);
+    }
+
+    /** The page a tap asked for before this WebView was listening; null when there is none. */
+    private static volatile String pendingPath;
+
+    @PluginMethod
+    public void takePendingOpen(PluginCall call) {
+        String path = takePending();
+        JSObject ret = new JSObject();
+        if (path != null) ret.put("path", path);
+        call.resolve(ret);
+    }
+
+    /** The held page, and only once: the caller owns it from here. */
+    static String takePending() {
+        String path = pendingPath;
+        pendingPath = null;
+        return path;
+    }
+
+    /** An empty path is not a destination: a tap with nothing to open keeps the one already held. */
+    static void hold(String path) {
+        if (path != null && !path.isEmpty()) pendingPath = path;
+    }
+
+    /** For the JVM tests: a tap, through the same door a real one takes. */
+    static void rememberOpen(String path) {
+        hold(path);
     }
 }

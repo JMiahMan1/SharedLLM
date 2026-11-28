@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { BookHeart, Cake, CalendarHeart, Heart, HeartHandshake, ImagePlus, Loader2, Moon, NotebookPen, Plus, Settings2, Smartphone, Sparkles, Trash2, X } from 'lucide-react';
+import { ArrowLeft, BookHeart, Cake, CalendarHeart, Heart, HeartHandshake, ImagePlus, Loader2, Moon, NotebookPen, Plus, Settings2, Smartphone, Sparkles, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../../services/api';
 import { IMAGE_TYPES, type PrivateVault } from '../../../lib/privateChatCrypto';
@@ -26,7 +26,7 @@ import { dailyTip, type BelovedTipTarget } from '../../../lib/beloved/tips';
 import type { BelovedPrefs } from '../../../lib/beloved/activity';
 import { HeartBackButton, TipCard, TodayStrip } from './BelovedHighlights';
 
-type Tab = 'home' | 'days' | 'today' | 'notes' | 'dates' | 'justus';
+export type Tab = 'home' | 'days' | 'today' | 'notes' | 'dates' | 'justus';
 
 const TABS: ReadonlyArray<{ id: Tab; label: string; icon: typeof Heart }> = [
   { id: 'home', label: 'Us', icon: Heart },
@@ -49,15 +49,27 @@ export default function BelovedPage({
   vault,
   onClose,
   onAddToHome,
+  initialTab,
 }: {
   token: string;
   vault: PrivateVault;
   onClose: () => void;
   /** Only in the Android app: a home-screen icon with your spouse's picture that opens straight here. */
   onAddToHome?: () => void;
+  /** The section a notice or an address asked for (a love note opens Notes). */
+  initialTab?: Tab | null;
 }) {
   const data = useBeloved(token, vault);
-  const [tab, setTab] = useState<Tab>('home');
+  const [tab, setTab] = useState<Tab>(initialTab ?? 'home');
+
+  // A tap that names a section while Beloved is already open walks to it: the
+  // person asked for Notes, not for the page they were already on.
+  useEffect(() => {
+    if (!initialTab) return;
+    // The section came from the address, which is outside React's state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTab(initialTab);
+  }, [initialTab]);
   const [editing, setEditing] = useState(false);
   const [reminders, setReminders] = useState<ReminderState | null>(null);
   const [nudge, setNudge] = useState(nudgeAfter);
@@ -104,8 +116,12 @@ export default function BelovedPage({
       {...noSave}
     >
       <div className="flex shrink-0 items-center gap-2 border-b border-rose-300/10 px-2 pb-1 pt-[max(0.5rem,var(--safe-top))]">
-        <button type="button" onClick={onClose} aria-label="Close Beloved" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-200 hover:bg-white/10">
-          <X size={20} />
+        {/* Back to the chat, in words as well as an arrow: the X it replaced
+            read as "dismiss this panel", and people looked for Chat instead. */}
+        <button type="button" onClick={onClose} aria-label="Back to Private Chat" data-testid="beloved-back"
+          className="flex h-11 shrink-0 items-center gap-1 rounded-xl px-2 text-slate-200 hover:bg-white/10">
+          <ArrowLeft size={20} />
+          <span className="text-sm font-semibold">Chat</span>
         </button>
         <h2 className="flex min-w-0 flex-1 items-center gap-1.5 truncate font-serif text-lg font-semibold text-rose-100">
           <Lily size={18} className="shrink-0 text-rose-200" /> Beloved
@@ -134,24 +150,6 @@ export default function BelovedPage({
           <Settings2 size={18} />
         </button>
       </div>
-      <nav className="grid shrink-0 grid-cols-6 gap-1 border-b border-rose-300/10 px-1.5 py-1" aria-label="Beloved sections">
-        {TABS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            aria-current={tab === id ? 'page' : undefined}
-            data-testid={`beloved-tab-${id}`}
-            className={`flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-[11px] font-semibold ${
-              tab === id ? 'bg-rose-500/20 text-rose-100' : 'text-slate-300 hover:bg-white/5'
-            }`}
-          >
-            <Icon size={16} aria-hidden />
-            <span className="max-w-full truncate">{label}</span>
-          </button>
-        ))}
-      </nav>
-
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-[max(1.25rem,var(--safe-bottom))] pt-3 sm:px-4">
         <div className="mx-auto w-full max-w-2xl">
           {notFound ? (
@@ -191,6 +189,32 @@ export default function BelovedPage({
         </div>
       </div>
       {editing && <ProfileSheet data={data} token={token} vault={vault} reminders={reminders} onClose={() => setEditing(false)} />}
+
+      {/* The sections live at the bottom, where a thumb reaches them: six 11px
+          columns across the top were a strip to squint at, not a way around. */}
+      <nav
+        className="grid shrink-0 grid-cols-6 gap-1.5 border-t border-rose-300/10 bg-slate-950/70 px-1.5 pt-1.5 pb-[max(0.375rem,var(--safe-bottom))] backdrop-blur"
+        aria-label="Beloved sections"
+      >
+        {TABS.map(({ id, label, icon: Icon }) => {
+          const on = tab === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              aria-current={on ? 'page' : undefined}
+              data-testid={`beloved-tab-${id}`}
+              className={`flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-1 text-xs font-semibold transition-colors ${
+                on ? 'bg-rose-500/20 text-rose-100' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+              }`}
+            >
+              <Icon size={20} aria-hidden className={on ? 'text-rose-200' : undefined} />
+              <span className="max-w-full truncate">{label}</span>
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 }
@@ -256,6 +280,14 @@ function HomeSection({
   const fromSpouse = data.view.hearts.filter((h) => !h.own);
   const nextDay = upcoming.find((d) => d.kind !== 'milestone') ?? upcoming[0];
   const tip = dailyTip(today);
+  // What is inside each section, so the main screen answers "where is it?".
+  const quick = [
+    { tab: 'today' as const, label: 'Today', unit: 'devotions', count: data.view.devotions.length },
+    { tab: 'notes' as const, label: 'Notes', unit: 'notes', count: data.view.notes.length + data.view.prayers.length },
+    { tab: 'dates' as const, label: 'Dates', unit: 'ideas', count: data.view.ideas.length },
+    { tab: 'days' as const, label: 'Special Days', unit: 'days', count: data.view.days.length },
+    { tab: 'justus' as const, label: 'Just Us', unit: 'plans', count: data.view.plans.length },
+  ];
 
   // A tip is a fixed pointer to a feature, never to any sealed content.
   const openTip = (target: BelovedTipTarget) => {
@@ -343,6 +375,31 @@ function HomeSection({
           <HeartBackButton onSend={() => void heart()} busy={sending} />
         </div>
       )}
+
+      <div className="grid grid-cols-2 gap-2" data-testid="beloved-quick-sections">
+        {quick.map(({ tab, label, count, unit }) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => onTab(tab)}
+            data-testid={`beloved-quick-${tab}`}
+            className="min-h-16 rounded-2xl border border-rose-300/15 bg-rose-500/[0.07] px-3 py-2 text-left transition hover:border-rose-300/35 active:bg-rose-500/15"
+          >
+            <span className="block text-sm font-semibold text-rose-50">{label}</span>
+            <span className="mt-0.5 block text-xs text-slate-300" data-testid={`beloved-quick-${tab}-count`}>
+              {count ? `${count} ${unit}` : 'Nothing yet'}
+            </span>
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => onTab('days')}
+          data-testid="beloved-quick-all"
+          className="min-h-16 rounded-2xl border border-dashed border-rose-300/20 px-3 py-2 text-left text-xs text-rose-200/80 transition hover:border-rose-300/40"
+        >
+          Every section is a tap away below.
+        </button>
+      </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
         {next && (

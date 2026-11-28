@@ -41,7 +41,9 @@ describe('chat shortcut payload', () => {
     const target = chatShortcutTarget({ conversation, people, privateInfo, mayUsePrivate: true });
     expect(target).toMatchObject({ label: 'Robin Sample', username: 'robin', avatar: 'preset:balaams-donkey' });
     const request = chatShortcutRequest(target!);
-    expect(request.path).toBe('/family?chat=roomprivate1');
+    // A private shortcut asks for the chat itself, so a tap opens it even when
+    // Beloved or the gallery is already on top of the same conversation.
+    expect(request.path).toBe('/family?chat=roomprivate1&private=1');
     expect(Object.keys(request).sort()).toEqual(['color', 'id', 'label', 'monogram', 'path']);
   });
 

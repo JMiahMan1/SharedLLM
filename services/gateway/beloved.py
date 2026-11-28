@@ -353,6 +353,26 @@ def _public(record: dict[str, Any], me: str, people: dict[str, dict[str, Any]]) 
     }
 
 
+#: The Beloved section a notice opens: the page a person was about when the phone
+#: buzzed, not the couple's home. Kept beside the notices so a new kind cannot be
+#: added without deciding where it lands.
+BELOVED_SECTIONS = {
+    "heart": "home",
+    "note": "notes",
+    "prayer": "notes",
+    "idea": "dates",
+    "day": "days",
+    "together": "today",
+    "plan": "justus",
+    "profile": "home",
+}
+
+
+def _beloved_section(kind: str) -> str:
+    """Where a Beloved notice opens; the couple's home when the kind is unknown."""
+    return BELOVED_SECTIONS.get(kind, "home")
+
+
 # --- Notices --------------------------------------------------------------------
 
 
@@ -377,8 +397,10 @@ async def _tell_spouse(token: str, chat: dict[str, Any], user: str, people: dict
         return False
     spouse = [m for m in chat["members"] if m != user]
     body = template.format(name=private_chat._display(people.get(user) or {"username": user}))
-    # Beloved opens only for the couple: the app checks it again on arrival.
-    target = notify.link("chat", chat=token, beloved=1)
+    # Beloved opens only for the couple: the app checks it again on arrival, and
+    # opens the section the notice is about (a love note lands on Notes, not on
+    # the couple's home).
+    target = notify.link("chat", chat=token, beloved=_beloved_section(kind))
     sent = await notify.send_many(
         spouse,
         lambda person: notify.notice(
@@ -408,7 +430,8 @@ async def _tell_spouse_seen(token: str, chat: dict[str, Any], user: str,
         return False
     spouse = [m for m in chat["members"] if m != user]
     body = template.format(name=private_chat._display(people.get(user) or {"username": user}))
-    target = notify.link("chat", chat=token, beloved=1)
+    # "They read your note" opens the note it is about.
+    target = notify.link("chat", chat=token, beloved=_beloved_section(what))
     sent = await notify.send_many(
         spouse,
         lambda person: notify.notice(

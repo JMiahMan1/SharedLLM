@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import PrivateChatThread from './PrivateChatThread';
 import type { DeviceUnlockPluginInterface } from '../../plugins/deviceUnlock';
 import type { PrivateChatInfo } from './privateChatModel';
@@ -162,4 +163,19 @@ describe('private chat thread', () => {
     const burst = await screen.findByTestId('reaction-animation', undefined, { timeout: 5000 });
     expect(burst.getAttribute('data-kind')).toBe('love');
   }, 30_000);
+
+  it('a tap on the chat icon wins over a section that was asked for earlier', async () => {
+    // `private=1` is the Private Chat icon/shortcut saying "show me the chat":
+    // it must not sit underneath a Beloved panel the last notice opened.
+    const { info } = await chat('secret');
+    window.history.replaceState({}, '', '/family?chat=roomQ&beloved=notes&private=1');
+    render(
+      <MemoryRouter initialEntries={['/family?chat=roomQ&beloved=notes&private=1']}>
+        {wrap(thread(info, []))}
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText(/unlock/i)).toBeTruthy());
+    expect(screen.queryByTestId('beloved')).toBeNull();
+    window.history.replaceState({}, '', '/');
+  });
 });

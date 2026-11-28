@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -88,6 +88,7 @@ const RouteFallback = () => (
 
 const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { children: React.ReactNode, requireAdmin?: boolean, isMobile?: boolean }) => {
   const { token, user, isLoading, initError } = useAuth();
+  const location = useLocation();
   // Opened from the screen-time lock: only the sections a parent left open.
   const locked = useLockedMode();
   
@@ -102,7 +103,9 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
     </div>
   );
   
-  if (initError || !token) return <Navigate to="/login" replace />;
+  // Where they were going, so signing in returns there rather than to the
+  // dashboard: a tapped notification on a cold start would otherwise be lost.
+  if (initError || !token) return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}${location.hash}` }} />;
   
   if (locked.active) return <LockedShell sections={locked.sections}>{children}</LockedShell>;
 

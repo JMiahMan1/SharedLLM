@@ -29,10 +29,26 @@ export interface AssistEvent {
 
 export type AssistState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
+/** What a turn is for: one tap, an always-listening session, and who is asking. */
+export interface AssistStartOptions {
+  /** Hands-free: keep listening after each answer. Off unless asked for. */
+  wake?: boolean;
+  /** Keep the session open after this turn (the sheet's hands-free toggle). */
+  handsFree?: boolean;
+  /** The person asking, so the answer is theirs. */
+  userId?: string;
+}
+
 export interface JarvisAssistPlugin {
   /** Hear one turn. `wake` keeps the service listening afterwards (hands-free). */
-  start(options?: { wake?: boolean }): Promise<void>;
+  start(options?: AssistStartOptions): Promise<void>;
   stop(): Promise<void>;
+  /**
+   * End the take being recorded and submit it, without closing the sheet. This is
+   * what the sheet's "Done" button does: a tap-to-talk turn should not have to
+   * wait out the silence timer.
+   */
+  finish?(): Promise<void>;
   /** Cut the answer off mid-sentence. */
   stopSpeaking(): Promise<void>;
   status(): Promise<{ running: boolean; state: AssistState }>;
@@ -64,6 +80,8 @@ let recorder: MediaRecorder | null = null;
 let discard = false;
 /** While the assistant screen is open it keeps listening after each answer. */
 let handsFree = false;
+/** Who is asking, so the turn answers as them (the sheet knows, this module does not). */
+let askingUser: string | undefined;
 let stream: MediaStream | null = null;
 let chunks: Blob[] = [];
 let audio: HTMLAudioElement | null = null;
@@ -355,7 +373,7 @@ async function finishTurn(blob: Blob, covered: number) {
       return;
     }
     answered = true;
-    await askJarvis(text);
+    await askJarvis(text, askingUser);
   } catch (error) {
     emit({ type: 'error', text: error instanceof Error ? error.message : 'That did not work.' });
   } finally {
@@ -532,9 +550,25 @@ async function webStart() {
 }
 
 const web: JarvisAssistPlugin = {
-  async start() {
-    handsFree = true;
+  async start(options) {
+    // Hands-free is asked for, never assumed. A tap-to-talk turn that quietly
+    // re-armed kept recording the room after the answer, and every quiet take
+    // came back as "I did not hear anything" - a loop nobody could stop without
+    // closing the sheet.
+    handsFree = Boolean(options?.handsFree);
+    askingUser = options?.userId ?? askingUser;
     await webStart();
+  },
+  async finish() {
+    // "Done": the take so far is the question, submitted now rather than when
+    // the silence timer decides the person has stopped talking.
+    if (rearmTimer !== null) {
+      window.clearTimeout(rearmTimer);
+      rearmTimer = null;
+    }
+    // Stopping the module's recorder ends the take the same way the silence
+    // timer does: the recorder's own onstop keeps the chunks and submits them.
+    if (recorder && recorder.state === 'recording') recorder.stop();
   },
   async stop() {
     handsFree = false;
@@ -609,10 +643,12 @@ const web: JarvisAssistPlugin = {
 export const JarvisAssist: JarvisAssistPlugin = {
   start: (options) => {
     if (options?.wake && Capacitor.isNativePlatform()) {
-      return native.start(options).catch(() => web.start());
+      return native.start(options).catch(() => web.start(options));
     }
-    return web.start();
+    return web.start(options);
   },
+  // The take so far is the question; the sheet stays open for the answer.
+  finish: () => web.finish?.() ?? Promise.resolve(),
   // Both halves are stopped, always. The sheet's close button has to end the
   // native service too, or a hands-free turn keeps the microphone open behind it.
   stop: async () => {

@@ -30,6 +30,13 @@ export interface ChatNotifyPluginInterface {
   stopAlarm(): Promise<{ ringing: boolean }>;
   /** A notification was tapped; `path` is the page to open. */
   addListener(event: 'open', cb: (data: { path: string }) => void): Promise<PluginListenerHandle>;
+  /**
+   * The page a tap asked for before this WebView was listening, taken once.
+   * A cold start (or a reload) opens the app before the bundle has attached
+   * its listener, so the page asks on mount instead of missing the tap.
+   * Absent from older APKs.
+   */
+  takePendingOpen?(): Promise<{ path?: string }>;
   /** A nudge arrived while Jarvis is on screen (APKs from 686). */
   addListener(event: 'nudge', cb: (data: { title: string; body: string; path: string; kind?: string }) => void): Promise<PluginListenerHandle>;
 }

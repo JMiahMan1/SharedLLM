@@ -55,7 +55,17 @@
         "beloved": "beloved",
         "private": "private_chat"
       },
-      "choices": {},
+      "choices": {
+        "beloved": [
+          "1",
+          "dates",
+          "days",
+          "home",
+          "justus",
+          "notes",
+          "today"
+        ]
+      },
       "description": "One family conversation; focus is the message"
     },
     "member": {

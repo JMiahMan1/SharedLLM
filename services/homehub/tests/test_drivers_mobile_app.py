@@ -220,6 +220,25 @@ async def test_notify_mobile_app_goes_to_the_jarvis_user(geo, sent):
     assert ("notify", "mobile_app_alexs_phone") not in hub.services
 
 
+async def test_every_notice_carries_a_page_a_tap_can_open(geo, sent):
+    """A notice with no destination is a notice that dead-ends: the kwargs always carry a link,
+    and an address no page of Jarvis reads (a Lovelace view) falls back to the dashboard."""
+    hub = family_hub()
+    await ma.setup_persons(hub, PERSONS)
+    await add_phone(hub, "l1", "Alexs Phone", "device_tracker.alexs_phone").async_setup()
+    await hub.call_service("notify", "mobile_app_alexs_phone",
+                           {"title": "Front door", "message": "Someone is at the front door",
+                            "data": {"url": "/lovelace/0"}})
+    await hub.call_service("notify", "mobile_app_alexs_phone",
+                           {"title": "Note", "message": "A love note",
+                            "data": {"url": "/family?chat=abc&beloved=notes"}})
+    assert [n["data"]["link"]["route"] for n in sent] == ["home", "chat"]
+    assert sent[1]["data"]["link"]["query"]["beloved"] == "notes"
+    # Every notice has one, including the ones the phone sends with nothing but a message.
+    await hub.call_service("notify", "mobile_app_alexs_phone", {"message": "Garage closed"})
+    assert sent[2]["data"]["link"] == HOME_LINK
+
+
 async def test_notify_notify_goes_to_the_family_and_entities_send_message(geo, sent):
     hub = family_hub()
     drv = add_phone(hub, "k1", "Robins Phone", "device_tracker.robins_phone")

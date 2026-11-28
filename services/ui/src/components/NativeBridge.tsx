@@ -6,6 +6,7 @@ import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../context/AuthContext';
 import ChatNotify from '../plugins/chatNotify';
 import { isVoicePath, openVoiceAssistant } from '../lib/voiceLaunch';
+import { inAppPath } from '../lib/noticeLink';
 import NudgeOverlay, { type Nudge } from './chat/NudgeOverlay';
 
 /**
@@ -89,8 +90,54 @@ async function warnIfNotificationsOff(): Promise<void> {
 
 export default function NativeBridge() {
   const navigate = useNavigate();
-  const { token } = useAuth();
+  const { token, isLoading } = useAuth();
   const native = Capacitor.isNativePlatform();
+  // A tap that arrives before there is a session (a cold start, or a WebView
+  // reload) waits here instead of being dropped.
+  const [wanted, setWanted] = useState<string | null>(null);
+
+  /** Open what a tap asked for. The full address is navigated, query and hash too. */
+  const go = useCallback(
+    (raw: unknown) => {
+      const path = inAppPath(raw);
+      if (!path) return;
+      // A hardware trigger (tile, widget, voice button, Digital Assistant) asks for
+      // the assistant, not for a page: open it over the dashboard. Navigating to
+      // '/?voice=1' used to land on '/' and do nothing, which is why the tile looked
+      // broken.
+      if (isVoicePath(path)) {
+        navigate('/');
+        openVoiceAssistant();
+        return;
+      }
+      // A state stamp makes this a real navigation even when the address is the one
+      // already on screen: a tap that names a tab, a section or an item has to close
+      // whatever is open on that page and open what it names.
+      navigate(path, { state: { noticeAt: Date.now() } });
+    },
+    [navigate],
+  );
+
+  // What a tap asked for, held until the session is known and there is one.
+  useEffect(() => {
+    if (!wanted || isLoading || !token) return;
+    // Cleared before navigating so the same tap cannot fire twice; the path
+    // itself is state mirrored from a notification, not derived during render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setWanted(null);
+    go(wanted);
+  }, [wanted, isLoading, token, go]);
+
+  // A tap that started the app cold opened the page before this bundle attached
+  // its listener, so ask the plugin what it is holding.
+  useEffect(() => {
+    if (!native || typeof ChatNotify.takePendingOpen !== 'function') return;
+    void ChatNotify.takePendingOpen()
+      .then((held) => {
+        if (typeof held?.path === 'string' && held.path) setWanted(held.path);
+      })
+      .catch(() => {});
+  }, [native]);
 
   useEffect(() => {
     if (!native || !token) return;
@@ -108,21 +155,17 @@ export default function NativeBridge() {
     if (!native) return;
     const handle = ChatNotify.addListener('open', ({ path }) => {
       if (typeof path !== 'string' || !path.startsWith('/')) return;
-      // A hardware trigger (tile, widget, voice button, Digital Assistant) asks for
-      // the assistant, not for a page: open it over the dashboard. Navigating to
-      // '/?voice=1' used to land on '/' and do nothing, which is why the tile looked
-      // broken.
-      if (isVoicePath(path)) {
-        navigate('/');
-        openVoiceAssistant();
+      // Not signed in yet (a cold start from the lock screen): hold it.
+      if (isLoading || !token) {
+        setWanted(path);
         return;
       }
-      navigate(path);
+      go(path);
     });
     return () => {
       void handle.then((h) => h.remove()).catch(() => {});
     };
-  }, [native, navigate]);
+  }, [native, isLoading, token, go]);
 
   // A nudge while Jarvis is open: shown full screen, not as one more message.
   const [nudge, setNudge] = useState<Nudge | null>(null);
@@ -146,7 +189,7 @@ export default function NativeBridge() {
       onClose={closeNudge}
       onOpen={() => {
         setNudge(null);
-        navigate(nudge.path);
+        go(nudge.path);
       }}
     />
   );

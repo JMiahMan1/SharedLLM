@@ -181,6 +181,24 @@ def test_a_link_no_page_could_open_is_refused(route, kwargs, why):
         link(route, **kwargs)
 
 
+@pytest.mark.parametrize("section", ["1", "home", "days", "today", "notes", "dates", "justus"])
+def test_a_beloved_notice_opens_the_section_it_is_about(section):
+    got = link("chat", chat="abc", beloved=section)
+    assert got["href"] == f"/family?chat=abc&beloved={section}"
+    assert got["guard"] == "beloved"
+    assert link_from_href(got["href"])["query"]["beloved"] == section
+
+
+def test_a_beloved_notice_still_reads_as_the_plain_page():
+    # ``beloved=1`` was the only value before sections existed, and it must keep meaning "the page".
+    assert link("chat", chat="abc", beloved=1)["href"] == "/family?chat=abc&beloved=1"
+
+
+def test_a_beloved_section_no_page_shows_is_refused():
+    with pytest.raises(LinkError, match="'beloved' must be one of"):
+        link("chat", chat="abc", beloved="recipes")
+
+
 def test_stricter_pages_carry_their_guard():
     assert link("admin", section="ops", mission=7)["guard"] == "admin"
     assert link("chat", chat="t", beloved=1)["guard"] == "beloved"

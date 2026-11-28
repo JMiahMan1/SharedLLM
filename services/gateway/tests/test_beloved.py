@@ -213,6 +213,42 @@ def test_notes_prayers_and_ideas_are_announced_without_content(couple, kind, bod
     assert [(n["user"], n["body"]) for n in couple["notices"]] == [("alex", body)]
 
 
+@pytest.mark.parametrize("kind,section", [
+    ("note", "notes"),
+    ("prayer", "notes"),
+    ("idea", "dates"),
+    ("day", "days"),
+    ("plan", "justus"),
+    ("heart", "home"),
+])
+def test_a_notice_opens_the_section_it_is_about(couple, kind, section):
+    """A note's notice lands on Notes, an idea's on Dates: the notice already knows what it is,
+    and a tap that opens "Us" leaves the parent hunting for the thing they were told about."""
+    assert _add(couple, kind, notify=True).json()["notified"] is True
+    [notice] = couple["notices"]
+    assert notice["data"]["link"]["query"]["beloved"] == section
+
+
+@pytest.mark.parametrize("kind,section", [
+    ("heart", "home"),
+    ("note", "notes"),
+    ("prayer", "notes"),
+    ("idea", "dates"),
+    ("day", "days"),
+    ("together", "today"),
+    ("plan", "justus"),
+    ("profile", "home"),
+    ("wedding", "home"),
+])
+def test_every_record_kind_has_a_section(kind, section):
+    # A kind added later without a section still opens the page, never nowhere.
+    assert beloved._beloved_section(kind) == section
+
+
+def test_an_unknown_kind_opens_the_page_itself():
+    assert beloved._beloved_section("something-new") == "home"
+
+
 @pytest.mark.parametrize("kind", ["devotion"])
 def test_private_bookkeeping_is_never_announced(couple, kind):
     assert _add(couple, kind, notify=True).json()["notified"] is False

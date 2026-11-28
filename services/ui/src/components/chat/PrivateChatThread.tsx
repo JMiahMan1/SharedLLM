@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import PasswordField from '../ui/PasswordField';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { BellRing, Camera, Heart, Check, CheckCheck, CheckSquare, Fingerprint, ImageMinus, ImagePlus, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, Mic, Pencil, Reply, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { UNSAFE_LocationContext } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { IMAGE_TYPES, PrivateVault, VIDEO_CHUNK_BYTES, VIDEO_TYPES, isSealedMessage, type PrivatePayload, type Quote, type VideoPayload } from '../../lib/privateChatCrypto';
@@ -26,7 +27,8 @@ import { PrivateVideoBubble, PrivateVideoPlayer } from './PrivateVideo';
 import PrivateGallery from './PrivateGallery';
 import { commandOf, galleryCommand } from './privateGalleryModel';
 import { recordMembership, useGalleryEntries, useMembership } from './useGalleryMembership';
-import BelovedPage from './beloved/BelovedPage';
+import BelovedPage, { type Tab as BelovedTab } from './beloved/BelovedPage';
+import { belovedTab } from '../../lib/beloved/sections';
 import { Lily } from './beloved/BelovedArt';
 import { useLoveIndicator } from './beloved/useLoveIndicator';
 import { useSeenVisit } from './beloved/seen';
@@ -417,17 +419,52 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
   // The in-app camera: a photo, or a video clip (the two share one button and switch modes).
   const [camera, setCamera] = useState<'photo' | 'video' | null>(null);
   const [audioOpen, setAudioOpen] = useState(false);
+  // The picture or clip being looked at full screen. Declared up here with the
+  // other overlays because an address asking for the chat closes them all.
+  const [viewing, setViewing] = useState<{ url: string; name: string; mediaKey: string; mime: string; message: TalkMessage; own: boolean; blob?: string } | null>(null);
   // A picked or recorded clip on its way: its encrypted pieces sent so far.
   const [videoSending, setVideoSending] = useState<{ done: number; count: number } | null>(null);
   // The gallery, opened on one picture (a comment's) or on the grid.
   const [gallery, setGallery] = useState<{ blob?: string } | null>(null);
   // A couple's gallery is a reading signal (metadata only), never a page of content.
   useSeenVisit(token, 'gallery', gallery !== null && belovedAllowed);
-  // A heart or love note notice opens the chat with ?beloved=1: straight to Beloved once unlocked.
-  const [beloved, setBeloved] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('beloved') === '1');
+  // A heart, note or plan notice opens the chat with ?beloved=<section>: straight
+  // there once unlocked. The section is kept while locked, then honoured after
+  // the PIN, and a second tap (a new location.key) walks an open Beloved to it.
+  // Read the address through the router's own context, not useLocation(): this
+  // component is mounted on its own in the tests, where useLocation() throws.
+  const routerLocation = useContext(UNSAFE_LocationContext)?.location;
+  const search = routerLocation?.search ?? (typeof window === 'undefined' ? '' : window.location.search);
+  const addressKey = routerLocation?.key ?? search;
+  const belovedAsk = useMemo(() => {
+    const params = new URLSearchParams(search);
+    return { tab: belovedTab(params.get('beloved')), private: params.get('private') === '1' };
+  }, [search]);
+  const [beloved, setBeloved] = useState(() => belovedAsk.tab !== null);
+  const [belovedTabWanted, setBelovedTabWanted] = useState<BelovedTab | null>(belovedAsk.tab);
   // The heart on the bar: hearts and love notes from your spouse you have not seen in Beloved yet.
   const love = useLoveIndicator(token, belovedAllowed);
   const { markSeen } = love;
+  // A tap on the Private Chat icon asks for the chat itself: whatever is on top
+  // of it (Beloved, the gallery, the camera, a voice note) gets out of the way,
+  // even when this chat is already the selected one.
+  useEffect(() => {
+    if (!belovedAsk.private) return;
+    // The address is an external signal saying what to show, so this mirrors it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBeloved(false);
+    setGallery(null);
+    setCamera(null);
+    setAudioOpen(false);
+    setViewing(null);
+  }, [belovedAsk.private, addressKey]);
+  // A notice names a section: open Beloved there, or move an open one to it.
+  useEffect(() => {
+    if (!belovedAsk.tab || !belovedAllowed) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBelovedTabWanted(belovedAsk.tab);
+    setBeloved(true);
+  }, [belovedAsk.tab, belovedAllowed, addressKey]);
   useEffect(() => {
     // Whatever arrives while Beloved is open is seen there.
     if (beloved && belovedAllowed) markSeen();
@@ -442,7 +479,6 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
   const [nudgeSent, setNudgeSent] = useState(false);
   const { trigger } = useHaptics();
   const [selected, setSelected] = useState<string | null>(null);
-  const [viewing, setViewing] = useState<{ url: string; name: string; mediaKey: string; mime: string; message: TalkMessage; own: boolean; blob?: string } | null>(null);
   const [watching, setWatching] = useState<{ video: VideoPayload; message: TalkMessage; own: boolean } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const feedRef = useRef<HTMLDivElement | null>(null);
@@ -1545,7 +1581,15 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
           onDelete={removeById}
         />
       )}
-      {beloved && belovedAllowed && <BelovedPage token={token} vault={vault} onClose={() => setBeloved(false)} onAddToHome={onAddBelovedToHome} />}
+      {beloved && belovedAllowed && (
+        <BelovedPage
+          token={token}
+          vault={vault}
+          initialTab={belovedTabWanted}
+          onClose={() => { setBeloved(false); setBelovedTabWanted(null); }}
+          onAddToHome={onAddBelovedToHome}
+        />
+      )}
       {pickGate.element}
       {resendGate.element}
       {audioOpen && (

@@ -14,9 +14,16 @@ export function chatShortcutId(token: string): string {
   return `chat:${token}`;
 }
 
-/** The page a notification tap opens for the same conversation. */
-export function chatShortcutPath(token: string): string {
-  return `/family?chat=${encodeURIComponent(token)}`;
+/**
+ * The page a shortcut or notification tap opens for the same conversation.
+ *
+ * A private chat says so (`private=1`) because it must open as the chat even
+ * when Beloved, the gallery or a camera is already open over the same token:
+ * "the same chat is selected" and "the same chat is showing" are different
+ * states, and only the notice can tell the app it was asked for deliberately.
+ */
+export function chatShortcutPath(token: string, isPrivate = false): string {
+  return `/family?chat=${encodeURIComponent(token)}${isPrivate ? '&private=1' : ''}`;
 }
 
 export interface ChatShortcutTarget {
@@ -28,6 +35,8 @@ export interface ChatShortcutTarget {
   avatar: string | null;
   color: string;
   monogram: string;
+  /** A private chat's page asks for the chat itself, closing anything over it. */
+  private?: boolean;
 }
 
 /**
@@ -62,7 +71,7 @@ export function chatShortcutTarget({
   };
   if (conversation.private) {
     if (!mayUsePrivate || !privateInfo || privateInfo.token !== token) return null;
-    return person(privateInfo.partner, privateInfo.partner_name, 'Private chat');
+    return { ...person(privateInfo.partner, privateInfo.partner_name, 'Private chat'), private: true };
   }
   if (conversation.type === 1) return person(conversation.name, conversation.display_name);
   const label = (conversation.display_name || '').trim() || 'Chat';
@@ -74,7 +83,7 @@ export function chatShortcutRequest(target: ChatShortcutTarget, icon?: string | 
   const request: ChatShortcutRequest = {
     id: chatShortcutId(target.token),
     label: target.label,
-    path: chatShortcutPath(target.token),
+    path: chatShortcutPath(target.token, target.private === true),
     color: target.color,
     monogram: target.monogram,
   };
