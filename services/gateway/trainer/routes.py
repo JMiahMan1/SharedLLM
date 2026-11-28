@@ -730,14 +730,21 @@ async def sim_record(body: SimRecordBody, request: Request) -> dict[str, Any]:
 
 @router.post("/sim/outcome")
 async def sim_outcome(body: SimOutcomeBody, request: Request) -> dict[str, Any]:
-    """Record an outcome only for a User SIM problem the caller owns."""
-    user, _admin = await _viewer(request)
+    """Record an outcome for the caller's User SIM, or any System SIM as an admin."""
+    user, is_admin = await _viewer(request)
     try:
         owned = await _sim_problems(scope="user", user_id=user, is_admin=False, include_retired=True)
-        if not any(str(p.get("problem_id")) == body.problem_id for p in owned):
-            raise HTTPException(status_code=404, detail="No such User SIM problem for this caller")
+        matched_user = any(str(p.get("problem_id")) == body.problem_id for p in owned)
+        matched_system = False
+        if not matched_user and is_admin:
+            system = await _sim_problems(
+                scope="system", user_id="default", is_admin=True, include_retired=True
+            )
+            matched_system = any(str(p.get("problem_id")) == body.problem_id for p in system)
+        if not matched_user and not matched_system:
+            raise HTTPException(status_code=404, detail="No such SIM problem for this caller")
         payload = body.model_dump()
-        payload["user_id"] = user
+        payload["user_id"] = "default" if matched_system else user
         return await dream_mod.request("POST", "/rag/sim/outcome", body=payload, timeout=30.0)
     except dream_mod.RagError as exc:
         raise _rag_http_error(exc) from exc

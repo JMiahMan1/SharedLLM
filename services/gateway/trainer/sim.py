@@ -110,6 +110,11 @@ async def query(
     return [item for item in results or [] if isinstance(item, dict)]
 
 
+#: The ``query`` parameter of :func:`context_for_turn` shadows the function of
+#: the same name; call through this alias so retrieval actually happens.
+_retrieve = query
+
+
 async def context_for_turn(
     *,
     user_id: str,
@@ -120,7 +125,7 @@ async def context_for_turn(
     k: int = 6,
 ) -> tuple[str, list[dict[str, Any]]]:
     """The bounded prompt block and the rows injected (for outcome learning)."""
-    items = await query(
+    items = await _retrieve(
         user_id=user_id, harness=harness, query=query, model=model,
         is_admin=is_admin, k=k,
     )
@@ -129,6 +134,7 @@ async def context_for_turn(
         harness,
         normalize_model_family(model),
         is_admin=is_admin,
+        preserve_order=True,
     )
     return block[:MAX_SIM_BLOCK_CHARS], items
 

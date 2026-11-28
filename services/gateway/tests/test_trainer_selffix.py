@@ -310,3 +310,61 @@ async def test_the_real_model_call_is_never_trimmed_and_asks_for_enough_tokens(w
     assert seen["context_chars"] == selffix.REPAIR_CONTEXT_CHARS
     assert len(seen["prompt"]) <= seen["context_chars"], "the prompt would have been trimmed"
     assert seen["max_tokens"] >= len(BROKEN) // 3
+
+
+async def test_learning_is_recorded_even_with_an_empty_initial_error(monkeypatch):
+    from services.gateway.trainer import sim as sim_mod
+    from services.gateway.trainer.selffix import RepairResult
+
+    captured: list[dict] = []
+
+    async def fake_success(**kwargs):
+        captured.append(kwargs)
+
+    async def no_outcomes(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(sim_mod, "record_success_lesson", fake_success)
+    monkeypatch.setattr(sim_mod, "record_injected_outcomes", no_outcomes)
+
+    result = RepairResult(
+        status="repaired",
+        workspace_id="sermons",
+        path="math_utils.py",
+        model="qwen3-6-35b",
+        initial_error="",
+    )
+    await selffix._record_repair_learning(result, [], passed=True)
+
+    assert captured and "unknown error" in captured[0]["signature"]
+
+
+async def test_sim_hints_are_dropped_before_a_repair_is_refused_for_the_budget(workspace, monkeypatch):
+    from services.gateway.trainer import sim as sim_mod
+
+    workspace["gates"] = [_gate(0, "1 passed")]
+    prompts: list[str] = []
+
+    async def fake_context_for_turn(**kwargs):
+        return "SIM-HINT-" + "h" * 600, []
+
+    async def fake_complete(prompt):
+        prompts.append(prompt)
+        return _fenced(FIXED)
+
+    async def no_learning(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(sim_mod, "context_for_turn", fake_context_for_turn)
+    monkeypatch.setattr(sim_mod, "record_success_lesson", no_learning)
+    monkeypatch.setattr(sim_mod, "record_injected_outcomes", no_learning)
+    monkeypatch.setattr(selffix, "REPAIR_CONTEXT_CHARS", 800)
+
+    result = await selffix.repair_workspace(
+        "sermons", path="math_utils.py", error_text="1 failed", complete_fn=fake_complete
+    )
+
+    assert result.status == "repaired", result.message
+    assert prompts and "SIM-HINT-" not in prompts[0]
+    assert prompts[0].startswith("Fix the bug in `math_utils.py`")
+

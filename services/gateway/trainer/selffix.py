@@ -235,6 +235,7 @@ async def _record_repair_learning(
             if passed
             else (result.final_error or "the pytest gate still failed")[:300]
         )
+        first_line = (result.initial_error.splitlines() or ["unknown error"])[0]
         await sim_mod.record_injected_outcomes(
             sim_items,
             success=passed,
@@ -242,7 +243,7 @@ async def _record_repair_learning(
             harness="workspace",
             observed_outcome=observed,
         )
-        signature = f"{result.path}::{result.initial_error.splitlines()[0][:160]}"
+        signature = f"{result.path}::{first_line[:160]}"
         if passed:
             await sim_mod.record_success_lesson(
                 user_id="default",
@@ -251,7 +252,7 @@ async def _record_repair_learning(
                 signature=signature,
                 rationale="The pytest gate rejected the original file; this repair passed it.",
                 rule=(
-                    f"When repairing `{result.path}` after `{result.initial_error.splitlines()[0][:120]}`, "
+                    f"When repairing `{result.path}` after `{first_line[:120]}`, "
                     "return the whole file and keep every existing definition; that is what the gate accepted."
                 ),
                 observed_outcome=observed,
@@ -269,7 +270,7 @@ async def _record_repair_learning(
                     "same rewrite approach must not be proposed again unchanged."
                 ),
                 rule=(
-                    f"For `{result.path}` failing with `{result.initial_error.splitlines()[0][:120]}`, "
+                    f"For `{result.path}` failing with `{first_line[:120]}`, "
                     "a whole-file rewrite did not pass the gate; inspect the assertion or change approach."
                 ),
                 observed_outcome=observed,
@@ -362,6 +363,10 @@ async def repair_workspace(
         # The first attempt sees the file as it is on disk; a later attempt sees
         # the candidate that just failed the tests, so it can build on it.
         prompt = build_repair_prompt(path, current, context, test_output, sim_hints=sim_block)
+        if len(prompt) > REPAIR_CONTEXT_CHARS and sim_block:
+            # SIM hints are an optimization, never a reason to refuse a repair
+            # that fits without them: drop the hints and try the honest prompt.
+            prompt = build_repair_prompt(path, current, context, test_output, sim_hints="")
         if len(prompt) > REPAIR_CONTEXT_CHARS:
             result.final_error = (
                 f"the repair prompt is {len(prompt):,} characters, over the "

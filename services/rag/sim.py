@@ -456,7 +456,7 @@ def query(
         except Exception:
             # Embeddings are an optional signal; lexical/tag retrieval is enough.
             pass
-    scored: list[tuple[tuple[float, float, int], dict[str, Any]]] = []
+    scored: list[tuple[tuple[int, float, int, int], dict[str, Any]]] = []
     for item in items:
         status = str(item.get("status") or STATUS_CANDIDATE).lower()
         if status == STATUS_RETIRED:
@@ -476,14 +476,19 @@ def query(
         if q_tokens and not overlap and not tag_hits and not same_harness:
             continue
         lexical = (overlap / max(1, len(q_tokens))) if q_tokens else 0.0
-        score = (
-            lexical * 6.0
-            + tag_hits * 2.0
-            + same_harness * 2.5
-            + float(item.pop("_embedding", 0.0)) * 4.0
-        )
+        embedding = max(0.0, float(item.pop("_embedding", 0.0)))
+        relevance = lexical * 6.0 + tag_hits * 2.0 + embedding * 4.0
+        # Relevance is the gate; portability is only a tie-breaker. A satellite
+        # turn must never receive a rule with zero lexical/tag/embedding overlap,
+        # however portable that rule happens to be.
+        if q_tokens and relevance <= 0.0 and harness == "satellite":
+            continue
         priority = status_priority(item, family)
-        scored.append(((priority, score, int(item.get("retrieval_count") or 0)), item))
+        matched_flag = 1 if (not q_tokens or relevance > 0.0) else 0
+        rank = relevance + same_harness * 2.0 + priority * 0.65
+        scored.append(
+            ((matched_flag, rank, priority, int(item.get("retrieval_count") or 0)), item)
+        )
     scored.sort(key=lambda pair: pair[0], reverse=True)
     results = [item for _rank, item in scored[: max(1, min(int(k), 50))]]
     if results:

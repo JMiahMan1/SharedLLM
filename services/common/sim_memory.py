@@ -422,6 +422,7 @@ def format_sim_block(
     current_model_family: str,
     *,
     is_admin: bool = False,
+    preserve_order: bool = False,
 ) -> str:
     """Render the compact runtime SIM block, capped to the harness budget.
 
@@ -433,6 +434,12 @@ def format_sim_block(
     family, then lessons verified on another family (clearly marked
     unverified here), then candidates. Retired lessons and lessons that
     regressed on the current family are never rendered.
+
+    ``preserve_order`` keeps the caller's relevance-first ordering from
+    :func:`services.rag.sim.query` instead of re-sorting purely by status.
+    That matters because an exact-matching verified lesson must outrank an
+    unrelated portable one; callers that did no retrieval ranking keep the
+    default portable-first sort.
     """
     harness = str(harness or "satellite").strip().lower()
     budget = HARNESS_CHAR_BUDGETS.get(harness, DEFAULT_CHAR_BUDGET)
@@ -440,14 +447,15 @@ def format_sim_block(
     usable = [item for item in (items or []) if is_usable_for_family(item, family, is_admin=is_admin)]
     if not usable:
         return ""
-    usable.sort(
-        key=lambda item: (
-            status_priority(item, family),
-            int(_get(item, "retrieval_count", 0) or 0),
-            str(_get(item, "problem_id", "")),
-        ),
-        reverse=True,
-    )
+    if not preserve_order:
+        usable.sort(
+            key=lambda item: (
+                status_priority(item, family),
+                int(_get(item, "retrieval_count", 0) or 0),
+                str(_get(item, "problem_id", "")),
+            ),
+            reverse=True,
+        )
     header = (
         f"SIM hints ({harness}; current model family: {family}). "
         "System lessons are shared by everyone; User lessons belong only to this user."

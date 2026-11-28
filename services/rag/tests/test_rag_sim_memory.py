@@ -208,3 +208,75 @@ async def test_rag_sim_endpoints_record_query_and_list(tmp_path):
     assert listed["count"] == 1
     consolidated = await rag_main.sim_consolidate()
     assert consolidated["status"] == "SUCCESS"
+
+
+def test_matching_verified_user_rule_beats_an_unrelated_portable_rule(tmp_path):
+    conn = _conn(tmp_path)
+    verified = _record(
+        conn,
+        scope="user",
+        user_id="alice",
+        harness="workspace",
+        signature="timezone formatting",
+        edit_or_rule="Use the timezone formatting helper for timestamps.",
+    )
+    verified = sim.record_outcome(
+        conn,
+        problem_id=verified["problem_id"],
+        observed_outcome="worked",
+        outcome_status="improved",
+        model="qwen3-6-35b",
+    )
+    assert verified["status"] == "verified"
+
+    portable = _record(
+        conn,
+        harness="workspace",
+        signature="manuals",
+        edit_or_rule="Always cite the manual page for shell flags.",
+    )
+    conn.execute(
+        "UPDATE sim_problems SET status = 'portable', verified_models = ? WHERE problem_id = ?",
+        ['["qwen", "claude"]', portable["problem_id"]],
+    )
+    conn.commit()
+
+    results = sim.query(
+        conn, user_id="alice", harness="workspace", query="timezone formatting bug", model="qwen3-6-35b"
+    )
+    ids = [item["problem_id"] for item in results]
+
+    # Relevance gates portability: the exact match is first even though the
+    # unrelated rule is portable.
+    assert ids[0] == verified["problem_id"]
+    assert portable["problem_id"] in ids
+
+
+def test_satellite_query_drops_unrelated_rules_even_when_portable(tmp_path):
+    conn = _conn(tmp_path)
+    related = _record(
+        conn,
+        harness="satellite",
+        signature="harbor song",
+        edit_or_rule="When the user says harbor, prefer the song.",
+    )
+    unrelated = _record(
+        conn,
+        harness="satellite",
+        signature="flags",
+        edit_or_rule="Always cite the manual page for shell flags.",
+    )
+    conn.execute(
+        "UPDATE sim_problems SET status = 'portable', verified_models = ? WHERE problem_id = ?",
+        ['["qwen", "claude"]', unrelated["problem_id"]],
+    )
+    conn.commit()
+
+    results = sim.query(
+        conn, user_id="alice", harness="satellite", query="harbor song", model="qwen3-6-35b"
+    )
+    ids = [item["problem_id"] for item in results]
+
+    assert related["problem_id"] in ids
+    assert unrelated["problem_id"] not in ids
+

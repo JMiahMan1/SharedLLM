@@ -1,6 +1,9 @@
 """The proposer/selector half of SIM: full history in, outcomes back out."""
 from __future__ import annotations
 
+import pytest
+from fastapi import HTTPException
+
 from services.gateway.trainer import dream
 
 
@@ -69,3 +72,83 @@ async def test_selector_records_each_case_outcome_and_consolidates(monkeypatch):
     assert all(r["model"] == report["model"] for r in recorded)
     assert all(r["scope"] == "system" for r in recorded)
     assert consolidated == [True]
+
+
+async def test_context_for_turn_preserves_retrieval_relevance_order(monkeypatch):
+    from services.gateway.trainer import sim as sim_mod
+
+    verified = {
+        "problem_id": "sim-v",
+        "scope": "user",
+        "user_id": "alice",
+        "harness": "workspace",
+        "status": "verified",
+        "verified_models": ["qwen"],
+        "edit_or_rule": "VERIFIED-MATCHING-LESSON",
+        "rationale": "",
+    }
+    portable = {
+        "problem_id": "sim-p",
+        "scope": "system",
+        "user_id": "default",
+        "harness": "workspace",
+        "status": "portable",
+        "verified_models": ["qwen", "claude"],
+        "edit_or_rule": "PORTABLE-UNRELATED-LESSON",
+        "rationale": "",
+    }
+
+    async def fake_query(**kwargs):
+        return [verified, portable]
+
+    monkeypatch.setattr(sim_mod, "_retrieve", fake_query)
+
+    block, items = await sim_mod.context_for_turn(
+        user_id="alice",
+        harness="workspace",
+        query="verified matching lesson",
+        model="qwen3-6-35b",
+    )
+
+    assert [item["problem_id"] for item in items] == ["sim-v", "sim-p"]
+    assert block.index("VERIFIED-MATCHING-LESSON") < block.index("PORTABLE-UNRELATED-LESSON")
+
+
+async def test_admin_records_system_sim_outcome_but_non_admin_still_gets_404(monkeypatch):
+    from services.gateway.trainer import routes
+
+    posted: list[dict] = []
+
+    async def fake_problems(*, scope, user_id, is_admin, **kwargs):
+        if scope == "system":
+            return [{"problem_id": "sim-system"}]
+        return [{"problem_id": "sim-alice"}]
+
+    async def fake_request(method, path, body=None, **kwargs):
+        posted.append(body or {})
+        return {"status": "SUCCESS"}
+
+    monkeypatch.setattr(routes, "_sim_problems", fake_problems)
+    monkeypatch.setattr(routes.dream_mod, "request", fake_request)
+
+    body = routes.SimOutcomeBody(
+        problem_id="sim-system", outcome_status="improved", model="qwen3-6-35b"
+    )
+
+    async def admin_viewer(request):
+        return "root", True
+
+    monkeypatch.setattr(routes, "_viewer", admin_viewer)
+    result = await routes.sim_outcome(body, None)
+    assert result["status"] == "SUCCESS"
+    assert posted[-1]["user_id"] == "default"
+
+    async def non_admin_viewer(request):
+        return "alice", False
+
+    monkeypatch.setattr(routes, "_viewer", non_admin_viewer)
+    with pytest.raises(HTTPException) as exc:
+        await routes.sim_outcome(body, None)
+    assert exc.value.status_code == 404
+    assert len(posted) == 1, "a non-admin must never reach the recording call"
+

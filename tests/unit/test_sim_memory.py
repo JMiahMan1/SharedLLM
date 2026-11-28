@@ -120,6 +120,32 @@ def test_portable_wins_retrieval_priority_over_same_family_verified():
     assert status_priority(portable, "qwen") > status_priority(verified, "qwen")
 
 
+def test_preserve_order_keeps_relevance_first_while_default_sorts_portable_first():
+    items = [
+        _problem(
+            problem_id="v",
+            scope="user",
+            user_id="alice",
+            status="verified",
+            verified_models=["qwen"],
+            edit_or_rule="VERIFIED-MATCHING-RULE",
+        ),
+        _problem(
+            problem_id="p",
+            status="portable",
+            verified_models=["qwen", "claude"],
+            edit_or_rule="PORTABLE-UNRELATED-RULE",
+        ),
+    ]
+
+    default = format_sim_block(items, "workspace", "qwen")
+    assert default.index("PORTABLE-UNRELATED-RULE") < default.index("VERIFIED-MATCHING-RULE")
+
+    preserved = format_sim_block(items, "workspace", "qwen", preserve_order=True)
+    assert preserved.index("VERIFIED-MATCHING-RULE") < preserved.index("PORTABLE-UNRELATED-RULE")
+
+
+
 def test_proposer_history_keeps_retired_and_regressed_evidence():
     summary = summarize_history(
         [_problem(status="retired", observed_outcome="regressed twice", regressed_models=["qwen"])]
