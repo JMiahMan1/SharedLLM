@@ -7,7 +7,7 @@ import { imageKindOf, saveBlob } from '../../lib/saveFile';
 import { errorText } from '../../lib/errorText';
 import { relativeTime } from '../../lib/wanderTrips';
 import MemberCard from './MemberCard';
-import type { ConcernLevel, GuardianConcern, NotifyLevel } from '../../types/api';
+import type { ConcernLevel, GuardianConcern, MessageContext, NotifyLevel } from '../../types/api';
 import { statusQuery } from '../../lib/memberPage';
 import { useMemberDeviceNoun } from '../../hooks/useDeviceNoun';
 import { videoCallAlertText, videoCallLine, withVideoCalls } from '../../lib/videoCalls';
@@ -38,10 +38,20 @@ const WHERE: Record<string, string> = {
 };
 
 function whereText(feature?: string, action?: string): string {
+  if (action === 'voice_message') return 'a voice message';
   if (feature === 'media' && (action?.includes('photo') || action?.includes('image') || action?.includes('video') || action?.includes('scan'))) {
     return 'a photo or video';
   }
   return WHERE[feature || ''] || 'their activity';
+}
+
+/** Who the flagged picture or voice note came from, in the parent's words. */
+function messageLine(context?: MessageContext | null): string {
+  if (!context) return '';
+  const who = context.contact || context.number || context.conversation || 'an unknown number';
+  const kind = context.app || (context.source === 'mms' ? 'MMS' : context.source === 'gallery' ? 'gallery' : '');
+  const where = kind && !who.toLowerCase().includes(kind.toLowerCase()) ? ` (${kind})` : '';
+  return context.direction === 'out' ? `Sent to ${who}${where}` : `From ${who}${where}`;
 }
 
 function whenText(value?: string): string {
@@ -329,6 +339,7 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
           const currentNote = c.id ? (notes[c.id] ?? c.human_review?.note ?? '') : '';
           const callLine = videoCallLine(c);
           const alertText = videoCallAlertText(c);
+          const fromMessage = messageLine(c.message_context);
           return (
             <li key={c.id || `${c.category}-${c.at}-${i}`} className={`rounded-xl border p-3.5 text-xs space-y-2 ${level.style}`} data-testid="concern" data-focus-id={c.id ? `concern-${c.id}` : undefined}>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -354,8 +365,21 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
                   )}
                 </div>
               )}
+              {fromMessage && (
+                <div className="rounded-lg border border-white/10 bg-black/10 px-2.5 py-2 leading-relaxed" data-testid="concern-message-context">
+                  <p className="font-semibold opacity-90">{fromMessage}</p>
+                  {(c.message_context?.app || c.message_context?.conversation) && (
+                    <p className="text-[11px] opacity-75">
+                      {[c.message_context?.app, c.message_context?.conversation].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
+                  {c.message_context?.message_text && (
+                    <p className="mt-0.5 text-[11px] opacity-85">Message: “{c.message_context.message_text}”</p>
+                  )}
+                </div>
+              )}
               <p className="rounded-lg bg-black/20 px-2.5 py-2 leading-relaxed opacity-95">
-                In {whereText(c.feature, c.action)}{c.item ? ` from ${c.item}` : ''}: “{c.excerpt}”
+                In {whereText(c.feature, c.action)}{c.item && c.action !== 'voice_message' ? ` from ${c.item}` : ''}: “{c.excerpt}”
               </p>
               {(context || when || c.file_name) && (
                 <details className="rounded-lg border border-white/10 bg-black/10 px-2.5 py-2 text-[11px] leading-relaxed">

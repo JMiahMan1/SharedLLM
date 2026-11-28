@@ -925,6 +925,8 @@ export interface GuardianConcern {
   image_kept_days?: number;
   review?: ConcernReview | null;
   human_review?: HumanConcernReview | null;
+  /** The message the picture or voice note came in (the server's normalized shape). */
+  message_context?: MessageContext | null;
   /** The call a video-call screenshot came from. */
   video_call?: {
     app?: string;
@@ -2771,6 +2773,25 @@ export interface GuardianRecap {
 }
 
 export type ConcernLevel = 'medium' | 'high' | 'severe';
+
+/**
+ * Who a scanned picture or voice message came from, what app it came through,
+ * and the words that came with it (services/common/concern_review.py
+ * `message_context`). A flagged photo of a bruise means one thing from a friend
+ * and another in a thread of threats, which is why the phone sends this.
+ */
+export interface MessageContext {
+  source?: string | null;
+  direction?: 'in' | 'out' | null;
+  contact?: string | null;
+  number?: string | null;
+  group?: string[] | null;
+  message_text?: string | null;
+  app?: string | null;
+  package?: string | null;
+  conversation?: string | null;
+  sent_at?: number | null;
+}
 
 /** How a concern was weighed: by the household's local model in context, or by the phrase list alone (and why). */
 export interface ConcernReview {

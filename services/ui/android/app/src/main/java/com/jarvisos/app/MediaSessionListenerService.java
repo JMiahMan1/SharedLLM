@@ -173,6 +173,62 @@ public class MediaSessionListenerService extends NotificationListenerService {
         ChatMessageLog.add(this, sender, text, at);
     }
 
+    /**
+     * What a messaging notification can say about the message it shows: the app,
+     * the conversation, who sent it, when, and its words. A picture or a voice
+     * note arrives with a caption that often carries the meaning, and a scan
+     * without it asks the model to guess.
+     */
+    private JSONObject notificationMeta(StatusBarNotification sbn, Bundle extras) {
+        JSONObject meta = new JSONObject();
+        try {
+            String pkg = sbn.getPackageName();
+            meta.put("source", "notification");
+            meta.put("direction", "in");
+            meta.put("package", pkg == null ? "" : pkg);
+            CharSequence app = null;
+            try {
+                app = getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(pkg, 0));
+            } catch (Exception ignored) {
+                // An uninstalled or hidden package still has a name below.
+            }
+            meta.put("app", app == null ? (pkg == null ? "" : pkg) : app.toString());
+            CharSequence conversation = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE);
+            if (conversation == null || conversation.length() == 0) {
+                conversation = extras.getCharSequence(Notification.EXTRA_TITLE);
+            }
+            if (conversation != null && conversation.length() > 0) meta.put("conversation", conversation.toString());
+            meta.put("sent_at", sbn.getPostTime() > 0 ? sbn.getPostTime() : System.currentTimeMillis());
+            android.os.Parcelable[] messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES);
+            if (messages != null && messages.length > 0 && messages[messages.length - 1] instanceof Bundle) {
+                Bundle last = (Bundle) messages[messages.length - 1];
+                CharSequence sender = last.getCharSequence("sender");
+                if (sender == null && last.get("sender_person") instanceof android.app.Person) {
+                    sender = ((android.app.Person) last.get("sender_person")).getName();
+                }
+                if (sender != null && sender.length() > 0) meta.put("contact", sender.toString());
+                CharSequence text = last.getCharSequence("text");
+                if (text != null && text.length() > 0) {
+                    String words = text.toString();
+                    meta.put("message_text", words.length() > 500 ? words.substring(0, 500) : words);
+                }
+            } else {
+                CharSequence body = extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
+                if (body == null || body.length() == 0) body = extras.getCharSequence(Notification.EXTRA_TEXT);
+                if (body != null && body.length() > 0) {
+                    String words = body.toString();
+                    meta.put("message_text", words.length() > 500 ? words.substring(0, 500) : words);
+                }
+            }
+            // One notification, one scan: an update re-posts the same message.
+            meta.put("message_key", "notif:" + pkg + ":" + (conversation == null ? "" : conversation)
+                    + ":" + meta.optLong("sent_at"));
+        } catch (Exception ignored) {
+            // No context is better than a broken listener.
+        }
+        return meta;
+    }
+
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
         if (sbn == null) return;
@@ -181,11 +237,14 @@ public class MediaSessionListenerService extends NotificationListenerService {
         Bundle extras = n.extras;
         if (extras == null) return;
 
-        // A chat image the app put on its notification is readable here even
-        // though its conversation is private (a photo message, never the
-        // outgoing side of an end-to-end chat). Cheap no-op otherwise.
+        // A chat image, or a recorded voice message, the app put on its
+        // notification is readable here even though its conversation is private
+        // (a photo message, never the outgoing side of an end-to-end chat).
+        // Cheap no-op otherwise.
         if (extras.containsKey(Notification.EXTRA_MESSAGES)) {
-            PhotoScan.scanNotification(this, extras);
+            JSONObject notifMeta = notificationMeta(sbn, extras);
+            PhotoScan.scanNotification(this, extras, notifMeta);
+            AudioMessageScan.scanNotification(this, extras, notifMeta);
         }
 
         String pkg = sbn.getPackageName();

@@ -12,6 +12,8 @@ doing:
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import json
 import logging
@@ -53,6 +55,11 @@ log = logging.getLogger("telemetry")
 #: a passing failure, later while the local model's machine is known to be off.
 MEDIA_SCAN_RETRY_S = 60
 MEDIA_SCAN_RETRY_OFFLINE_S = 300
+# A voice note waits for Whisper, which is slower than a vision check and runs
+# on the CPU: a minute is not long enough when a clip is still being read.
+AUDIO_SCAN_RETRY_S = 120
+# One clip is transcribed once. A day is longer than any outbox retries.
+AUDIO_SEEN_SECONDS = 30 * 24 * 3600
 
 #: Most calls and messages the Calls & messages tab gets in one read.
 COMMS_MAX = 3000
@@ -676,6 +683,84 @@ def create_app():
                 "has_image": bool(concern.get("has_image")),
             }
         return {"status": "SUCCESS", "concern": False}
+
+    @application.post("/api/telemetry/audio/scan")
+    async def scan_audio(
+        body: dict[str, Any], _: bool = Depends(require_internal)
+    ):
+        """Transcribe one recorded voice message and scan what it says.
+
+        The audio is the point: a child who is sent a threat by voice, or who
+        records one, says nothing the phrase list can read. The clip is handed
+        to the household's own Whisper on this LAN and never stored - not on
+        disk, not in Redis - and only the transcript is kept, as a text message
+        in the child's feed, where everything that scans texts already looks.
+        """
+        user = str(body.get("user") or "").strip().lower()
+        if not user:
+            raise HTTPException(status_code=422, detail="user is required")
+        audio_b64 = str(body.get("audio_b64") or "").strip()
+        if not audio_b64:
+            raise HTTPException(status_code=422, detail="audio_b64 is required")
+        mime_type = str(body.get("mime_type") or "audio/mp4").strip().lower()
+        file_name = str(body.get("file_name") or "voice-note.m4a").strip()
+        metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+        try:
+            audio = base64.b64decode(audio_b64, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(status_code=422, detail="audio_b64 is not base64 audio") from None
+        if not audio:
+            raise HTTPException(status_code=422, detail="audio_b64 is empty")
+        if len(audio) > guardian.MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=422, detail="that clip is too large to be a voice message")
+
+        rc = _redis()
+        client = _client()
+        child = (await guardian.children(client)).get(user)
+        if not child or child.get("monitoring") == "off":
+            # Adults, and children whose parents turned monitoring off, never
+            # have their voice notes read.
+            return {"status": "SUCCESS", "scanned": False, "reason": "not_a_monitored_child"}
+
+        # A notification retried by the outbox, or an MMS part re-read, is the
+        # same clip: transcribe it once.
+        message_key = str(metadata.get("message_key") or "").strip()
+        seen_key = f"tel:audio_seen:{user}:{message_key}" if message_key else ""
+        if seen_key and not await rc.set(seen_key, "1", nx=True, ex=AUDIO_SEEN_SECONDS):
+            return {"status": "SUCCESS", "scanned": False, "reason": "already_scanned"}
+
+        try:
+            transcript = await guardian.transcribe_audio(client, audio, mime_type, file_name)
+        except guardian.AudioScanUnavailable as exc:
+            if seen_key:
+                # Unseen again, so the retry is not turned away as a duplicate.
+                await rc.delete(seen_key)
+            offline = llm.LOCAL_MODEL.is_down()
+            retry_after = MEDIA_SCAN_RETRY_OFFLINE_S if offline else AUDIO_SCAN_RETRY_S
+            log.info("audio scan for %s deferred (%s); retry in %ss", user, exc, retry_after)
+            return JSONResponse(
+                status_code=503,
+                headers={"Retry-After": str(retry_after)},
+                content={"detail": "The voice message could not be read right now; keep it and try again later.",
+                         "scanned": False, "retry_after_s": retry_after, "offline": "transcriber" if offline else None},
+            )
+
+        if transcript.strip().lower() in guardian.NO_SPEECH:
+            return {"status": "SUCCESS", "scanned": True, "transcript": "", "concern": False}
+
+        event = guardian.voice_message_event(user, transcript, mime_type, file_name, metadata)
+        found = await guardian.record_activity(rc, client, event, deliver_notice)
+        top = max(found, key=lambda c: guardian.concern_monitor.LEVELS.index(c["level"])) if found else None
+        return {
+            "status": "SUCCESS",
+            "scanned": True,
+            "transcript": transcript,
+            "concern": bool(top),
+            **(
+                {"category": top["category"], "level": top["level"], "label": top["label"]}
+                if top else {}
+            ),
+        }
 
     @application.get("/api/telemetry/comms/{user}")
     async def get_comms(

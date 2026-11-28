@@ -796,6 +796,18 @@ final class GuardApi {
      * server will never accept.
      */
     static int uploadMediaScan(Context context, String mediaType, String fileName, String thumbnailB64) {
+        return uploadMediaScan(context, mediaType, fileName, thumbnailB64, null);
+    }
+
+    /**
+     * The same, carrying what the phone knows about the message the picture came
+     * in: who sent it, whether the child sent or received it, the app, and the
+     * words that came with it. A picture of a bruise from a friend and the same
+     * picture in a threatening thread are not the same thing, and the server can
+     * only tell them apart if it is told.
+     */
+    static int uploadMediaScan(Context context, String mediaType, String fileName, String thumbnailB64,
+                               JSONObject metadata) {
         if (!photoScanEnabled(context)) return 204;
         // The server said the check cannot run yet (its vision model's computer is
         // off): hold every photo check until the time it gave, without asking.
@@ -806,6 +818,7 @@ final class GuardApi {
             body.put("media_type", mediaType);
             body.put("file_name", fileName);
             body.put("image_b64", thumbnailB64);
+            if (metadata != null) body.put("metadata", metadata);
             HttpResult r = send(context, "POST", "/api/guardian/media/scan", body.toString(), MEDIA_SCAN_READ_TIMEOUT_MS);
             if (r != null && r.status == 503) {
                 prefs(context).edit().putLong(KEY_MEDIA_SCAN_PAUSED_UNTIL,
@@ -814,6 +827,33 @@ final class GuardApi {
             return r == null ? 0 : r.status;
         } catch (Exception e) {
             // Best effort: media scanning never blocks the phone.
+            return 0;
+        }
+    }
+
+    /**
+     * Send one recorded voice message to be transcribed and scanned. Returns the
+     * HTTP status (0 when there was no connection) so the caller keeps it, and
+     * holds every later clip after a 503 the way the photo check does.
+     */
+    static int uploadAudioScan(Context context, String fileName, String mimeType, String audioB64,
+                               JSONObject metadata) {
+        if (!isProtected(context)) return 204; // an adult's voice notes are never read
+        if (System.currentTimeMillis() < prefs(context).getLong(KEY_AUDIO_SCAN_PAUSED_UNTIL, 0L)) return 503;
+        try {
+            JSONObject body = new JSONObject();
+            body.put("file_name", fileName);
+            body.put("mime_type", mimeType);
+            body.put("audio_b64", audioB64);
+            if (metadata != null) body.put("metadata", metadata);
+            HttpResult r = send(context, "POST", "/api/guardian/audio/scan", body.toString(), AUDIO_SCAN_READ_TIMEOUT_MS);
+            if (r != null && r.status == 503) {
+                prefs(context).edit().putLong(KEY_AUDIO_SCAN_PAUSED_UNTIL,
+                        MediaScanOutbox.pausedUntil(System.currentTimeMillis(), r.body)).apply();
+            }
+            return r == null ? 0 : r.status;
+        } catch (Exception e) {
+            // Best effort: a voice note never blocks the phone.
             return 0;
         }
     }
@@ -856,6 +896,8 @@ final class GuardApi {
     static final String KEY_VIDEO_CAPTURE = "guard_video_capture";
     /** Photo checks wait until this time (epoch ms) after the server answered 503 with retry_after_s. */
     static final String KEY_MEDIA_SCAN_PAUSED_UNTIL = "guard_media_scan_paused_until";
+    /** The same for voice-message transcription, which has its own, slower answer. */
+    static final String KEY_AUDIO_SCAN_PAUSED_UNTIL = "guard_audio_scan_paused_until";
 
     /**
      * How the last video call screenshot went ("ok", or why it failed), and
@@ -1052,6 +1094,12 @@ final class GuardApi {
      * caller is off the main thread (the scan worker, or its own thread).
      */
     static final int MEDIA_SCAN_READ_TIMEOUT_MS = 75_000;
+    /**
+     * Whisper on the server's CPUs takes far longer than a vision answer and has
+     * no model to load onto the card first: the server gives it 180 s (a minute
+     * of speech is normal), so the phone waits a little longer still.
+     */
+    static final int AUDIO_SCAN_READ_TIMEOUT_MS = 200_000;
 
     /** Null when the phone has no credentials yet. Also used for the crash SOS ({@link CrashAlert}). */
     static HttpResult send(Context context, String method, String path, String json) throws Exception {

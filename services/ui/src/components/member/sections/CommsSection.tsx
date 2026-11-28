@@ -208,11 +208,21 @@ export default function CommsSection({ username, name }: { username: string; nam
                             <p className="flex items-baseline gap-2 text-slate-200">
                               <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2">
                                 <span className="break-words">{line?.title ?? e.item}</span>
+                                {line?.badge && (
+                                  <span className="rounded-full bg-[var(--site-accent-soft)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--site-accent-text)]" data-testid="member-comms-voice">
+                                    {line.badge}
+                                  </span>
+                                )}
                                 {line?.length && <span className="text-slate-400">{line.length}</span>}
                                 {line?.number && <span className="text-slate-500">{line.number}</span>}
                               </span>
                               <Stamp at={e.at} />
                             </p>
+                            {line?.badge && typeof e.detail?.message_text === 'string' && e.detail.message_text && (
+                              <p className="mt-0.5 break-words text-[11px] text-slate-400">
+                                Text with it: “{e.detail.message_text}”
+                              </p>
+                            )}
                             {line?.text && (
                               <button
                                 type="button"

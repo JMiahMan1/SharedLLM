@@ -70,24 +70,50 @@ final class MediaScanOutbox {
         final String mediaType;
         final String fileName;
         final String b64;
+        /**
+         * What the phone knew about the message it came from, as JSON, or null
+         * for an item queued before that was kept (those still send fine).
+         */
+        final String metadata;
 
         Item(File file, String mediaType, String fileName, String b64) {
+            this(file, mediaType, fileName, b64, null);
+        }
+
+        Item(File file, String mediaType, String fileName, String b64, String metadata) {
             this.file = file;
             this.mediaType = mediaType;
             this.fileName = fileName;
             this.b64 = b64;
+            this.metadata = metadata;
         }
     }
 
     /** Keep one thumbnail for later; the oldest is dropped past {@link #MAX_PENDING}. */
     static synchronized boolean add(File dir, String mediaType, String fileName, String b64) {
+        return add(dir, mediaType, fileName, b64, null);
+    }
+
+    /**
+     * The same, with the message context the scan came from (who sent it, which
+     * app, what came with it). It is written with the thumbnail because a chat
+     * picture exists only while its notification does: the context is as
+     * perishable as the picture, and a retry a minute later is the same message.
+     */
+    static synchronized boolean add(File dir, String mediaType, String fileName, String b64, String metadata) {
         if (b64 == null || b64.isEmpty()) return false;
         if (!dir.isDirectory() && !dir.mkdirs()) return false;
         String safeType = clean(mediaType);
         String safeName = clean(fileName);
+        String safeMeta = clean(metadata);
         File f = new File(dir, System.currentTimeMillis() + "-" + Math.abs(b64.hashCode()) + ".scan");
+        // Line two shapes live on disk: `type\nname\nbase64` (written before
+        // context was kept) and `type\nname\n{json}\nbase64`. Base64 never
+        // begins with `{`, so a reader tells them apart without a version.
+        String text = safeType + "\n" + safeName + "\n"
+                + (safeMeta == null || safeMeta.isEmpty() ? "" : safeMeta + "\n") + b64;
         try (FileOutputStream out = new FileOutputStream(f)) {
-            out.write((safeType + "\n" + safeName + "\n" + b64).getBytes(StandardCharsets.UTF_8));
+            out.write(text.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             return false;
         }
@@ -108,7 +134,19 @@ final class MediaScanOutbox {
                 String text = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
                 String[] parts = text.split("\n", 3);
                 if (parts.length == 3 && !parts[2].isEmpty()) {
-                    out.add(new Item(f, parts[0], parts[1], parts[2]));
+                    String metadata = null;
+                    String b64 = parts[2];
+                    int newline = b64.indexOf('\n');
+                    if (newline > 0 && b64.startsWith("{")) {
+                        metadata = b64.substring(0, newline);
+                        b64 = b64.substring(newline + 1);
+                    }
+                    if (b64.isEmpty()) {
+                        //noinspection ResultOfMethodCallIgnored
+                        f.delete();
+                    } else {
+                        out.add(new Item(f, parts[0], parts[1], b64, metadata));
+                    }
                 } else {
                     //noinspection ResultOfMethodCallIgnored
                     f.delete(); // unreadable: nothing to send
