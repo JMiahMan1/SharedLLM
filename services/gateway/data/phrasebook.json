@@ -115,6 +115,14 @@
     "what is my top speed",
     "how long have I been still",
     "locations I frequent the most",
-    "where do I spend the most time"
+    "where do I spend the most time",
+    "how long will it take me to get to the airport",
+    "how long will it take me to get to 1234 E Main St",
+    "how long to drive from work to the school",
+    "how long to walk from home to the park",
+    "eta to the office",
+    "how long until I get home",
+    "who is closest to the school",
+    "who's nearest to work"
   ]
 }

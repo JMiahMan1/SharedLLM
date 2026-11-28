@@ -2263,17 +2263,39 @@ async def _geocode_place(text: str, near: tuple[float, float] | None = None) -> 
     return hit
 
 
-async def _destination(to: str, near: tuple[float, float] | None = None) -> dict | None:
+#: Ways of asking for a walking ETA, from the LLM and from a phrase.
+_WALKING_MODES = {"walking", "walk", "foot", "on foot", "on_foot"}
+
+
+def eta_route(mode: str | None) -> tuple[str | None, str, str]:
+    """(OSRM server, OSRM profile, canonical mode) for an ETA.
+
+    The profile is part of the URL, not of the server, so the walking server
+    (OSRM_FOOT_URL) must be asked for ``/route/v1/foot/``; asking a foot server
+    for ``driving`` is a 400 that reads as "the road network is down"."""
+    if (mode or "").strip().lower() in _WALKING_MODES:
+        return OSRM_FOOT_URL, "foot", "walking"
+    return OSRM_URL, "driving", "driving"
+
+
+async def _destination(to: str, near: tuple[float, float] | None = None,
+                       viewer: str | None = None) -> dict | None:
     """A destination by HA zone (entity id or name, "home" by default),
     "lat,lon", or else an address / place name (geocoded near ``near``):
-    {"name", "latitude", "longitude", "radius"}."""
+    {"name", "latitude", "longitude", "radius"}.
+
+    A name is matched against the places ``viewer`` may see: the household's
+    zones plus that person's own private saved places. Without a viewer only
+    the household's are considered, so naming someone else's private place
+    finds nothing rather than silently routing there."""
     key = (to or "home").strip()
     if re.fullmatch(r"-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?", key):
         lat, lon = (float(v) for v in key.split(","))
         return {"name": f"{lat:.4f}, {lon:.4f}", "latitude": lat, "longitude": lon, "radius": 50.0}
     want = key.lower().removeprefix("zone.")
     try:
-        known = hub_places.family(await _zones())
+        zones = await _zones()
+        known = hub_places.for_person(zones, viewer) if viewer else hub_places.family(zones)
     except hub_places.PlacesUnavailable:
         known = []
     for z in known:
@@ -2287,29 +2309,70 @@ async def _latest_fix(r, clean: str) -> dict | None:
     return json.loads(raw[0]) if raw else None
 
 
-async def compute_eta(clean: str, to: str = "home") -> dict:
-    """Drive time from someone's latest fix to a destination, by road (OSRM).
-    Raises HTTPException with the reason when it cannot be given."""
+async def compute_eta(clean: str, to: str = "home", viewer: str | None = None,
+                      mode: str | None = "driving") -> dict:
+    """Travel time from someone's latest fix to a destination by road (OSRM).
+    Raises HTTPException with the reason when it cannot be given.
+
+    ``viewer`` is the person asking: it is only used to resolve their own
+    private saved places, and only when they are asking about themselves, so
+    no one's private place is ever named on someone else's behalf."""
     r = await get_redis()
     fix = await _latest_fix(r, clean)
     if not fix:
         raise HTTPException(status_code=404, detail=f"No location for {clean}")
-    dest = await _destination(to, (fix["lat"], fix["lon"]))
+    who = (viewer or "").strip().lower()
+    dest = await _destination(to, (fix["lat"], fix["lon"]), who if who == clean else None)
     if not dest:
         raise HTTPException(status_code=404, detail=f"No place called '{to}' (a zone, an address or lat,lon)")
+    server, profile, canonical = eta_route(mode)
     straight = _haversine_distance(fix["lat"], fix["lon"], dest["latitude"], dest["longitude"])
     out = {
         "user_id": clean,
         "to": dest["name"],
+        "mode": canonical,
         "fix_time": fix.get("t"),
         "fix_age_s": round(time.time() - float(fix.get("t", time.time()))),
         "moving": float(fix.get("spd") or 0) >= 2.0,
     }
     if straight <= dest["radius"]:
         return {**out, "arrived": True, "duration_s": 0, "distance_m": 0, "eta": fix.get("t")}
-    route = await map_match.route((fix["lat"], fix["lon"]), (dest["latitude"], dest["longitude"]), OSRM_URL)
+    route = await map_match.route((fix["lat"], fix["lon"]), (dest["latitude"], dest["longitude"]),
+                                  server, profile=profile)
     if not route:
-        raise HTTPException(status_code=503, detail="The road network cannot give a drive time right now")
+        raise HTTPException(status_code=503, detail="The road network cannot give a travel time right now")
+    return {
+        **out,
+        "arrived": False,
+        "duration_s": round(route["duration_s"]),
+        "distance_m": round(route["distance_m"]),
+        "eta": round(time.time() + route["duration_s"]),
+    }
+
+
+async def compute_place_eta(origin: str, to: str, viewer: str | None = None,
+                            mode: str | None = "driving") -> dict:
+    """Travel time between two places, neither of which is a person: a saved
+    place, a zone, an address or "lat,lon" at each end (OSRM route).
+
+    "How long to drive from here to the auction house" has no person in it, so
+    there is no GPS fix to read; both ends are resolved as places."""
+    who = (viewer or "").strip().lower() or None
+    start = await _destination(origin, viewer=who)
+    if not start:
+        raise HTTPException(status_code=404, detail=f"No place called '{origin}' (a zone, an address or lat,lon)")
+    dest = await _destination(to, (start["latitude"], start["longitude"]), who)
+    if not dest:
+        raise HTTPException(status_code=404, detail=f"No place called '{to}' (a zone, an address or lat,lon)")
+    server, profile, canonical = eta_route(mode)
+    straight = _haversine_distance(start["latitude"], start["longitude"], dest["latitude"], dest["longitude"])
+    out = {"from": start["name"], "to": dest["name"], "mode": canonical}
+    if straight <= dest["radius"]:
+        return {**out, "arrived": True, "duration_s": 0, "distance_m": 0, "eta": round(time.time())}
+    route = await map_match.route((start["latitude"], start["longitude"]),
+                                  (dest["latitude"], dest["longitude"]), server, profile=profile)
+    if not route:
+        raise HTTPException(status_code=503, detail="The road network cannot give a travel time right now")
     return {
         **out,
         "arrived": False,
@@ -2346,11 +2409,12 @@ CLOSEST_MAX_FIX_AGE_S = 3600
 @app.get("/closest")
 async def get_closest(
     to: str = Query(..., description="An HA zone (name or entity id) or lat,lon"),
+    mode: str = Query("driving", description="driving (default) or walking"),
     viewer: str | None = None,
     is_admin: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
 ):
-    """Who can get to a place soonest, by drive time on the roads (OSRM
+    """Who can get to a place soonest, by travel time on the roads (OSRM
     table), among the people the viewer may see. Nearest first."""
     if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
@@ -2370,29 +2434,61 @@ async def get_closest(
             people.append((user, fix))
     if not people:
         return {"to": dest["name"], "people": []}
+    server, profile, canonical = eta_route(mode)
     durations = await map_match.table([(f["lat"], f["lon"]) for _, f in people],
-                                      (dest["latitude"], dest["longitude"]), OSRM_URL)
+                                      (dest["latitude"], dest["longitude"]), server, profile=profile)
     if durations is None:
-        raise HTTPException(status_code=503, detail="The road network cannot give drive times right now")
+        raise HTTPException(status_code=503, detail="The road network cannot give travel times right now")
     ranked = sorted(
         ({"user_id": u, "duration_s": round(d), "fix_age_s": round(now - float(f.get("t", now)))}
          for (u, f), d in zip(people, durations, strict=True) if d is not None),
         key=lambda x: x["duration_s"],
     )
-    return {"to": dest["name"], "people": ranked}
+    return {"to": dest["name"], "mode": canonical, "people": ranked}
+
+
+@app.get("/eta")
+async def get_place_eta(
+    to: str = Query(..., description="Destination: a saved place, a zone, an address or lat,lon"),
+    origin: str | None = Query(None, description="Origin place, address or lat,lon (place-to-place)"),
+    from_place: str | None = Query(None, description="Alias of origin, for an LLM that says 'from'"),
+    user: str | None = Query(None, description="Who is travelling: their latest fix is the origin"),
+    person: str | None = Query(None, description="Alias of user"),
+    mode: str = Query("driving", description="driving (default) or walking"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+):
+    """How long until a person gets somewhere, or between two places.
+
+    With a person, the origin is their latest fix (and the same sharing
+    consent as their location applies). With an origin place, neither end is
+    a person: both are resolved as places, so "how long from here to the
+    auction house" works without reading anyone's position."""
+    if not _verify_internal_secret(x_internal_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    start = (origin or from_place or "").strip()
+    if start:
+        return await compute_place_eta(start, to, viewer=viewer, mode=mode)
+    who = (user or person or "").strip()
+    if not who:
+        raise HTTPException(status_code=400, detail="Give an origin place, or a user to travel from")
+    clean = await _require_may_view(viewer, who, is_admin)
+    return await compute_eta(clean, to, viewer=viewer, mode=mode)
 
 
 @app.get("/people/{entity_id:path}/eta")
 async def get_eta(
     entity_id: str,
     to: str = Query("home"),
+    mode: str = Query("driving", description="driving (default) or walking"),
     viewer: str | None = None,
     is_admin: str | None = None,
 ):
     """How long until someone reaches a place, by road from their latest fix.
     Subject to the same sharing consent as their location."""
     clean = await _require_may_view(viewer, entity_id, is_admin)
-    return await compute_eta(clean, to)
+    return await compute_eta(clean, to, viewer=viewer, mode=mode)
 
 
 @app.get("/people/{entity_id:path}/telemetry")

@@ -19,9 +19,10 @@ Play music, podcasts, radio, or audio via Music Assistant, Home Assistant, or Ne
   - `{"tool": "MediaPlayRequest", "query": "Miles Davis", "media_type": "music", "device_name": "Den"}`
 
 ### MediaTransportRequest
-Transport controls for active media players.
+Transport controls for active media players, including audiobooks.
 - Fields: `tool`, `command` (`pause`, `resume`, `stop`, `next`, `previous`, `volume_set`, `volume_up`, `volume_down`, `volume_mute`, `volume_unmute`).
 - Optional: `entity_id` or `device_name`; `volume_level` (0 to 1) with `volume_set`.
+- For an audiobook or anything long: `position` (0 to 1 through the file), `seconds` (an absolute offset), `chapter`, `rate` (playback speed, 1.0 is normal).
 - "Set the volume to N%" is `volume_set` with `volume_level` N/100; `volume_up`/`volume_down` are one small step.
 - Any target level is `volume_set`, never repeated steps: "lower it to 30%", "turn it down to 30", "keep lowering it until 30%" and a follow-up "set it to 50%" (the device just talked about) are all `{"tool": "MediaTransportRequest", "command": "volume_set", "volume_level": 0.3, "device_name": "Office TV"}`.
 - Never state a volume you did not just set or read with a tool in this turn; to check one, call `MediaStatusRequest`.
@@ -139,8 +140,10 @@ Control thermostat/climate.
 - Fields: `tool`, `entity_id`, `temperature`.
 
 ### TimerRequest
-Set or check timers and alarms.
+Set, check, or cancel timers and alarms.
 - Fields: `tool`, `action` (`add`, `list`, `delete`), optional `duration_str` (e.g. "10 minutes"), `title`.
+- For a clock time rather than a countdown, use `time_str` (e.g. "6:30 am"); `recurrence` repeats it (`daily`, `weekdays`, or days of the week).
+- Optional `target_device` / `target_devices` and `scope` ring a particular speaker; `sound`, `emoji`, `tts_enabled` and `flash_screen` shape how it announces itself.
 
 ### EntitySearchRequest
 Search for Home Assistant entities/devices by name, domain, or area. Reachable devices are listed first; a device that is `off` can still be turned on. Not needed before an announcement.
@@ -160,16 +163,102 @@ The family chat (Nextcloud Talk). To send a family member a message, send it to 
 - Example: `{"tool": "TalkRequest", "action": "send", "target_user": "<family member>", "message": "Please call me when you can"}`
 
 ### HAServiceRequest
-Generic Home Assistant service call.
-- Fields: `tool`, `domain`, `service`, `entity_id`.
+Generic Home Assistant service call, for anything no other tool covers.
+- Fields: `tool`, `domain`, `service`, `entity_id`, and `service_data` (an object of the service's own parameters, e.g. `{"brightness_pct": 40}`).
 
 ### LocationRequest
-Query person/family location, Home Assistant zone presence, speed, dwell time, and travel telemetry (Life360 features).
-- Fields: `tool`, `user` (name or person, e.g. "Alex", "Sam", "me"), optional `detail` ("summary", "speed", "dwell", "frequented", "cost", "vehicle").
+Where someone is, and how long it takes to get somewhere.
+- Fields: `tool`, `user` (name or person, e.g. "Alex", "Sam", "me"), optional `detail`.
+- `detail` is one of `summary` (default), `speed`, `dwell`, `frequented`, `cost`, `vehicle`, `eta`, `closest`.
+- For a journey (`detail: "eta"`): `to` is the destination and `origin` the starting place. Either may be a saved place, a Home Assistant zone, a street address, or `lat,lon`. With no `origin`, the person named in `user` travels. With an `origin`, no `user` is needed — that is a place-to-place question.
+- `mode` is `driving` (default) or `walking`.
+- `detail: "closest"` with `to` says which family member is nearest a place.
 - Examples:
   - `{"tool": "LocationRequest", "user": "Alex"}`
   - `{"tool": "LocationRequest", "user": "Alex", "detail": "speed"}`
-  - `{"tool": "LocationRequest", "user": "me", "detail": "frequented"}`
+  - `{"tool": "LocationRequest", "user": "me", "detail": "eta", "to": "home"}`
+  - `{"tool": "LocationRequest", "user": "me", "detail": "eta", "to": "1234 E Main St"}`
+  - `{"tool": "LocationRequest", "detail": "eta", "origin": "work", "to": "the airport"}`
+  - `{"tool": "LocationRequest", "user": "me", "detail": "eta", "to": "the park", "mode": "walking"}`
+  - `{"tool": "LocationRequest", "detail": "closest", "to": "the school", "user": "Sam"}`
+- Never answer a travel-time question from memory and never say there is no mapping tool: this tool computes it. If it reports no time, say so plainly.
+
+### CalendarRequest
+The family calendars.
+- Fields: `tool`, `action` (`read`, `list`, `create`, `update`, `delete`).
+- `read` answers "what is next on my calendar" and takes `range_start` / `range_end` (ISO times) for a window, `calendar_name` or `integration` to narrow to one calendar, and `query` to search.
+- `list` names the calendars; `create` needs `summary` and `start_time`; `update` and `delete` need `event_id`.
+- Optional `priority_wins` when two households' calendars disagree.
+
+### MediaStatusRequest
+What is playing right now, on what, and how loud.
+- Fields: `tool`, optional `area`, optional `entity_id`.
+
+### VideoPlayRequest
+Play a video file or stream on a target device.
+- Fields: `tool`, `entity_id`, `query` (the file, title, or URL to play).
+
+### TVCastRequest
+Cast media or a URL to a TV or Chromecast.
+- Fields: `tool`, `media_player_entity_id`, `media_content_id` (the URL or media reference), `media_content_type`.
+- Optional `power_on_wait_ms` when the TV has to wake first.
+
+### SecurityRequest
+Arm, disarm, or ask about the alarm.
+- Fields: `tool`, `action`, optional `entity_id`.
+
+### DropInRequest
+Echo-to-Echo Drop In: open a live audio channel to another room's Echo.
+- Fields: `tool`, `action` (`start`, `end`, `status`), `target_room` (a room name, or `room_of:<person>`), `target_device`, optional `source_satellite`.
+
+### LogbookRequest
+What happened lately in Home Assistant.
+- Fields: `tool`, optional `entity_id`, optional `days` (default 1).
+
+### NightModeRequest
+The night-mode scene: lights down, house locks up, climate settles for sleep.
+- Fields: `tool`, optional `lights` (default `all`), `climate_entity`, `sleep_temp` (default 68), `media_entity`, `media_query` (quiet audio to fall asleep to).
+
+### DocumentBroadcastRequest
+A composite broadcast: a spoken announcement, the displays, and a lighting scene, as one action.
+- Fields: `tool`, `input_path` (the document to read), `entity_id` (the lights scene), optional `summary`, optional `voice`.
+
+### TTSRequest
+Synthesize speech to an audio file (not to a speaker — use `AnnouncementRequest` for that).
+- Fields: `tool`, `text`, optional `voice`, `storybook`, `relative_path`.
+
+### WebReadRequest
+Read a URL's content: a page's main text, a PDF's text page by page, or a text file.
+- Fields: `tool`, `url`, optional `start_page` for long PDFs, optional `save: true` to keep the downloaded file.
+
+### WebScraperRequest
+Scrape product or page data with a real browser, when a plain fetch is not enough (script-rendered pages, listings).
+- Fields: `tool`, `query` or `urls`, optional `output_file`.
+
+### ImageEditRequest
+Edit an existing image (img2img). The field is `image_path` — there is no `image` field.
+- Fields: `tool`, `image_path`, `prompt`.
+- Optional `face_image_path` for a face swap (both images are then required), `output_path`, `size`, `model`.
+- To restage or restyle one photo and keep the people recognisable, use `image_path` alone and say so in `prompt`.
+
+### AiCapabilitiesRequest
+Which AI abilities actually run on this machine — image editing, face swap, face-preserving generation, voice profiles, video.
+- Fields: `tool`.
+- Each answer is true, false, or `null` (unconfirmed). Check before promising a capability.
+
+### garden_summary
+Today's garden: which plants need care, frost/heat/rain alerts, what is ready to harvest, and pantry goals.
+- Fields: `tool`.
+
+### garden_log_care
+Record plant care.
+- Fields: `tool`, `target` (a plant's name, a species, or a room).
+- Optional `action` (`water` by default, `fertilize`, `mist`, `prune_pinch`, `clean_leaves`, `rotate`, `check_pests`), `still_damp` (snooze — the soil is still wet), `postpone_days` (default 2).
+
+### garden_log_harvest
+Record a harvest.
+- Fields: `tool`, `target`, `quantity`.
+- Optional `unit`, `disposition` (`fresh`, `canned`, `frozen`, `dried`, `fermented`, `shared`), `notes`.
 
 ### WebSearchRequest
 Search the public internet for web information. (Do NOT use to play music or podcasts).

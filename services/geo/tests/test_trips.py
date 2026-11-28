@@ -855,8 +855,9 @@ async def test_eta_home_by_road(client, fake_redis, monkeypatch):
     async def zones():
         return [HOME]
 
-    async def road(a, b, url, timeout_s=5.0):
+    async def road(a, b, url, profile="driving", timeout_s=5.0):
         assert b == (HOME["latitude"], HOME["longitude"])
+        assert profile == "driving"
         return {"distance_m": 19800.0, "duration_s": 1080.0}
     monkeypatch.setattr(geo, "_zones", zones)
     monkeypatch.setattr(geo.map_match, "route", road)
@@ -920,7 +921,8 @@ async def test_closest_ranks_by_road_time_among_those_shared(client, fake_redis,
     async def may_see(viewer, target):
         return target != "kate"   # kate does not share with the viewer
 
-    async def table(sources, dest, url):
+    async def table(sources, dest, url, profile="driving"):
+        assert profile == "driving"
         return [1500.0 if lat == 39.6725 else 400.0 for lat, _ in sources]
     monkeypatch.setattr(geo, "_tracked_users", tracked)
     monkeypatch.setattr(geo, "_zones", zones)

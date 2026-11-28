@@ -130,13 +130,17 @@ async def match(points: list[dict], osrm_url: str | None, profile: str = "drivin
 
 
 async def route(a: tuple[float, float], b: tuple[float, float], osrm_url: str | None,
-                timeout_s: float = 5.0) -> dict | None:
-    """Fastest road route from a to b ((lat, lon) each): {"distance_m",
-    "duration_s"}, or None when OSRM cannot be asked or finds no route."""
+                profile: str = "driving", timeout_s: float = 5.0) -> dict | None:
+    """Fastest route from a to b ((lat, lon) each): {"distance_m", "duration_s"},
+    or None when OSRM cannot be asked or finds no route.
+
+    ``profile`` is the OSRM profile in the URL, not a property of the server:
+    the same engine answers ``/route/v1/driving/`` and ``/route/v1/foot/``, so a
+    server configured for walking (OSRM_FOOT_URL) is asked with ``"foot"``."""
     base = (osrm_url or "").rstrip("/")
     if not base:
         return None
-    url = f"{base}/route/v1/driving/{a[1]:.6f},{a[0]:.6f};{b[1]:.6f},{b[0]:.6f}"
+    url = f"{base}/route/v1/{profile}/{a[1]:.6f},{a[0]:.6f};{b[1]:.6f},{b[0]:.6f}"
     try:
         async with aiohttp.ClientSession() as session, session.get(
                 url, params={"overview": "false"}, timeout=aiohttp.ClientTimeout(total=timeout_s)) as resp:
@@ -151,9 +155,11 @@ async def route(a: tuple[float, float], b: tuple[float, float], osrm_url: str | 
 
 
 async def table(sources: list[tuple[float, float]], destination: tuple[float, float],
-                osrm_url: str | None) -> list[float | None] | None:
-    """Drive time (s) from each source to one destination (OSRM table), None
-    for a source with no route; None when OSRM cannot be asked."""
+                osrm_url: str | None, profile: str = "driving") -> list[float | None] | None:
+    """Travel time (s) from each source to one destination (OSRM table), None
+    for a source with no route; None when OSRM cannot be asked.
+
+    ``profile`` works like ``route``'s: ``"foot"`` against a walking server."""
     base = (osrm_url or "").rstrip("/")
     if not base or not sources:
         return None
@@ -162,7 +168,7 @@ async def table(sources: list[tuple[float, float]], destination: tuple[float, fl
               "destinations": str(len(sources)), "annotations": "duration"}
     try:
         async with aiohttp.ClientSession() as session, session.get(
-                f"{base}/table/v1/driving/{coords}", params=params,
+                f"{base}/table/v1/{profile}/{coords}", params=params,
                 timeout=aiohttp.ClientTimeout(total=10)) as resp:
             data = await resp.json(content_type=None)
     except Exception as e:

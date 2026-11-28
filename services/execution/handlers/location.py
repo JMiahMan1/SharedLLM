@@ -9,7 +9,7 @@ import re
 from typing import Any
 
 import aiohttp
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 try:
     from schemas import ExecutionResult, UserContext
@@ -20,13 +20,37 @@ log = logging.getLogger("execution.location")
 
 
 class LocationRequest(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def map_travel_aliases(cls, data: Any) -> Any:
+        """Keep a named origin however the model named it (``from``, ``start``...)."""
+        if isinstance(data, dict):
+            data = dict(data)
+            if not data.get("origin"):
+                for alias in ("from", "from_place", "start", "start_place", "origin_place"):
+                    if isinstance(data.get(alias), str) and data[alias].strip():
+                        data["origin"] = data[alias]
+                        break
+            if not data.get("destination"):
+                for alias in ("destination", "to_place", "end", "end_place"):
+                    if isinstance(data.get(alias), str) and data[alias].strip():
+                        data["destination"] = data[alias]
+                        break
+            if not data.get("mode") and isinstance(data.get("travel_mode"), str):
+                data["mode"] = data["travel_mode"]
+        return data
+
     user_context: UserContext | None = None
     user: str | None = None
     person: str | None = None
     target: str | None = None
     detail: str | None = None  # "summary", "speed", "dwell", "frequented", "cost", "vehicle", "eta", "closest"
     to: str | None = None  # for "eta": a Home Assistant zone ("home", "work") or "lat,lon"
+    destination: str | None = None  # alias for "to"
+    origin: str | None = None  # where the trip starts; omitted = the person's latest fix
+    mode: str | None = None  # "driving" (default) or "walking"
     hours: float = 24.0
+
 
 
 def _clean_target_name(target_str: str | None, default_user: str | None = None) -> str:
@@ -48,7 +72,89 @@ def _minutes(seconds: float) -> str:
     return f"{m // 60} h {m % 60:02d} min"
 
 
-async def _closest(to: str | None, caller: str, is_admin: bool) -> ExecutionResult:
+def _arrival_clock(epoch: Any) -> str:
+    """When they arrive, as the household reads a clock ("4:15 pm"), or "".
+
+    The geo service answers with an epoch, which is no answer to a person; the
+    household's zone lives in ``household_tz``, and a box with no zone set is a
+    reason to say nothing rather than to say the wrong hour.
+    """
+    if not isinstance(epoch, (int, float)) or epoch <= 0:
+        return ""
+    try:
+        import datetime
+
+        from services.common import household_tz
+
+        when = datetime.datetime.fromtimestamp(float(epoch), household_tz.zoneinfo())
+    except Exception:
+        return ""
+    hour = when.hour % 12 or 12
+    return f"{hour}:{when.minute:02d} {'am' if when.hour < 12 else 'pm'}"
+
+
+async def _eta(target_name: str, to: str | None, origin: str | None, caller: str, is_admin: bool,
+               mode: str | None = None) -> ExecutionResult:
+    """ "When will X be home?" / "how long from A to B?": travel time by road or on foot.
+
+    A named origin asks the geo service to route place to place (``/eta``); with
+    none, it routes from that person's latest fix as before.
+    """
+    from services.common.http import get_client_insecure
+    from services.config import GEO_SVC_URL, INTERNAL_SECRET
+
+    name = target_name.title() if target_name else ""
+    params = {"to": to or "home", "viewer": caller, "is_admin": "true" if is_admin else "false"}
+    if mode:
+        params["mode"] = mode
+    base = f"{GEO_SVC_URL.rstrip('/')}"
+    if origin:
+        params["origin"] = origin
+        url = f"{base}/eta"
+    else:
+        url = f"{base}/people/{target_name}/eta"
+    try:
+        async with get_client_insecure() as client, client.get(
+            url, params=params,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=10.0),
+        ) as resp:
+            data = await resp.json(content_type=None)
+            status = resp.status
+    except Exception as e:
+        log.warning(f"[location] ETA lookup failed: {e}")
+        return ExecutionResult(status="FAILURE", message="I can't work out travel times right now.", service="location")
+    if status == 404 and origin is None and "shared" in str(data.get("detail", "")):
+        return ExecutionResult(status="SUCCESS", message=f"I don't have a current location for {name} right now.",
+                               service="location")
+    if status != 200:
+        return ExecutionResult(status="FAILURE", message=str(data.get("detail") or "No travel time available."),
+                               service="location", detail=data)
+    place = data.get("to") or (to or "there")
+    walking = str(data.get("mode") or mode or "driving").lower() == "walking"
+    road = "on foot" if walking else "by road"
+    miles = data.get("distance_m", 0) * 0.000621371
+    clock = _arrival_clock(data.get("eta"))
+    if origin is not None:
+        start = data.get("from") or origin
+        if data.get("arrived"):
+            msg = f"{start} and {place} are the same place."
+        else:
+            msg = f"It is about {_minutes(data['duration_s'])} from {start} to {place} {road} ({miles:.1f} miles)"
+            msg += f", arriving around {clock}." if clock else "."
+    else:
+        if data.get("arrived"):
+            msg = f"{name} is at {place} now."
+        else:
+            msg = f"{name} is about {_minutes(data['duration_s'])} from {place} {road} ({miles:.1f} miles)"
+            msg += f", arriving around {clock}" if clock else ""
+            msg += "."
+            if not data.get("moving"):
+                msg += " They don't seem to be driving at the moment."
+            if (data.get("fix_age_s") or 0) > 900:
+                msg += f" (Their last location is {_minutes(data['fix_age_s'])} old.)"
+    return ExecutionResult(status="SUCCESS", message=msg, service="location", detail=data)
+async def _closest(
+    to: str | None, caller: str, is_admin: bool, mode: str | None = None) -> ExecutionResult:
     """ "Who's closest to the school?": drive time by road for everyone the
     asker may see (geo /closest), nearest first."""
     from services.common.http import get_client_insecure
@@ -57,6 +163,9 @@ async def _closest(to: str | None, caller: str, is_admin: bool) -> ExecutionResu
     if not to:
         return ExecutionResult(status="FAILURE", message="Closest to where?", service="location")
     params = {"to": to, "viewer": caller, "is_admin": "true" if is_admin else "false"}
+    if mode:
+        params["mode"] = mode
+
     try:
         async with get_client_insecure() as client, client.get(
             f"{GEO_SVC_URL.rstrip('/')}/closest", params=params,
@@ -80,42 +189,6 @@ async def _closest(to: str | None, caller: str, is_admin: bool) -> ExecutionResu
     if len(people) > 1:
         rest = ", ".join(f"{p['user_id'].title()} {_minutes(p['duration_s'])}" for p in people[1:4])
         msg += f" Then {rest}."
-    return ExecutionResult(status="SUCCESS", message=msg, service="location", detail=data)
-
-
-async def _eta(target_name: str, to: str | None, caller: str, is_admin: bool) -> ExecutionResult:
-    """ "When will X be home?": drive time by road from X's latest fix (geo /eta)."""
-    from services.common.http import get_client_insecure
-    from services.config import GEO_SVC_URL, INTERNAL_SECRET
-
-    name = target_name.title()
-    params = {"to": to or "home", "viewer": caller, "is_admin": "true" if is_admin else "false"}
-    try:
-        async with get_client_insecure() as client, client.get(
-            f"{GEO_SVC_URL.rstrip('/')}/people/{target_name}/eta", params=params,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=10.0),
-        ) as resp:
-            data = await resp.json(content_type=None)
-            status = resp.status
-    except Exception as e:
-        log.warning(f"[location] ETA lookup failed: {e}")
-        return ExecutionResult(status="FAILURE", message="I can't work out drive times right now.", service="location")
-    if status == 404 and "shared" in str(data.get("detail", "")):
-        return ExecutionResult(status="SUCCESS", message=f"I don't have a current location for {name} right now.",
-                               service="location")
-    if status != 200:
-        return ExecutionResult(status="FAILURE", message=str(data.get("detail") or "No drive time available."),
-                               service="location", detail=data)
-    place = data.get("to") or "there"
-    if data.get("arrived"):
-        msg = f"{name} is at {place} now."
-    else:
-        miles = data.get("distance_m", 0) * 0.000621371
-        msg = f"{name} is about {_minutes(data['duration_s'])} from {place} by road ({miles:.1f} miles)."
-        if not data.get("moving"):
-            msg += " They don't seem to be driving at the moment."
-        if (data.get("fix_age_s") or 0) > 900:
-            msg += f" (Their last location is {_minutes(data['fix_age_s'])} old.)"
     return ExecutionResult(status="SUCCESS", message=msg, service="location", detail=data)
 
 
@@ -154,15 +227,27 @@ async def handle_location(req: LocationRequest) -> ExecutionResult:
     caller_user = (ctx.user if ctx else "") or ""
     is_admin = bool(ctx and ctx.is_admin)
     raw_target = req.user or req.person or req.target or caller_user
-    if (req.detail or "").lower() == "closest":
-        return await _closest(req.to, caller_user, is_admin)
+    detail = (req.detail or "").lower()
+    to = (req.to or req.destination or "").strip() or None
+    origin = (req.origin or "").strip() or None
+    if not detail and (to or origin):
+        # "How long to get to X" and "from A to B" are travel questions even when
+        # the model leaves `detail` off; answering them as "where is X" is how a
+        # question about a street address came back as someone's whereabouts.
+        detail = "eta"
+    if detail == "closest":
+        return await _closest(to, caller_user, is_admin, req.mode)
+    if detail == "eta" and origin:
+        # Place to place needs no person; only tidy a target the model also sent.
+        tidy = _clean_target_name(req.user or req.person or req.target) if (req.user or req.person or req.target) else ""
+        return await _eta(tidy, to, origin, caller_user, is_admin, req.mode)
     target_name = _clean_target_name(raw_target, caller_user)
     if not target_name:
         return ExecutionResult(status="FAILURE", message="Whose location do you mean?", service="location")
 
     log.info(f"[location] target={target_name} detail={req.detail} caller={caller_user}")
-    if (req.detail or "").lower() == "eta":
-        return await _eta(target_name, req.to, caller_user, is_admin)
+    if detail == "eta":
+        return await _eta(target_name, to, None, caller_user, is_admin, req.mode)
 
     # A plain "where is X?" answers with the room first when the hub's Bluetooth room
     # detection knows it (and the asker may see it); otherwise geo answers, and says so.

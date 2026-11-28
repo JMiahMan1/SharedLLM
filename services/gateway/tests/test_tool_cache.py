@@ -427,3 +427,26 @@ def test_safety_and_presence_tools_are_not_declared_cacheable():
                  "TimerRequest", "EntitySearchRequest", "MediaStatusRequest", "LogbookRequest",
                  "TodoListRequest", "HAServiceRequest"):
         assert tool not in tr.FRESHNESS
+
+
+# --- stats -------------------------------------------------------------------------------------
+
+def test_a_millisecond_field_is_never_written_as_an_integer(_tool_cache_store):
+    """The live `ResponseError ... hash value is not an integer` for `source_ms`.
+
+    A timing field is a float, but a float with no fraction (`972.0`) used to be
+    written with HINCRBY. Once the field already held `12.5` Redis refused that
+    command outright, the exception marked the whole cache down, and every call
+    went to its source for 30 s.
+    """
+    tc._down_until = 0.0
+    tc._stat("ContextSearchRequest", misses=1, source_ms=12.5, source_calls=1)
+    tc._stat("ContextSearchRequest", misses=1, source_ms=972.0, source_calls=1)
+    tc._stat("ContextSearchRequest", hits=1, saved_ms=8.0)
+    tc._stat("ContextSearchRequest", hits=1, saved_ms=0.25)
+
+    stats = _tool_cache_store.hgetall(f"{tc.PREFIX}:stats:ContextSearchRequest")
+    assert float(stats["source_ms"]) == pytest.approx(984.5)
+    assert float(stats["saved_ms"]) == pytest.approx(8.25)
+    assert stats["misses"] == "2" and stats["hits"] == "2"
+    assert tc._down_until == 0.0, "a refused stat must not take the cache down"
