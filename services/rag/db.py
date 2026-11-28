@@ -91,6 +91,76 @@ def detect_dimension(embed_fn, fallback: int = 768) -> int:
     return fallback
 
 
+def create_sim_tables(cur: sqlite3.Connection | sqlite3.Cursor) -> None:
+    """Create the Self-Improvement Memory ledger (idempotent).
+
+    ``sim_problems`` is the current, problem-grouped view (one row per stable
+    scope/user/harness/category/signature). ``sim_attempts`` is the append-only
+    history, including the attempts that regressed and retired a rule; proposer
+    agents read it so they never re-try a failed fix.
+    """
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sim_problems (
+            problem_id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            harness TEXT NOT NULL,
+            category TEXT NOT NULL,
+            signature TEXT NOT NULL,
+            rationale TEXT NOT NULL,
+            edit_or_rule TEXT NOT NULL,
+            predicted_outcome TEXT NOT NULL DEFAULT '',
+            observed_outcome TEXT NOT NULL DEFAULT '',
+            outcome_status TEXT NOT NULL DEFAULT 'pending',
+            status TEXT NOT NULL DEFAULT 'candidate',
+            requires_admin INTEGER NOT NULL DEFAULT 0,
+            tags TEXT NOT NULL DEFAULT '[]',
+            verified_models TEXT NOT NULL DEFAULT '[]',
+            regressed_models TEXT NOT NULL DEFAULT '[]',
+            model TEXT NOT NULL DEFAULT '',
+            model_family TEXT NOT NULL DEFAULT '',
+            domain TEXT NOT NULL DEFAULT '',
+            round INTEGER NOT NULL DEFAULT 0,
+            retrieval_count INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            last_used_at INTEGER
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sim_attempts (
+            attempt_id TEXT PRIMARY KEY,
+            problem_id TEXT NOT NULL,
+            harness TEXT NOT NULL,
+            model TEXT NOT NULL DEFAULT '',
+            model_family TEXT NOT NULL DEFAULT '',
+            domain TEXT NOT NULL DEFAULT '',
+            round INTEGER NOT NULL DEFAULT 0,
+            rationale TEXT NOT NULL DEFAULT '',
+            edit_or_rule TEXT NOT NULL DEFAULT '',
+            predicted_outcome TEXT NOT NULL DEFAULT '',
+            observed_outcome TEXT NOT NULL DEFAULT '',
+            outcome_status TEXT NOT NULL DEFAULT 'pending',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(problem_id) REFERENCES sim_problems(problem_id) ON DELETE CASCADE
+        )
+        """
+    )
+    for index, table, columns in (
+        ("idx_sim_problems_scope_user", "sim_problems", "scope, user_id"),
+        ("idx_sim_problems_harness", "sim_problems", "harness"),
+        ("idx_sim_problems_status", "sim_problems", "status"),
+        ("idx_sim_problems_problem", "sim_problems", "problem_id"),
+        ("idx_sim_attempts_problem", "sim_attempts", "problem_id"),
+        ("idx_sim_attempts_family", "sim_attempts", "model_family"),
+    ):
+        cur.execute(f"CREATE INDEX IF NOT EXISTS {index} ON {table}({columns})")
+
+
 def init_schema(conn: sqlite3.Connection, dim: int) -> None:
     """Create all tables. ``dim`` is the (dynamically detected) embedding size."""
     cur = conn.cursor()
@@ -239,6 +309,12 @@ def init_schema(conn: sqlite3.Connection, dim: int) -> None:
         )
         """
     )
+
+    # Two-tier Self-Improvement Memory: a problem-grouped ledger with an
+    # append-only attempt history. System rows are shared (user_id='default');
+    # user rows are isolated by user_id. Both live here rather than in rag_items
+    # because their lifecycle is relational, not semantic.
+    create_sim_tables(cur)
 
     # Persist the detected dimension so restarts stay consistent.
     cur.execute(

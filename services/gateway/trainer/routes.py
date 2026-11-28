@@ -581,3 +581,180 @@ async def teacher_scrub_names(request: Request) -> dict[str, Any]:
     if not names:
         raise HTTPException(status_code=502, detail="The family directory listed no names")
     return {"names": names}
+
+
+# ---------------------------------------------------------------------------
+# Self-Improvement Memory (SIM): authenticated inspection and management
+#
+# Admins can inspect/consolidate shared System SIM plus their own User SIM.
+# Everyone else can inspect their own User SIM and only the non-admin System
+# SIM; no route lets a caller name another person's User SIM.
+# ---------------------------------------------------------------------------
+
+
+class SimRecordBody(BaseModel):
+    scope: str = "user"
+    harness: str
+    category: str = "general"
+    signature: str = ""
+    rationale: str = ""
+    edit_or_rule: str = ""
+    predicted_outcome: str = ""
+    observed_outcome: str = ""
+    outcome_status: str = "pending"
+    requires_admin: bool = False
+    tags: list[str] = Field(default_factory=list)
+    model: str = ""
+    model_family: str = ""
+    domain: str = ""
+    round: int = 0
+
+
+class SimOutcomeBody(BaseModel):
+    problem_id: str
+    observed_outcome: str = ""
+    outcome_status: str
+    model: str = ""
+    model_family: str = ""
+    harness: str = ""
+    domain: str = ""
+    round: int = 0
+
+
+async def _viewer(request: Request) -> tuple[str, bool]:
+    from services.gateway.main import _caller_is_admin, _require_authenticated
+
+    user = await _require_authenticated(request)
+    return user, await _caller_is_admin(request)
+
+
+def _sim_params(**kwargs: Any) -> dict[str, Any]:
+    return {key: value for key, value in kwargs.items() if value is not None}
+
+
+async def _sim_problems(
+    *, scope: str, user_id: str, is_admin: bool, harness: str | None = None,
+    status: str | None = None, include_retired: bool = False,
+) -> list[dict[str, Any]]:
+    data = await dream_mod.request(
+        "GET",
+        "/rag/sim/problems",
+        params=_sim_params(
+            scope=scope,
+            user_id=user_id,
+            harness=harness,
+            status=status,
+            include_retired="true" if include_retired else "false",
+            is_admin="true" if is_admin else "false",
+            limit=1000,
+        ),
+    )
+    return [p for p in data.get("problems") or [] if isinstance(p, dict)]
+
+
+@router.get("/sim/problems")
+async def sim_problems(
+    request: Request,
+    scope: str | None = None,
+    harness: str | None = None,
+    status: str | None = None,
+    include_retired: bool = False,
+) -> dict[str, Any]:
+    """System SIM (admin-filtered) + the viewer's own User SIM."""
+    if scope not in (None, "system", "user"):
+        raise HTTPException(status_code=400, detail="scope must be system or user")
+    user, is_admin = await _viewer(request)
+    try:
+        problems: list[dict[str, Any]] = []
+        if scope in (None, "user"):
+            problems += await _sim_problems(
+                scope="user", user_id=user, is_admin=False, harness=harness,
+                status=status, include_retired=include_retired,
+            )
+        if scope in (None, "system"):
+            problems += await _sim_problems(
+                scope="system", user_id="default", is_admin=is_admin, harness=harness,
+                status=status, include_retired=include_retired,
+            )
+    except dream_mod.RagError as exc:
+        raise _rag_http_error(exc) from exc
+    problems.sort(key=lambda p: int(p.get("updated_at") or 0), reverse=True)
+    return {"status": "SUCCESS", "count": len(problems), "problems": problems}
+
+
+@router.get("/sim/history")
+async def sim_history(
+    request: Request,
+    harness: str | None = None,
+    include_retired: bool = True,
+) -> dict[str, Any]:
+    """Full ledger for proposers, including retired/regressed attempts."""
+    user, is_admin = await _viewer(request)
+    try:
+        merged: dict[str, dict[str, Any]] = {}
+        for owner, admin_view in ((user, False), ("default", is_admin)):
+            data = await dream_mod.request(
+                "GET",
+                "/rag/sim/history",
+                params=_sim_params(
+                    user_id=owner, harness=harness,
+                    include_retired="true" if include_retired else "false",
+                    is_admin="true" if admin_view else "false",
+                    limit=500,
+                ),
+            )
+            for problem in data.get("problems") or []:
+                if isinstance(problem, dict) and problem.get("problem_id"):
+                    merged[str(problem["problem_id"])] = problem
+    except dream_mod.RagError as exc:
+        raise _rag_http_error(exc) from exc
+    problems = sorted(merged.values(), key=lambda p: int(p.get("updated_at") or 0), reverse=True)
+    return {"status": "SUCCESS", "count": len(problems), "problems": problems}
+
+
+@router.post("/sim/record")
+async def sim_record(body: SimRecordBody, request: Request) -> dict[str, Any]:
+    """Record a lesson. Only an admin may write System SIM; User SIM is the caller's."""
+    user, is_admin = await _viewer(request)
+    if body.scope not in ("system", "user"):
+        raise HTTPException(status_code=400, detail="scope must be system or user")
+    if body.scope == "system" and not is_admin:
+        raise HTTPException(status_code=403, detail="Admin only for System SIM")
+    payload = body.model_dump()
+    payload["user_id"] = "default" if body.scope == "system" else user
+    try:
+        return await dream_mod.request("POST", "/rag/sim/record", body=payload, timeout=30.0)
+    except dream_mod.RagError as exc:
+        raise _rag_http_error(exc) from exc
+
+
+@router.post("/sim/outcome")
+async def sim_outcome(body: SimOutcomeBody, request: Request) -> dict[str, Any]:
+    """Record an outcome for the caller's User SIM, or any System SIM as an admin."""
+    user, is_admin = await _viewer(request)
+    try:
+        owned = await _sim_problems(scope="user", user_id=user, is_admin=False, include_retired=True)
+        matched_user = any(str(p.get("problem_id")) == body.problem_id for p in owned)
+        matched_system = False
+        if not matched_user and is_admin:
+            system = await _sim_problems(
+                scope="system", user_id="default", is_admin=True, include_retired=True
+            )
+            matched_system = any(str(p.get("problem_id")) == body.problem_id for p in system)
+        if not matched_user and not matched_system:
+            raise HTTPException(status_code=404, detail="No such SIM problem for this caller")
+        payload = body.model_dump()
+        payload["user_id"] = "default" if matched_system else user
+        return await dream_mod.request("POST", "/rag/sim/outcome", body=payload, timeout=30.0)
+    except dream_mod.RagError as exc:
+        raise _rag_http_error(exc) from exc
+
+
+@router.post("/sim/consolidate")
+async def sim_consolidate(request: Request) -> dict[str, Any]:
+    """Promote portability winners, mark model-specific rules, retire regressions."""
+    await _admin(request)
+    try:
+        return await dream_mod.request("POST", "/rag/sim/consolidate", timeout=60.0)
+    except dream_mod.RagError as exc:
+        raise _rag_http_error(exc) from exc

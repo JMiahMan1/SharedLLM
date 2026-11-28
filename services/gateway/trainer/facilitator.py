@@ -334,9 +334,26 @@ async def _cycle(
             "weak": alpaca.weakest_categories(benchmarks, summary["hardware"].get("model") or ""),
         }
 
+    sim_ran = bool(
+        report
+        and report.get("cases")
+        and report.get("stopped_reason") not in ("host_busy", "model_unavailable")
+    )
+    sim_history: dict[str, Any] = {}
+    if sim_ran:
+        try:
+            sim_history = await dream_mod.sim_history(user)
+        except dream_mod.RagError as exc:
+            summary["errors"].append(f"sim: {exc}")
+    summary["sim"] = {
+        "problems": sim_history.get("count", 0),
+        "retired": sum(1 for p in sim_history.get("problems") or [] if p.get("status") == "retired"),
+    }
+
     proposals = dream_mod.merge_proposals(
         dream_mod.proposals_from_dream(dream_report),
         dream_mod.proposals_from_failures(report),
+        dream_mod.proposals_from_sim(sim_history),
         hardware_proposal({"ready": False, "reasons": hardware.get("reasons")}) if busy else [],
         benchmark_proposals(summary["hardware"].get("model") or "", benchmarks),
         ui_proposals(catalog),
@@ -349,6 +366,18 @@ async def _cycle(
         summary["errors"].extend(
             f"lesson {item['proposal']}: {item['error']}" for item in ingested["failed"]
         )
+
+    # Selector: record this run's per-case outcomes against the model's family,
+    # then consolidate (portable winners, model-specific rules, retire repeats).
+    if sim_ran:
+        try:
+            await dream_mod.record_eval_outcomes(report, user_id=user)
+        except dream_mod.RagError as exc:
+            summary["errors"].append(f"sim outcomes: {exc}")
+        try:
+            summary["sim_consolidation"] = await dream_mod.consolidate_sim()
+        except dream_mod.RagError as exc:
+            summary["errors"].append(f"sim consolidation: {exc}")
 
     if repair:
         try:

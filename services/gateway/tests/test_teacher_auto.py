@@ -38,11 +38,24 @@ def data_dir(tmp_path, monkeypatch):
     return tmp_path
 
 
+class _Written(list):
+    """System-learnings writes; SIM ledger writes are kept on ``.sim``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sim: list[dict] = []
+
+
 @pytest.fixture
 def rag(monkeypatch):
-    written: list[dict] = []
+    written = _Written()
 
     async def fake_request(method, path, **kwargs):
+        if path == "/rag/sim/history":
+            return {"problems": [], "count": 0}
+        if path == "/rag/sim/record":
+            written.sim.append(kwargs.get("body") or {})
+            return {}
         written.append(kwargs.get("body") or {})
         return {}
 
@@ -91,6 +104,9 @@ def test_a_pass_writes_lessons_evaluates_and_snapshots_without_a_button(data_dir
     done = _pass(now=T0, notify=notices)
 
     assert done["lessons_written"] == 1 and len(rag) == 1
+    (sim,) = rag.sim
+    assert sim["harness"] == "raven" and sim["category"] == "teacher_lesson"
+    assert sim["outcome_status"] == "improved"
     assert done["eval"] == "1/1 passed"
     assert done["snapshot"] in ("1 train / 0 eval rows", "0 train / 1 eval rows")
     health = teacher_auto.health()
