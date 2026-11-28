@@ -21,6 +21,7 @@ import { hasDayRolledOver, localDayKey } from '../lib/stepDay';
 import { isInsideGeofence, shouldUploadFix, classifyFix, derivedSpeedMps, GOOD_FIX_M, COARSE_FIX_M } from '../lib/locationSync';
 import { startBackgroundTracking, stopBackgroundTracking } from '../lib/locationTracking';
 import { startBackgroundSteps, stopBackgroundSteps } from '../lib/stepSync';
+import { AuthContext } from './AuthContext';
 
 export type SensorId = 'location' | 'steps';
 type NoticeOwner = 'service' | 'read';
@@ -93,6 +94,24 @@ function logSensor(scope: string, message: string, err?: unknown) {
 
 
 export function LocationProvider({ children }: { children: React.ReactNode }) {
+  /**
+   * Nothing here belongs to a phone without an account: location and the
+   * pedometer upload on that person's behalf, and both ask for a runtime
+   * permission when they start.
+   *
+   * This provider wraps the login screen too, so on a fresh install the
+   * "Default location ON for native" rule below started tracking before
+   * anybody had signed in -- the location dialog appeared over the sign-in
+   * form, belonging to no account, and a decline was then written to the
+   * new account's own preference. Wait for a session, and start when one
+   * arrives (the effect depends on `signedIn`).
+   *
+   * An absent provider (an isolated render, a test) reads as signed in, so
+   * this cannot silently stop the sensors anywhere they were running.
+   */
+  const auth = useContext(AuthContext);
+  const signedIn = auth === undefined ? true : Boolean(auth.token);
+
   const [state, setState] = useState<LocationState>({
     latitude: null,
     longitude: null,
@@ -886,8 +905,13 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     }
   }, [handleLocationUpdate, refreshDailySteps, syncDailySteps, patchSensor, resolveSyncUsername]);
 
-  const stopTracking = useCallback(() => {
-    void storageSet('jarvis_location_tracking_enabled', 'false');
+  /**
+   * Stops the watch, the background service and the timers, and says nothing
+   * about what the person chose. Signing out uses this: the sensors were on
+   * because someone was signed in, not because anyone turned them off, so the
+   * preference has to survive the session ending.
+   */
+  const haltTracking = useCallback(() => {
     // The foreground service is sticky and independent of this context, so
     // turning tracking off has to stop it explicitly -- otherwise it keeps
     // uploading for a user who just opted out.
@@ -914,6 +938,11 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     }
     setState((s) => ({ ...s, isTracking: false }));
   }, [resolveSyncUsername]);
+
+  const stopTracking = useCallback(() => {
+    void storageSet('jarvis_location_tracking_enabled', 'false');
+    haltTracking();
+  }, [haltTracking]);
 
   /**
    * Steps have their own native service so location consent is not a
@@ -1044,6 +1073,24 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     async function initSensors() {
+      // No session, no sensors: a signed-out phone has nobody to upload for,
+      // and both sensors ask for a runtime permission when they start.
+      //
+      // Nothing is written here on purpose. Signing out leaves the saved
+      // preference alone, so signing back in starts the sensors the person
+      // chose; only the disable switch records "off".
+      if (!signedIn) {
+        const off: SensorsState = {
+          location: { enabled: false, permission: 'disabled', message: null, recovering: false },
+          steps: { enabled: false, permission: 'disabled', message: null, recovering: false },
+        };
+        sensorsRef.current = off;
+        locationRecoveringRef.current = false;
+        setSensors(() => off);
+        haltTracking();
+        await stopStepService();
+        return;
+      }
       try {
         const [locPref, stepsPref, legacyLoc] = await Promise.all([
           storageGet(KEY_LOCATION_ENABLED),
@@ -1101,7 +1148,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [startTracking, refreshDailySteps, syncDailySteps, patchSensor]);
+  }, [signedIn, haltTracking, stopStepService, startTracking, refreshDailySteps, syncDailySteps, patchSensor]);
 
   // Midnight rollover: re-read the sensor so the new day's bucket starts even if
 // no step event has fired yet.

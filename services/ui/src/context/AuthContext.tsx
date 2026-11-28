@@ -10,7 +10,7 @@ import { mirrorIdentity } from '../lib/locationTracking';
 import { lockAll } from '../lib/privateChatSession';
 import { clearSignOutReason, isKeyRefusal, recordSignOutReason, signOutMessage, signOutReasonFor, type SignOutReason } from '../lib/signOutNotice';
 
-interface AuthContextType {
+export interface AuthContextType {
   user: UserProfile | null;
   token: string | null;
   role: 'admin' | 'user' | null;
@@ -63,7 +63,14 @@ function parseStoredUser(raw: string | null): UserProfile | null {
   }
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+/**
+ * Exported so a provider that must not run before there is a session can ask
+ * (the sensors: see LocationContext). `useAuth` stays the way components read
+ * it; this exists only for that check, and an absent provider means "yes", so
+ * an isolated render is unaffected.
+ */
+/* eslint-disable-next-line react-refresh/only-export-components */
+export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const queryClient = useQueryClient();
