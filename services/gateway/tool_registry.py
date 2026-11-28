@@ -1058,6 +1058,113 @@ def get_raven_tool_schemas() -> list[dict]:
                 },
             },
         })
+    schemas.extend(_delegation_schemas())
+    return schemas
+
+
+#: Cross-harness delegation tools (services/gateway/harness_bridge.py). They
+#: are not HTTP rows in ``_RAVEN_TOOL_TABLE``: the bridge is the only place
+#: allowed to fan a call out, and it must receive the caller's own credentials.
+DELEGATION_TOOL_SCHEMAS: tuple[dict, ...] = (
+    {
+        "name": "DelegateRavenRequest",
+        "description": (
+            "Start a longer autonomous Raven mission in the background and return immediately. "
+            "Use when the work needs many steps, files, or verification; do not use for a quick answer."
+        ),
+        "properties": {
+            "goal": {"type": "string", "description": "The concrete outcome Raven should achieve."},
+            "workspace_id": {"type": "string", "description": "Optional workspace to work in."},
+            "context_summary": {"type": "string", "description": "Compact context Raven needs, max ~1500 chars."},
+            "notify_on_complete": {"type": "boolean", "description": "Notify when the mission finishes."},
+            "model": {"type": "string", "description": "Optional coding model override."},
+        },
+        "required": ["goal"],
+    },
+    {
+        "name": "DelegateWorkspaceRequest",
+        "description": (
+            "Ask another workspace to do one bounded task. Returns the answer, or a queued "
+            "acknowledgement when async_mode is true."
+        ),
+        "properties": {
+            "workspace_id": {"type": "string", "description": "Workspace to run the task in."},
+            "prompt": {"type": "string", "description": "The task to perform."},
+            "mode": {"type": "string", "enum": ["single_task", "librarian", "raven", "auto"]},
+            "async_mode": {"type": "boolean", "description": "Return immediately and notify later."},
+        },
+        "required": ["workspace_id", "prompt"],
+    },
+    {
+        "name": "DelegateLookupRequest",
+        "description": (
+            "Fast, strictly read-only household/RAG lookup (calendar, weather, location, HA state, "
+            "knowledge). Use instead of pulling household tools into a coding harness."
+        ),
+        "properties": {
+            "query": {"type": "string", "description": "What to look up."},
+            "domain": {"type": "string", "description": "Optional hint such as calendar or home."},
+        },
+        "required": ["query"],
+    },
+    {
+        "name": "DelegateSubagentRequest",
+        "description": (
+            "Run a read-only Explorer/Verifier subagent in an isolated context and return one "
+            "condensed findings summary. Never writes files or runs mutating commands."
+        ),
+        "properties": {
+            "question": {"type": "string", "description": "What to investigate or verify."},
+            "workspace_id": {"type": "string", "description": "Optional workspace to inspect."},
+            "paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional starting files/directories.",
+            },
+            "max_turns": {"type": "integer", "minimum": 1, "maximum": 6},
+        },
+        "required": ["question"],
+    },
+    {
+        "name": "DelegateNotifyRequest",
+        "description": (
+            "Send a completion/update notice to the current user (admins may target another user). "
+            "Never use it to escalate permissions."
+        ),
+        "properties": {
+            "message": {"type": "string", "description": "Notice body."},
+            "title": {"type": "string", "description": "Notice title."},
+            "target_user": {"type": "string", "description": "Admin-only alternate recipient."},
+            "link": {"type": "string", "description": "Optional in-app deep link."},
+            "mission_id": {"type": "integer", "description": "Related Raven mission id."},
+        },
+        "required": ["message"],
+    },
+)
+
+
+def _delegation_schemas() -> list[dict]:
+    schemas: list[dict] = []
+    for spec in DELEGATION_TOOL_SCHEMAS:
+        schemas.append({
+            "type": "function",
+            "function": {
+                "name": spec["name"],
+                "description": f"[Raven] {spec['description']} Pass arguments inside `payload`.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "payload": {
+                            "type": "object",
+                            "description": f"Fields for {spec['name']}.",
+                            "properties": spec["properties"],
+                            "required": spec["required"],
+                        }
+                    },
+                    "required": ["payload"],
+                },
+            },
+        })
     return schemas
 
 

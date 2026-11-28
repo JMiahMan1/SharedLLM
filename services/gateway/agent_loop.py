@@ -622,6 +622,11 @@ ALLOWED_TOOLS = {
     "workspaceportexposerequest", "workspace_expose_port", "expose_port", "port_expose",
     # Mission discipline: the objectives checklist and the debrief (services/gateway/mission_discipline.py).
     "missionobjectivesrequest", "missioncompleterequest",
+    # Cross-harness delegation (services/gateway/harness_bridge.py). An absent
+    # name is not refused: it is fuzzy-matched into an unrelated tool, so these
+    # must be listed even though they dispatch in-process below.
+    "delegateravenrequest", "delegateworkspacerequest", "delegatelookuprequest",
+    "delegatesubagentrequest", "delegatenotifyrequest",
     # Aliases and Hallucination-prefixed tools
     "git_status", "git_diff", "git_log", "git_add", "git_commit", "git_push", "git_pull", "git_sync",
     "workspace_file_read", "workspace_file_write", "workspace_file_patch",
@@ -682,6 +687,126 @@ ALLOWED_TOOLS = {
 STUDIO_TOOL_ACTIONS = frozenset(name.lower() for name in studio_tools.TOOL_ACTIONS)
 ALLOWED_TOOLS |= STUDIO_TOOL_ACTIONS
 WORKSPACE_TOOL_ACTIONS |= STUDIO_TOOL_ACTIONS
+
+# Delegation runs in-process against services/gateway/harness_bridge.py: there is
+# no HTTP endpoint, because the bridge is the only place allowed to fan a call
+# out to another harness with the caller's own credentials.
+DELEGATION_ACTIONS = frozenset({
+    "delegateravenrequest",
+    "delegateworkspacerequest",
+    "delegatelookuprequest",
+    "delegatesubagentrequest",
+    "delegatenotifyrequest",
+})
+
+
+def _delegation_bool(value: object, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def _delegation_paths(value: object) -> list[str] | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        paths = [p.strip() for p in value.split(",") if p.strip()]
+    elif isinstance(value, (list, tuple, set)):
+        paths = [str(p).strip() for p in value if str(p).strip()]
+    else:
+        paths = [str(value).strip()]
+    return paths or None
+
+
+def _delegation_call(action_name: str, payload: dict, fallback_workspace_id: str | None) -> tuple[str, dict]:
+    """Map a Delegate*Request payload onto the bridge function and keyword args."""
+    norm = re.sub(r"[\s_]+", "", str(action_name or "")).lower()
+    if norm not in DELEGATION_ACTIONS:
+        raise ValueError(f"Unknown delegation action: {action_name}")
+
+    def text(key: str) -> str:
+        value = payload.get(key)
+        return str(value or "").strip()
+
+    def workspace() -> str | None:
+        return text("workspace_id") or (str(fallback_workspace_id) if fallback_workspace_id else None)
+
+    if norm == "delegateravenrequest":
+        goal = text("goal") or text("task") or text("query")
+        return "delegate_to_raven", {
+            "goal": goal,
+            "workspace_id": workspace(),
+            "context_summary": text("context_summary"),
+            "notify_on_complete": _delegation_bool(payload.get("notify_on_complete"), True),
+            "model": text("model") or None,
+        }
+    if norm == "delegateworkspacerequest":
+        return "delegate_to_workspace", {
+            "workspace_id": workspace(),
+            "prompt": text("prompt") or text("task") or text("query"),
+            "mode": text("mode") or "single_task",
+            "async_mode": _delegation_bool(payload.get("async_mode"), False),
+        }
+    if norm == "delegatelookuprequest":
+        return "delegate_lookup", {
+            "query": text("query") or text("question"),
+            "domain": text("domain"),
+        }
+    if norm == "delegatesubagentrequest":
+        try:
+            turns = int(payload.get("max_turns") or 6)
+        except (TypeError, ValueError):
+            turns = 6
+        return "delegate_explorer_subagent", {
+            "question": text("question") or text("task") or text("query"),
+            "workspace_id": workspace(),
+            "paths": _delegation_paths(payload.get("paths")),
+            "max_turns": max(1, min(turns, 6)),
+        }
+    return "delegate_notify", {
+        "message": text("message"),
+        "title": text("title") or "Jarvis",
+        "target_user": text("target_user") or None,
+        "link": payload.get("link"),
+        "mission_id": payload.get("mission_id"),
+        "workspace_id": workspace(),
+    }
+
+
+async def run_delegation(
+    action_name: str,
+    payload: dict | None,
+    creds: ResolvedCredentials,
+    *,
+    workspace_id: str | None = None,
+    event_callback: Callable[[dict], Awaitable[None]] | None = None,
+) -> dict:
+    """Dispatch one Delegate*Request action through the harness bridge.
+
+    Returned as a dict so the AgentLoop's normal ``exec_data`` handling (message,
+    status, sanitisation) keeps working unchanged.
+    """
+    from services.gateway import harness_bridge
+
+    data = dict(payload) if isinstance(payload, dict) else {}
+    data.pop("user_context", None)
+    try:
+        func_name, kwargs = _delegation_call(action_name, data, workspace_id)
+    except ValueError as exc:
+        return {"status": "ERROR", "message": str(exc)}
+    func = getattr(harness_bridge, func_name)
+    call_kwargs: dict = {"creds": creds, "source_harness": "raven", **kwargs}
+    if func_name == "delegate_explorer_subagent":
+        call_kwargs["event_callback"] = event_callback
+    raw = await func(**call_kwargs)
+    try:
+        result = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        result = {"status": "ERROR", "message": str(raw)}
+    return result if isinstance(result, dict) else {"status": "ERROR", "message": str(result)}
+
 
 def _extract_json_with_brace_depth(text: str, start: int = 0) -> dict | list | None:
     """Extract JSON from text using brace-depth tracking for accurate nesting."""
@@ -5036,6 +5161,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "speakeridentifyrequest": (EXECUTION_SVC, "/execute/speaker_identify"),
                 "listvoicesrequest": (EXECUTION_SVC, "/execute/list_voices"),
                 "controlplanerequest": (CONTROL_PLANE_URL, "/api/restart/{service_name}"),
+                # Cross-harness delegation is served in-process below; the
+                # placeholder path only keeps svc_base/endpoint defined for the
+                # shared dispatch block.
+                **{name: ("", "in-process") for name in DELEGATION_ACTIONS},
                 # Served in-process below (no HTTP): the path is for the logs.
                 **{name: ("", studio_tools.TOOL_PATHS[tool])
                    for tool in studio_tools.TOOL_ACTIONS
@@ -5218,6 +5347,96 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # workspace. If Raven attempts `gh repo create` (or similar) there, fail
                 # loudly so it creates a workspace first instead of polluting a shared one.
                 _skip_post = False
+
+                # Cross-harness delegation: the bridge is in-process (see
+                # harness_bridge.py) and receives the caller's own credentials,
+                # current harness and workspace. It owns depth/cycle guardrails,
+                # so AgentLoop only has to surface the structured result.
+                if lookup_action in DELEGATION_ACTIONS:
+                    _delegation_input = dict(payload) if isinstance(payload, dict) else {}
+                    _delegation_input.pop("user_context", None)
+                    _delegation_text = str(
+                        _delegation_input.get("goal")
+                        or _delegation_input.get("prompt")
+                        or _delegation_input.get("query")
+                        or _delegation_input.get("question")
+                        or _delegation_input.get("message")
+                        or ""
+                    )
+                    try:
+                        _display_payload = sanitize_for_llm({
+                            **_delegation_input,
+                            "@type": action_name,
+                            "task": _delegation_text,
+                        })
+                        await stream_event(
+                            "action_payload",
+                            json.dumps(_display_payload, default=str),
+                        )
+                    except Exception as _payload_exc:
+                        log.debug(f"[AgentLoop] delegation payload log skipped: {_payload_exc}")
+
+                    _subagent_forward = None
+                    if lookup_action == "delegatesubagentrequest":
+                        async def _subagent_forward(ev: dict) -> None:
+                            try:
+                                phase = str(ev.get("phase") or "step")
+                                detail = str(ev.get("detail") or "").strip()
+                                note = f"Explorer subagent {phase}"
+                                if detail:
+                                    note += f": {detail[:300]}"
+                                await stream_event("subagent", note)
+                            except Exception:
+                                pass
+
+                    try:
+                        _delegation_result = await run_delegation(
+                            action_name,
+                            _delegation_input,
+                            creds,
+                            workspace_id=workspace_id,
+                            event_callback=_subagent_forward,
+                        )
+                    except Exception as _delegation_exc:
+                        log.warning(f"[AgentLoop] Delegation {action_name} failed: {_delegation_exc}")
+                        _delegation_result = {
+                            "status": "ERROR",
+                            "message": f"Delegation failed: {_delegation_exc}",
+                        }
+
+                    _delegation_status = str(_delegation_result.get("status") or "SUCCESS")
+                    _summary = str(
+                        _delegation_result.get("summary")
+                        or _delegation_result.get("message")
+                        or "Delegation finished."
+                    )
+                    _effective_status = (
+                        "ERROR" if _delegation_status in ("ERROR", "REFUSED") else _delegation_status
+                    )
+                    exec_data = {
+                        **_delegation_result,
+                        "status": _effective_status,
+                        "delegation_status": _delegation_status,
+                        "message": _summary,
+                    }
+                    if _effective_status == "ERROR":
+                        await stream_event("result_error", _summary[:500])
+                        _consecutive_no_tool += 1
+                    else:
+                        await stream_event("result_success", _summary[:500])
+                        successful_tool_calls += 1
+                        _consecutive_no_tool = 0
+                        _sig = action_signature(action_name, payload)
+                        _recent_actions.append((_sig, True))
+                        _loop_history.append((_sig, True, ""))
+                        if len(_recent_actions) > 12:
+                            _recent_actions = _recent_actions[-12:]
+                    action_log.append(f"Step {iter_num}: {action} -> {_summary[:500]}")
+                    await stream_event(
+                        "subagent" if lookup_action == "delegatesubagentrequest" else "delegation",
+                        _summary[:500],
+                    )
+                    _skip_post = True
 
                 # Mission discipline: the checklist and the debrief are handled here,
                 # against the loop's own write/verify tracking (mission_discipline.py).

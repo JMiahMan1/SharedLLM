@@ -171,6 +171,7 @@ def test_the_single_turn_surface_lists_only_tools_it_can_dispatch(hub):
 
     dispatchable = set(orchestrator.SINGLE_TURN_TOOL_ENDPOINTS) | {"controlplanerequest"}
     dispatchable |= set(orchestrator._GARDEN_ACTIONS)
+    dispatchable |= set(orchestrator.DELEGATION_ACTIONS)
     from services.gateway.studio import tools as studio_tools
 
     dispatchable |= {n.lower() for n in studio_tools.TOOL_ACTIONS}

@@ -264,6 +264,61 @@ Record a harvest.
 Search the public internet for web information. (Do NOT use to play music or podcasts).
 - Fields: `tool`, `query`.
 
+## Cross-Harness Delegation
+
+These five tools hand work to another Jarvis harness. They carry the caller's own
+identity; they never grant extra access. Use them only when the other harness is
+genuinely better at the job — not for a question you can answer right here.
+
+### DelegateRavenRequest
+Start a longer autonomous mission in the background (multi-step coding, research,
+file changes, verification). Returns immediately with a `mission_id`.
+- Fields: `tool`, `goal`.
+- Optional `workspace_id`, `context_summary` (compact context, about 1500 chars
+  max), `notify_on_complete` (default true), `model`.
+- Use when the work will take many steps. Do NOT use for a quick fact, a single
+  read, or anything you can answer now.
+- Never delegate to Raven from inside a Raven mission (the bridge refuses a cycle).
+
+### DelegateWorkspaceRequest
+Ask one workspace to perform a bounded task. Returns a compact answer, or a queued
+acknowledgement when it runs asynchronously.
+- Fields: `tool`, `workspace_id`, `prompt`.
+- Optional `mode` (`single_task` default, `librarian`, `raven`, `auto`),
+  `async_mode` (return immediately and notify later).
+- The caller must already have access to the workspace; a non-admin cannot use
+  this to reach an admin-only workspace.
+- Do NOT use for household lookups (use `DelegateLookupRequest`) or for a task
+  that belongs in the current harness.
+
+### DelegateLookupRequest
+Fast, strictly read-only household/RAG lookup: calendar, weather, location, home
+state, or stored knowledge.
+- Fields: `tool`, `query`.
+- Optional `domain` (a short hint such as `calendar`, `weather`, `home`).
+- Read-only by construction: it can never change a device, file, or setting.
+- Do NOT use when the answer is already in your context or needs a write.
+
+### DelegateSubagentRequest
+Run an isolated, read-only Explorer/Verifier subagent and get back one condensed
+findings summary that cites `path:line`. The intermediate reads and searches stay
+out of your context.
+- Fields: `tool`, `question`.
+- Optional `workspace_id`, `paths` (starting files or directories), `max_turns`
+  (1–6, default 6).
+- It may only read/search/list files, inspect git status/diff/log, and run lint
+  checks. It cannot write, patch, run mutating shell commands, commit, push, or
+  delegate further.
+- Do NOT use it to make changes; make those yourself in the main mission.
+
+### DelegateNotifyRequest
+Send a completion or progress notice to the current user.
+- Fields: `tool`, `message`.
+- Optional `title` (default `Jarvis`), `mission_id`, `link` (an in-app deep
+  link), `target_user` (admins only).
+- Non-admins can only notify themselves. Do NOT use it to escalate privileges or
+  to send a notice to someone else unless you are an admin.
+
 ## Output Format
 
 When you need to call a tool, output ONLY a JSON object in a fenced code block:
