@@ -81,6 +81,14 @@ final class CommsCollector {
                     // also posted from its notification.
                     sms += ChatMessageLog.flush(app);
                 }
+                // Voice notes a notification gave us while the transcriber was
+                // unavailable are kept app-private; this is the comms pass that
+                // sends them. Never able to fail the upload above.
+                try {
+                    AudioMessageScan.drain(app);
+                } catch (Exception e) {
+                    Log.w(TAG, "audio outbox drain skipped: " + e.getMessage());
+                }
             } catch (Exception e) {
                 // Offline or a server error: the cursor stays on the first
                 // row not taken, and the next run starts there.
@@ -220,12 +228,28 @@ final class CommsCollector {
                     .put("item", groupLabel(names))
                     .put("detail", detail);
                 postOrSkip(app, body);
+                // What the message itself says about its pictures and voice notes:
+                // who sent it, which way it went, the group, and its words. A photo
+                // with "look at this" means something the photo alone does not.
+                JSONObject mmsMeta = new JSONObject()
+                    .put("source", "mms")
+                    .put("direction", direction)
+                    .put("contact", groupLabel(names))
+                    .put("number", people.isEmpty() ? "" : people.get(0))
+                    .put("message_key", "mms:" + id)
+                    .put("sent_at", at * 1000L);
+                if (people.size() > 1) mmsMeta.put("group", new org.json.JSONArray(names));
+                if (!text.isEmpty()) {
+                    mmsMeta.put("message_text", text.length() > 500 ? text.substring(0, 500) : text);
+                }
                 prefs.edit().putLong(KEY_MMS, at).putLong(KEY_MMS_ID, id).apply();
                 sent++;
                 // A picture message is also a picture on the phone: sample its
                 // photo/video parts for the family's safety scanner. Never
                 // allowed to break the message upload.
-                PhotoScan.scanMms(app, id);
+                PhotoScan.scanMms(app, id, mmsMeta);
+                // A recorded one is a message no text filter can read.
+                AudioMessageScan.scanMms(app, id, mmsMeta);
             }
         }
         return sent;

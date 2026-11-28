@@ -28,6 +28,77 @@ from services.common.concern_monitor import ALWAYS_ON, CATEGORIES, LEVELS
 
 MAX_TEXT = 1500
 
+#: How much of the message that came with a picture or voice note is kept.
+#: Enough for a parent to judge the tone of the conversation around it; not so
+#: much that the concern becomes a second copy of the whole chat.
+MAX_MESSAGE_TEXT = 500
+
+#: What each collector calls itself, in the words a parent reads.
+SOURCE_WORDS = {"mms": "MMS", "notification": "notification", "gallery": "gallery"}
+
+
+def _clean(value: Any, limit: int = 120) -> str:
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())[:limit].strip()
+
+
+def message_context(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The message a scan came from, in one shape (``None`` when there is none).
+
+    A picture or a voice note reaches the phone as a picture message, as a
+    notification attachment, or as something in the gallery, and each collector
+    knows slightly different things about it: who it was from, whether the child
+    sent or received it, the app it came through, and the words that came with
+    it. Those are the things that decide whether a scan is a bully's message or
+    a meme between friends, so they are normalised here once and read from the
+    same shape by the vision prompt, the stored concern and the parent's notice.
+
+    Android sends a few spellings for the same idea (``package`` beside ``app``,
+    ``sent_at`` in milliseconds); anything unrecognised is ignored rather than
+    guessed at.
+    """
+    if not isinstance(metadata, dict) or not metadata:
+        return None
+    group = metadata.get("group")
+    names = [name for name in (_clean(item, 60) for item in group or []) if name] if isinstance(group, list) else []
+    direction = _clean(metadata.get("direction"), 12).lower()
+    context = {
+        "source": _clean(metadata.get("source"), 20).lower() or None,
+        "direction": direction if direction in ("in", "out") else None,
+        "contact": _clean(metadata.get("contact")),
+        "number": _clean(metadata.get("number"), 40),
+        "group": names or None,
+        "message_text": _clean(metadata.get("message_text"), MAX_MESSAGE_TEXT) or None,
+        "app": _clean(metadata.get("app"), 60),
+        "package": _clean(metadata.get("package"), 120),
+        "conversation": _clean(metadata.get("conversation"), 80),
+        "sent_at": metadata.get("sent_at") if isinstance(metadata.get("sent_at"), (int, float)) else None,
+    }
+    return context if any(value for key, value in context.items() if key != "sent_at") else None
+
+
+def message_summary(context: dict[str, Any] | None, *, with_text: bool = True) -> str:
+    """One line naming who the message was from or to, and what came with it.
+
+    ``From Alex (MMS) · Message: "..."`` reads the same in a vision prompt, a
+    stored concern and a parent's push notification, so the three never
+    disagree about what the child was looking at.
+    """
+    if not context:
+        return ""
+    who = context.get("contact") or context.get("number") or context.get("conversation") or "an unknown number"
+    kind = context.get("app") or SOURCE_WORDS.get(str(context.get("source") or ""), "")
+    where = f" ({kind})" if kind and kind.lower() not in who.lower() else ""
+    line = f"Sent to {who}{where}" if context.get("direction") == "out" else f"From {who}{where}"
+    if context.get("group"):
+        line += f", in a group with {', '.join(context['group'][:4])}"
+    text = context.get("message_text")
+    if with_text and text:
+        line += f' · Message: "{text}"'
+    return line
+
+
 SYSTEM_PROMPT = (
     "You help Christian parents look after their child's phone. A keyword filter flagged a message, "
     "song, video or website title from the child's phone. Decide whether it is really something a "
@@ -43,16 +114,28 @@ SYSTEM_PROMPT = (
 def messages(concern: dict[str, Any], text: str) -> list[dict[str, str]]:
     """The chat request for one candidate."""
     label = CATEGORIES.get(concern.get("category") or "", {}).get("label") or concern.get("label") or ""
-    where = {"sms": "a text message", "calls": "a call", "media": "something played", "web": "a website"}.get(
-        str(concern.get("feature") or ""), "something on the phone"
-    )
+    action = str(concern.get("action") or "")
+    if action == "voice_message":
+        where = "a recorded voice message in a text conversation"
+    else:
+        where = {"sms": "a text message", "calls": "a call", "media": "something played", "web": "a website"}.get(
+            str(concern.get("feature") or ""), "something on the phone"
+        )
     clipped = (text or "")[:MAX_TEXT]
+    # A parent reading only the transcript has lost the person and the
+    # direction; both decide whether the words were aimed at the child.
+    context = concern.get("message_context")
+    who = message_summary(context, with_text=False) if isinstance(context, dict) else ""
+    said = (context or {}).get("message_text") if isinstance(context, dict) else None
+    aside = f"\n{who}." if who else ""
+    if said:
+        aside += f'\nThe message with it said: "{said}"'
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
             "content": f"Flagged as: {label} (keyword level {concern.get('level')}).\nFrom {where}"
-            f" ({concern.get('action') or 'seen'}):\n\"\"\"\n{clipped}\n\"\"\"",
+            f" ({concern.get('action') or 'seen'}):{aside}\n\"\"\"\n{clipped}\n\"\"\"",
         },
     ]
 
@@ -108,12 +191,28 @@ def dismissed(concern: dict[str, Any]) -> bool:
     return (concern.get("review") or {}).get("verdict") == "dismissed"
 
 
-def media_messages(media_type: str, file_name: str, image_b64: str) -> list[dict[str, Any]]:
-    """Build the vision completion chat prompt for evaluating a photo/video thumbnail."""
+def media_messages(
+    media_type: str,
+    file_name: str,
+    image_b64: str,
+    metadata: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Build the vision completion chat prompt for evaluating a photo/video thumbnail.
+
+    ``metadata`` is what the phone knows about the message the picture came in:
+    who sent it, whether the child sent or received it, what app, and the words
+    that came with it. A picture of a bruise from a friend reads differently from
+    the same picture in a bullying thread, so the context goes in the prompt.
+    """
     clean_b64 = image_b64
     if "," in clean_b64:
         clean_b64 = clean_b64.split(",", 1)[1]
     clean_b64 = clean_b64.strip()
+    context = message_context(metadata)
+    question = f"Scanned from {media_type} file: '{file_name}'."
+    if context:
+        question += f"\n{message_summary(context)}."
+    question += " Is there any safety concern?"
     return [
         {
             "role": "system",
@@ -137,7 +236,7 @@ def media_messages(media_type: str, file_name: str, image_b64: str) -> list[dict
             "content": [
                 {
                     "type": "text",
-                    "text": f"Scanned from {media_type} file: '{file_name}'. Is there any safety concern?",
+                    "text": question,
                 },
                 {
                     "type": "image_url",

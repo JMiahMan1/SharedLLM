@@ -8851,6 +8851,32 @@ async def guardian_media_scan(request: Request):
                             headers={"Retry-After": retry_after} if retry_after else None)
 
 
+@app.post("/api/guardian/audio/scan")
+async def guardian_audio_scan(request: Request):
+    """Transcribe one recorded voice message from a child's phone and scan it.
+
+    The same shape as the photo scan, for the same reason: a clip that could not
+    be read is not a clean clip, so a 503 and its Retry-After reach the phone and
+    it keeps the audio.
+    """
+    creds = await _resolve_identity_from_request(request)
+    me = str((creds or {}).get("user") or "").strip()
+    if not me:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json() or {}
+    user = str(body.get("user") or me).strip().lower()
+    if user != me:
+        await _raw_data_access(request, user)
+    payload = {**body, "user": user}
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.post(f"{TELEMETRY_SVC}/api/telemetry/audio/scan", json=payload, headers=headers)
+        data = await resp.json(content_type=None)
+        retry_after = (getattr(resp, "headers", None) or {}).get("Retry-After")
+        return JSONResponse(status_code=resp.status, content=data,
+                            headers={"Retry-After": retry_after} if retry_after else None)
+
+
 @app.get("/api/family/member/{user}/devices")
 async def family_member_devices(request: Request, user: str):
     """A child's devices with their technical side (model, OS, app version and

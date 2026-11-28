@@ -19,6 +19,7 @@ logged and kept on the hit.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -26,9 +27,12 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from typing import Any
 
+import aiohttp
+
 from services.common import concern_monitor, concern_review, device_noun, guardian_recap, notice_links, video_calls
 from services.common.backend_health import BackendUnavailable
 from services.telemetry import app_updates, llm, notices, store
+from services.telemetry.config import EXECUTION_SVC, INTERNAL_SECRET
 
 log = logging.getLogger("telemetry.guardian")
 
@@ -49,6 +53,24 @@ class MediaScanUnavailable(Exception):
     """The vision check could not run (settings unreadable, the model failed or
     timed out). Not the same as a clean picture: the phone must try it again."""
 _settings_cache: tuple[float, dict[str, str]] | None = None
+
+#: A voice note can be a minute of speech on the CPU: Whisper is given time to
+#: finish (it is the reason these are scanned rather than dropped).
+AUDIO_TIMEOUT_SECONDS = 180
+#: The most audio one request may carry, decoded. A voice note is far smaller;
+#: past this it is not a voice note.
+MAX_AUDIO_BYTES = 8 * 1024 * 1024
+
+#: What Whisper answers when a clip holds no speech. Recording an activity for
+#: it would tell a parent nothing and cost a phrase scan for nothing.
+NO_SPEECH = frozenset({"", "[silence]", "(silence)", "[blank_audio]", "[ music ]", "[music]", "..."})
+
+
+class AudioScanUnavailable(Exception):
+    """The voice note could not be transcribed (Whisper is off, the service is
+    unreachable or busy). The phone keeps the clip and retries; nothing is
+    dropped, and the parent is told nothing rather than told it was clean."""
+
 
 #: media_type and concern feature of a screenshot taken during a video call.
 VIDEO_CALL = "video_call"
@@ -100,6 +122,18 @@ def _concern_notice(parent: str, child: dict[str, Any], concern: dict[str, Any],
     priority = 5 if concern["category"] in concern_monitor.ALWAYS_ON else 4 if concern["level"] == "severe" else 3
     review = concern.get("review") or {}
     body = concern.get("excerpt") or ""
+    # A parent deciding what to do needs to know who sent it before they need
+    # the description: "From Alex (MMS)" is the difference between a bully and
+    # a friend quoting a song.
+    from_message = concern.get("message_context")
+    if isinstance(from_message, dict):
+        summary = concern_review.message_summary(from_message, with_text=False)
+        said = from_message.get("message_text")
+        if summary:
+            body = f"{summary}.\n{body}" if body else f"{summary}."
+        if said:
+            body = f'{body}\nMessage: "{said}"' if body else f'Message: "{said}"'
+        body = body[:400]
     if review.get("by") == "model" and review.get("reason"):
         body = f"{body}\n{'Checked' if review.get('verdict') == 'confirmed' else 'Unsure'}: {review['reason']}"
     return {
@@ -209,7 +243,7 @@ async def scan_media_item(
 
     payload = {
         "model": model,
-        "messages": concern_review.media_messages(media_type, file_name, image_b64),
+        "messages": concern_review.media_messages(media_type, file_name, image_b64, metadata),
         "temperature": 0,
         "max_tokens": 200,
         "stream": False,
@@ -235,6 +269,13 @@ async def scan_media_item(
         context_parts = [description]
         if verdict["reason"]:
             context_parts.append(f"Checked: {verdict['reason']}")
+        # Who sent it, in which app, and the words that came with it: a parent
+        # needs that more than the file name when deciding what to say.
+        from_message = concern_review.message_context(metadata)
+        if from_message:
+            summary = concern_review.message_summary(from_message, with_text=len(context_parts) < 3)
+            if summary:
+                context_parts.append(summary)
         if isinstance(metadata, dict):
             for key in ("app", "package", "folder", "album", "title", "taken_at"):
                 value = metadata.get(key)
@@ -252,6 +293,7 @@ async def scan_media_item(
             "action": f"{media_type}_scan",
             "file_name": file_name,
             "at": household_now().isoformat(),
+            "message_context": from_message,
             "review": {
                 "by": "vision",
                 "model": model,
@@ -263,6 +305,142 @@ async def scan_media_item(
     except Exception as exc:
         log.warning("media scan error for %s (%s): %s", child.get("username"), file_name, exc)
         return None
+
+
+_AUDIO_SUFFIX = {
+    "audio/amr": ".amr",
+    "audio/3gpp": ".3gp",
+    "audio/3gpp2": ".3g2",
+    "audio/mp4": ".m4a",
+    "audio/x-m4a": ".m4a",
+    "audio/aac": ".aac",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/ogg": ".ogg",
+    "application/ogg": ".ogg",
+    "audio/opus": ".opus",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/wave": ".wav",
+    "audio/webm": ".webm",
+}
+
+#: Whisper's smallest model transcribes a phone voice note well and runs on the
+#: CPU without taking the card from the household.
+AUDIO_WHISPER_MODEL = "base"
+
+
+def audio_file_name(mime_type: str, file_name: str = "") -> str:
+    """A name the transcriber can pick a decoder from.
+
+    Whisper's loader believes an extension over a content type, so a clip named
+    without one - which is what a notification URI or an MMS part gives us - is
+    given the extension its type implies. Android's own recordings are m4a, so
+    that is the fallback rather than .wav (a container that is not wav is not
+    decodable when the loader trusts the name).
+    """
+    name = (file_name or "").strip().replace("/", "_").replace("\\", "_")[:120]
+    leaf = name.rsplit("/", 1)[-1]
+    if "." in leaf and len(leaf.rsplit(".", 1)[-1]) <= 5:
+        return name
+    suffix = _AUDIO_SUFFIX.get((mime_type or "").split(";")[0].strip().lower(), ".m4a")
+    return f"{name or 'voice-note'}{suffix}"
+
+
+async def transcribe_audio(session, audio: bytes, mime_type: str, file_name: str) -> str:
+    """The words in one clip, from the household's own Whisper.
+
+    The execution service already runs Whisper and ffmpeg on this LAN, so this
+    asks it rather than adding a second transcriber to telemetry. Nothing is
+    written here: the bytes go into the multipart form, and execution deletes
+    its own temporary file when it is done. A 501 (no Whisper in that image) is
+    an unavailability, not a verdict: the phone keeps the clip.
+    """
+    form = aiohttp.FormData()
+    form.add_field(
+        "file",
+        audio,
+        filename=audio_file_name(mime_type, file_name),
+        content_type=(mime_type or "audio/mp4"),
+    )
+    form.add_field("model", AUDIO_WHISPER_MODEL)
+    form.add_field("language", "en")
+    url = f"{EXECUTION_SVC.rstrip('/')}/execute/stt/transcribe"
+    try:
+        async with session.post(
+            url,
+            data=form,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=AUDIO_TIMEOUT_SECONDS),
+        ) as response:
+            status = response.status
+            body = await response.text()
+    except (TimeoutError, aiohttp.ClientError, OSError) as exc:
+        raise AudioScanUnavailable(f"the transcriber could not be reached: {exc!r}") from exc
+    if status >= 500 or status == 501:
+        # 501 is "Whisper not installed" from the execution image, and 503/504
+        # are the GPU box busy or restarting: both mean try again later.
+        raise AudioScanUnavailable(f"the transcriber is not available (HTTP {status})")
+    if status >= 400:
+        raise AudioScanUnavailable(f"the transcriber refused the clip (HTTP {status})")
+    try:
+        data = json.loads(body)
+    except (TypeError, ValueError) as exc:
+        raise AudioScanUnavailable("the transcriber's answer could not be read") from exc
+    transcript = data.get("transcript") if isinstance(data, dict) else None
+    if not isinstance(transcript, str):
+        raise AudioScanUnavailable("the transcriber answered without a transcript")
+    return transcript.strip()
+
+
+def voice_message_event(
+    user: str,
+    transcript: str,
+    mime_type: str,
+    file_name: str,
+    metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """The child's ``sms`` activity for one transcribed voice note.
+
+    It is recorded as a text message the child handled, with the transcript in
+    its body, so the phrase list, the local model, the recap and the Calls &
+    messages view all read it the way they read a written message - and the
+    view can badge it as spoken because ``detail.audio`` is true.
+    """
+    context = concern_review.message_context(metadata) or {}
+    at = context.get("sent_at") or (metadata or {}).get("at") if isinstance(metadata, dict) else None
+    if not isinstance(at, (int, float)):
+        at = int(time.time() * 1000)
+    # The feed and the Calls & messages view read a top-level ISO stamp (a
+    # number there is skipped as unreadable); the phone's own convention for
+    # the detail is milliseconds, so both are kept.
+    when = _iso_at(at)
+    item = context.get("contact") or context.get("number") or (file_name or "a voice message")
+    detail = {
+        "body": transcript,
+        "transcript": transcript,
+        "audio": True,
+        "mime_type": mime_type,
+        "file_name": file_name,
+        "direction": context.get("direction"),
+        "number": context.get("number"),
+        "contact": context.get("contact"),
+        "group": context.get("group"),
+        "mms": bool(context.get("source") == "mms"),
+        "source": context.get("source") or "audio",
+        "message_text": context.get("message_text"),
+        "at": at,
+    }
+    return {
+        "user": user,
+        "feature": "sms",
+        "event": "message",
+        "action": "voice_message",
+        "item": item,
+        "detail": detail,
+        "at": when,
+        "message_context": context or None,
+    }
 
 
 async def verify_media_frame(session, category: str, image_b64: str) -> dict[str, Any]:
@@ -497,6 +675,10 @@ async def on_activity(rc, session, event: dict[str, Any], deliver: Deliver) -> l
         for concern in found:
             concern.setdefault("id", store.new_id())
             concern["at"] = _iso_at(concern.get("at"))
+            # A voice note's concerns keep who said it, so a parent's notice
+            # names the person instead of only quoting the words.
+            if event.get("message_context") and not concern.get("message_context"):
+                concern["message_context"] = event["message_context"]
         await store.add_concerns(rc, child["username"], found)
         for concern in found:
             for parent in child.get("parents") or []:

@@ -65,6 +65,40 @@ describe('CommsSection', () => {
     expect(within(first).getByRole('button', { expanded: true })).toHaveTextContent('x'.repeat(300));
   });
 
+  it('says when a message was really a voice note, and shows what was typed with it', async () => {
+    vi.mocked(api.getGuardianComms).mockResolvedValue({
+      days: 7,
+      events: [
+        {
+          user: 'taylor',
+          feature: 'sms',
+          item: 'Leo',
+          action: 'voice_message',
+          at: at(5),
+          detail: {
+            direction: 'in',
+            number: '+15555550102',
+            body: 'Meet me behind the gym after school.',
+            transcript: 'Meet me behind the gym after school.',
+            audio: true,
+            message_text: 'listen to this',
+          },
+        },
+        { user: 'taylor', feature: 'sms', item: 'Leo', action: 'message', at: at(60), detail: { direction: 'out', number: '+15555550102', body: 'ok' } },
+      ],
+    } as never);
+    renderIt();
+
+    const items = await screen.findAllByTestId('member-comms-item');
+    const voice = items[0];
+    expect(within(voice).getByTestId('member-comms-voice')).toHaveTextContent('Voice message');
+    expect(voice).toHaveTextContent('Meet me behind the gym after school.');
+    expect(voice).toHaveTextContent('Text with it: “listen to this”');
+    // A typed text carries no badge, and no "text with it" line.
+    expect(within(items[1]).queryByTestId('member-comms-voice')).not.toBeInTheDocument();
+    expect(items[1]).not.toHaveTextContent('Text with it');
+  });
+
   it('tells a non-parent plainly', async () => {
     vi.mocked(api.getGuardianComms).mockRejectedValue(Object.assign(new Error('no'), { isAxiosError: true, response: { status: 403 } }));
     renderIt();

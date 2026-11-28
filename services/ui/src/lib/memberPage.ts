@@ -326,7 +326,7 @@ const TEXT_TITLE: Record<string, (who: string) => string> = {
  * other kind of event.
  */
 export function commsLine(e: { feature: string; item: string; duration_s?: number | null; detail?: Record<string, unknown> }):
-  { title: string; number: string | null; length: string | null; text: string | null } | null {
+  { title: string; number: string | null; length: string | null; text: string | null; badge?: string } | null {
   if (e.feature === 'social') {
     // A message notification from an app (Snapchat, Instagram...): who, on which app, and what it said.
     const sender = typeof e.detail?.sender === 'string' && e.detail.sender ? e.detail.sender : null;
@@ -347,7 +347,10 @@ export function commsLine(e: { feature: string; item: string; duration_s?: numbe
   const kind = e.detail?.rcs ? ' (chat)' : e.detail?.mms ? ' (picture or group)' : '';
   const title = (TEXT_TITLE[direction] ?? ((w: string) => `Text with ${w}`))(who) + kind;
   const text = typeof e.detail?.body === 'string' ? e.detail.body : null;
-  return { title, number: number && number !== who ? number : null, length: null, text };
+  // A voice message the child sent or was sent: it is in the feed as a text
+  // message because that is where the transcript goes, but nobody typed it.
+  const audio = e.detail?.audio === true;
+  return { title, number: number && number !== who ? number : null, length: null, text, ...(audio ? { badge: 'Voice message' } : {}) };
 }
 
 /**

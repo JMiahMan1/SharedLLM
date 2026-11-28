@@ -75,7 +75,13 @@ final class PhotoScan {
             }
             // Chat images kept while the check could not run go first (see MediaScanOutbox).
             for (MediaScanOutbox.Item item : MediaScanOutbox.pending(outboxDir(app), MAX_UPLOADS)) {
-                int status = GuardApi.uploadMediaScan(app, item.mediaType, item.fileName, item.b64);
+                JSONObject meta = null;
+                try {
+                    if (item.metadata != null && !item.metadata.isEmpty()) meta = new JSONObject(item.metadata);
+                } catch (Exception ignored) {
+                    // Unreadable context still leaves a picture worth checking.
+                }
+                int status = GuardApi.uploadMediaScan(app, item.mediaType, item.fileName, item.b64, meta);
                 if ((status >= 200 && status < 300) || (status >= 400 && status < 500 && status != 429)) {
                     MediaScanOutbox.done(item);
                     uploaded++;
@@ -143,7 +149,8 @@ final class PhotoScan {
                         continue;
                     }
                     int status = GuardApi.uploadMediaScan(app,
-                            PhotoScanMonitor.mediaType(mime, name), name == null ? "" : name, b64);
+                            PhotoScanMonitor.mediaType(mime, name), name == null ? "" : name, b64,
+                            galleryMeta(at));
                     if (status >= 200 && status < 300) {
                         uploaded++;
                         uploads++;
@@ -196,6 +203,15 @@ final class PhotoScan {
      * comms pass.
      */
     static void scanMms(Context context, long mmsId) {
+        scanMms(context, mmsId, null);
+    }
+
+    /**
+     * The same, carrying what the phone knows about the message the picture
+     * came in: who sent it, whether the child sent or received it, the group and
+     * the words that came with it.
+     */
+    static void scanMms(Context context, long mmsId, JSONObject meta) {
         Context app = context.getApplicationContext();
         try {
             if (!GuardApi.isProtected(app) || !GuardApi.photoScanEnabled(app)) return;
@@ -220,7 +236,7 @@ final class PhotoScan {
                         continue;
                     }
                     int status = GuardApi.uploadMediaScan(app, mediaType,
-                            name == null || name.isEmpty() ? "mms-" + partId : name, b64);
+                            name == null || name.isEmpty() ? "mms-" + partId : name, b64, meta);
                     if ((status >= 200 && status < 300) || (status >= 400 && status < 500 && status != 429)) {
                         remember(prefs, KEY_MMS_SEEN, seen, key);
                     }
@@ -232,11 +248,36 @@ final class PhotoScan {
     }
 
     /**
+     * What a gallery picture can say about itself: it came from the phone's own
+     * camera roll, and when it was taken (epoch ms). A picture found in the
+     * gallery has no sender, and claiming one would be a lie to the model.
+     */
+    static JSONObject galleryMeta(long takenAtSeconds) {
+        JSONObject out = new JSONObject();
+        try {
+            out.put("source", "gallery");
+            if (takenAtSeconds > 0) out.put("sent_at", takenAtSeconds * 1000L);
+        } catch (Exception ignored) {
+            // Plain keys.
+        }
+        return out;
+    }
+
+    /**
      * Chat images a messaging app attached to its notification. Only what the
      * app chose to show on the lock screen: an app's private camera roll, and
      * anything sent end-to-end, is not visible to any other app.
      */
     static void scanNotification(Context context, android.os.Bundle extras) {
+        scanNotification(context, extras, null);
+    }
+
+    /**
+     * The same, with what the notification itself says: which app, which
+     * conversation, who sent it, when, and the message text. A chat picture with
+     * a threatening caption is the caption that matters as much as the picture.
+     */
+    static void scanNotification(Context context, android.os.Bundle extras, JSONObject meta) {
         if (extras == null) return;
         Context app = context.getApplicationContext();
         try {
@@ -255,14 +296,14 @@ final class PhotoScan {
                 if (uriText == null || uriText.isEmpty()) continue;
                 String mime = message.getString("type", "image/jpeg");
                 if (!PhotoScanMonitor.isSupportedMedia(mime, null)) continue;
-                sendNotificationImage(app, Uri.parse(uriText), mime);
+                sendNotificationImage(app, Uri.parse(uriText), mime, meta);
             }
         } catch (Exception e) {
             Log.w(TAG, "notification media unreadable: " + e.getMessage());
         }
     }
 
-    private static void sendNotificationImage(Context app, Uri uri, String mime) {
+    private static void sendNotificationImage(Context app, Uri uri, String mime, JSONObject meta) {
         String key = "notif:" + uri;
         synchronized (PhotoScan.class) {
             SharedPreferences prefs = prefs(app);
@@ -273,13 +314,14 @@ final class PhotoScan {
             try {
                 String b64 = mediaThumbnail(app, uri, mime);
                 if (b64 == null) return;
-                int status = GuardApi.uploadMediaScan(app, "image", "notification-image.jpg", b64);
+                int status = GuardApi.uploadMediaScan(app, "image", "notification-image.jpg", b64, meta);
                 boolean settled = (status >= 200 && status < 300) || (status >= 400 && status < 500 && status != 429);
                 if (!settled) {
                     // Not checked yet (offline, or the server's check cannot run now). The
                     // picture lives only as long as the notification, so keep the thumbnail
                     // and send it with the next gallery pass rather than lose it.
-                    settled = MediaScanOutbox.add(outboxDir(app), "image", "notification-image.jpg", b64);
+                    settled = MediaScanOutbox.add(outboxDir(app), "image", "notification-image.jpg", b64,
+                            meta == null ? null : meta.toString());
                 }
                 if (settled) {
                     SharedPreferences prefs = prefs(app);

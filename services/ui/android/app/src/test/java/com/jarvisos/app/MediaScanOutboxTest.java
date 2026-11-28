@@ -50,4 +50,31 @@ public class MediaScanOutboxTest {
         assertEquals(MediaScanOutbox.MAX_PENDING, MediaScanOutbox.size(dir));
         assertEquals("n5.jpg", MediaScanOutbox.pending(dir, 1).get(0).fileName);
     }
+
+    @Test
+    public void keepsTheMessageContextWithTheKeptCheck() throws Exception {
+        File dir = Files.createTempDirectory("scan-outbox-meta").toFile();
+        String meta = "{\"source\":\"notification\",\"contact\":\"Alex\",\"message_text\":\"look at this\"}";
+        assertTrue(MediaScanOutbox.add(dir, "image", "chat.jpg", "AAAA", meta));
+
+        MediaScanOutbox.Item item = MediaScanOutbox.pending(dir, 1).get(0);
+        assertEquals("chat.jpg", item.fileName);
+        assertEquals("the context must not become part of the image", "AAAA", item.b64);
+        assertEquals(meta, item.metadata);
+    }
+
+    @Test
+    public void readsACheckQueuedBeforeContextWasKept() throws Exception {
+        // What an older version wrote: three lines, no context. A phone that
+        // upgrades must send it rather than treat it as unreadable and delete it.
+        File dir = Files.createTempDirectory("scan-outbox-legacy").toFile();
+        File old = new File(dir, "1700000000000-1.scan");
+        Files.write(old.toPath(), "image\nold.jpg\nBBBB".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        List<MediaScanOutbox.Item> pending = MediaScanOutbox.pending(dir, 4);
+        assertEquals(1, pending.size());
+        assertEquals("old.jpg", pending.get(0).fileName);
+        assertEquals("BBBB", pending.get(0).b64);
+        assertEquals(null, pending.get(0).metadata);
+    }
 }

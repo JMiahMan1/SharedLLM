@@ -2,6 +2,7 @@
 import os
 
 from services.config import (
+    EXECUTION_SVC_URL,
     GEO_SVC_URL,
     IDENTITY_SVC_URL,
     _net_url,
@@ -21,6 +22,9 @@ AUTOMATION_SVC_URL = (
 
 GEO_SVC = (GEO_SVC_URL or "").rstrip("/")
 IDENTITY_SVC = (IDENTITY_SVC_URL or "").rstrip("/")
+# Whisper and ffmpeg live in the execution image; telemetry asks it to read a
+# voice note rather than carrying a transcriber of its own.
+EXECUTION_SVC = (EXECUTION_SVC_URL or "").rstrip("/")
 
 # Scheduler poll cadence. Short enough that a report starts close to its
 # configured time, long enough not to hammer Redis.
