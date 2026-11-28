@@ -88,6 +88,9 @@ DEVICE_ANCHORS = ("devices-hardware", "devices-light-groups", "devices-duplicate
                   "devices-persons", "devices-logins", "devices-rooms", "devices-archived", "devices-family",
                   "devices-windows", "devices-folders", "devices-activity")
 HEALTH_TABS = ("today", "fitness", "sleep", "nutrition", "health")
+#: Beloved's sections, as ``?beloved=<section>`` opens them. "1" is what every
+#: notice before sections existed carried, and still means "open Beloved".
+BELOVED_SECTIONS = ("1", "home", "days", "today", "notes", "dates", "justus")
 # Actual tabs in the UI (services/ui/src/pages/Bible.tsx TAB_IDS):
 # read, today, play, memorize, studies, progress
 # Old values kept so existing links still validate.
@@ -102,6 +105,10 @@ ROUTES: dict[str, Route] = {
                  choices={"tab": FAMILY_TABS}, description="A tab of the Family page; Announce lists timers"),
     "chat": _r("/family", query=("chat", "beloved", "private"), focus=("msg",),
                query_guards={"beloved": "beloved", "private": "private_chat"},
+               # The section of Beloved a notice opens, so a love note lands on
+               # Notes rather than on the couple's home. "1" is what older
+               # notices carry and means "open Beloved".
+               choices={"beloved": BELOVED_SECTIONS},
                description="One family conversation; focus is the message"),
     "member": _r("/family/member/{username}", query=("section",), choices={"section": MEMBER_SECTIONS},
                  focus=("unlock", "guard", "time", "app", "concern", "chore"),

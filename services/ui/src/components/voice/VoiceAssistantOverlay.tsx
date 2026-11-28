@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Capacitor } from '@capacitor/core';
-import { Keyboard, Mic, Send, Sparkles, Square, X } from 'lucide-react';
+import { Check, Keyboard, Mic, Send, Sparkles, Square, X } from 'lucide-react';
 import { JarvisAssist, askJarvis, type AssistEvent, type AssistState } from '../../plugins/jarvisAssist';
 import JarvisHead from './JarvisHead';
 import { faceStateFor } from './jarvisFace';
@@ -57,24 +57,34 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
     [],
   );
 
-  // What the service reports, however it is running (native plugin or this page).
+  // The last answer, so the smile can wait for the voice to finish (a flash on
+  // the reply landed in the middle of the sentence being spoken).
+  const saidRef = useRef('');
+  useEffect(() => {
+    saidRef.current = said;
+  }, [said]);
+
+  // Listen, then speak. The listener has to exist before the microphone opens:
+  // registering it while `start()` was already running meant the first states of
+  // a turn went to nobody, so a tapped button could look like nothing happened.
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
     let handle: { remove: () => Promise<void> } | undefined;
-    void JarvisAssist.addListener('assist', (event: AssistEvent) => {
+    const onEvent = (event: AssistEvent) => {
       if (cancelled) return;
       if (event.type === 'state' && event.text) {
         const next = event.text as AssistState;
         setState(next);
-        // A new turn starts from a clean sheet: the previous answer and its
-        // error must not sit under this turn's words.
+        // A new turn starts from a clean sheet: the previous answer, its error
+        // and the words of the question before it must not sit under this turn.
         if (next === 'listening') {
           setSaid('');
+          setHeard('');
           setError('');
-          // A new turn clears the last turn's face.
           setReaction(null);
         }
+        if (next === 'idle' && saidRef.current) flash('happy', 1800);
       }
       if (event.type === 'level') setLevel(typeof event.level === 'number' ? event.level : 0);
       if (event.type === 'partial' && event.text) {
@@ -89,52 +99,47 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
         setError('');
       }
       if (event.type === 'sentence' && event.text) setSaid((prev) => (prev ? `${prev} ${event.text}` : String(event.text)));
-      if (event.type === 'reply' && event.text) {
-        setSaid(event.text);
-        // A short smile: he answered, and he is pleased about it.
-        flash('happy', 1800);
-      }
+      if (event.type === 'reply' && event.text) setSaid(event.text);
       if (event.type === 'status' && event.text) setNote(event.text);
       if (event.type === 'error') {
         setError(event.text || 'That did not work.');
         setState('idle');
         flash('error', 2400);
       }
-    }).then((registered) => {
-      // Closed before the listeners resolved: drop them instead of leaking one
-      // per open/close of the sheet.
+    };
+    void (async () => {
+      setError('');
+      setNote('');
+      setHeard('');
+      setSaid('');
+      setLevel(0);
+      setTyping(false);
+      setReaction(null);
+      try {
+        handle = await JarvisAssist.addListener('assist', onEvent);
+      } catch {
+        // The web turn cannot fail to register; a native-only event stream could.
+      }
       if (cancelled) {
-        void registered.remove();
+        // Closed while the listener was resolving: drop it instead of leaking
+        // one per open and close of the sheet.
+        void handle?.remove();
         return;
       }
-      handle = registered;
-    });
+      setState('listening');
+      try {
+        await JarvisAssist.start({ wake: false, userId });
+      } catch {
+        setState('idle');
+        setTyping(true);
+        setError('This device will not open the microphone. Type instead.');
+      }
+    })();
     return () => {
       cancelled = true;
       void handle?.remove();
     };
-  }, [isOpen, flash]);
-
-  // A new turn starts as the sheet opens.
-  useEffect(() => {
-    if (!isOpen) return;
-    /* eslint-disable react-hooks/set-state-in-effect -- opening the sheet is a deliberate
-       reset of the turn before it; it runs once per open, never in a render loop. */
-    setError('');
-    setNote('');
-    setHeard('');
-    setSaid('');
-    setLevel(0);
-    setTyping(false);
-    setReaction(null);
-    setState('listening');
-    /* eslint-enable react-hooks/set-state-in-effect */
-    void JarvisAssist.start({ wake: false }).catch(() => {
-      setState('idle');
-      setTyping(true);
-      setError('This device will not open the microphone. Type instead.');
-    });
-  }, [isOpen]);
+  }, [isOpen, userId, flash]);
 
   // Ask once whether this phone could hand us the assistant role.
   useEffect(() => {
@@ -169,6 +174,16 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
   const speaking = state === 'speaking';
   const face = faceStateFor(state, reaction);
 
+  /** The one control in the middle, named and drawn for what the screen is doing. */
+  const primary: { label: string; icon: React.ReactNode } =
+    state === 'listening'
+      ? { label: 'Done speaking', icon: <Check size={28} /> }
+      : state === 'thinking'
+        ? { label: 'Cancel the question', icon: <X size={28} /> }
+        : state === 'speaking'
+          ? { label: 'Stop talking', icon: <Square size={26} fill="currentColor" /> }
+          : { label: 'Tap to speak', icon: <Mic size={28} /> };
+
   const words: Record<AssistState, string> = {
     idle: 'Ask me anything',
     listening: 'Listening',
@@ -200,7 +215,7 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
             }}
           />
 
-          <div className="relative flex items-center justify-between px-[calc(1rem+var(--safe-left))] pt-[calc(0.75rem+var(--safe-top))] pr-[calc(1rem+var(--safe-right))]">
+          <div className="relative flex shrink-0 items-center justify-between px-[calc(1rem+var(--safe-left))] pt-[calc(0.75rem+var(--safe-top))] pr-[calc(1rem+var(--safe-right))]">
             <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.28em] text-white/40">
               <Sparkles size={12} /> Jarvis
             </span>
@@ -213,45 +228,49 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
             </button>
           </div>
 
-          {/* the face */}
-          <div className="relative flex flex-1 flex-col items-center justify-center gap-8 px-6">
-            <div className="relative grid place-items-center">
+          {/* the face, and what it heard and says */}
+          <div className="relative flex min-h-0 flex-1 flex-col items-center gap-4 px-6">
+            <div className="relative grid shrink-0 place-items-center py-2">
               {speaking &&
                 [0, 0.35, 0.7].map((delay) => (
                   <motion.span
                     key={delay}
                     aria-hidden
-                    className="absolute h-44 w-44 rounded-full border border-white/15"
+                    className="absolute h-40 w-40 rounded-full border border-white/15"
                     initial={{ scale: 0.9, opacity: 0.5 }}
                     animate={{ scale: 2.1, opacity: 0 }}
                     transition={{ duration: 2.4, repeat: Infinity, delay, ease: 'easeOut' }}
                   />
                 ))}
-              <JarvisHead state={face} level={level} size={176} />
+              <JarvisHead state={face} level={level} size={152} />
             </div>
 
-            <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-white/45">{words[state]}</p>
-            {note && !error && (
-              <p className="text-[10px] uppercase tracking-[0.22em] text-white/25">{note}</p>
-            )}
+            <div className="flex shrink-0 flex-col items-center gap-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-white/45">{words[state]}</p>
+              {note && !error && (
+                <p className="max-w-xs text-center text-[10px] uppercase tracking-[0.22em] text-white/25">{note}</p>
+              )}
+            </div>
 
-            {(heard || said) && (
-              <div
-                ref={scroller}
-                className="max-h-[34vh] w-full max-w-md space-y-3 overflow-y-auto text-center [scrollbar-width:none]"
-              >
-                {heard && <p className="text-2xl font-medium leading-snug text-white/95">{heard}</p>}
-                {said && (
-                  <p aria-live="polite" className="text-base leading-relaxed text-white/70">
-                    {said}
-                  </p>
-                )}
-              </div>
-            )}
+            {/* The words have their own area, which scrolls: the face, the
+                question and the answer used to share one column, so a long
+                answer pushed the buttons off a short screen. */}
+            <div
+              ref={scroller}
+              data-testid="voice-transcript"
+              className="min-h-0 w-full max-w-md flex-1 space-y-3 overflow-y-auto overscroll-contain pb-1 text-center [scrollbar-width:none]"
+            >
+              {heard && <p className="text-xl font-medium leading-snug text-white/95 sm:text-2xl">{heard}</p>}
+              {said && (
+                <p aria-live="polite" className="text-base leading-relaxed text-white/70">
+                  {said}
+                </p>
+              )}
+            </div>
           </div>
 
           {/* controls */}
-          <div className="relative flex flex-col items-center gap-3 px-6 pb-[calc(1.5rem+var(--safe-bottom))]">
+          <div className="relative flex shrink-0 flex-col items-center gap-3 px-6 pb-[calc(1.5rem+var(--safe-bottom))]">
             {error && (
               <p className="rounded-full border border-amber-300/30 bg-amber-400/10 px-4 py-2 text-center text-sm text-amber-100">
                 {error}
@@ -322,20 +341,44 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
                 >
                   <Keyboard size={22} />
                 </button>
+                {/* One button, and what it does is what the screen is doing: a
+                    square that closed the sheet while he was waiting looked
+                    backwards, and stopping a recording took a second tap on a
+                    different button to get the answer. */}
                 <button
-                  onClick={() => (speaking ? void JarvisAssist.stopSpeaking() : close())}
-                  aria-label={speaking ? 'Stop talking' : 'Stop listening'}
+                  onClick={() => {
+                    if (state === 'listening') {
+                      // Done: this take is the question.
+                      void JarvisAssist.finish?.();
+                      return;
+                    }
+                    if (state === 'thinking') {
+                      // Cancel: drop the request and stay here, ready to ask again.
+                      void JarvisAssist.stop();
+                      return;
+                    }
+                    if (state === 'speaking') {
+                      // Stop the voice; the answer stays on screen to read.
+                      void JarvisAssist.stopSpeaking();
+                      return;
+                    }
+                    // Idle: ask. Nothing re-arms afterwards, so the answer stays.
+                    setError('');
+                    setTyping(false);
+                    setState('listening');
+                    void JarvisAssist.start({ wake: false, userId }).catch(() => {
+                      setState('idle');
+                      setError('This device will not open the microphone.');
+                    });
+                  }}
+                  aria-label={primary.label}
+                  data-testid="voice-primary"
+                  data-state={state}
                   className="grid h-20 w-20 place-items-center rounded-full bg-white text-[#0b0d12] shadow-xl transition-transform active:scale-95"
                 >
-                  <Square size={26} fill="currentColor" />
+                  {primary.icon}
                 </button>
-                <button
-                  onClick={() => void JarvisAssist.start({ wake: false })}
-                  aria-label="Ask again"
-                  className="grid h-16 w-16 place-items-center rounded-full border border-white/10 bg-white/5 text-white/65 transition-colors hover:bg-white/10 hover:text-white"
-                >
-                  <Mic size={22} />
-                </button>
+                <span aria-hidden className="h-16 w-16" />
               </div>
             )}
           </div>

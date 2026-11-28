@@ -4,11 +4,12 @@ import { Shield, Lock, User, AlertCircle, Server, WifiOff, Wifi, Eye, EyeOff } f
 import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { storageGet, storageSet } from '../lib/storage';
 import { checkConnectivity, normalizeServerUrl } from '../lib/connectivity';
 import { DEFAULT_SERVER_URL } from '../lib/serverUrl';
 import { readSignOutMessage } from '../lib/signOutNotice';
+import { inAppPath } from '../lib/noticeLink';
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -21,6 +22,7 @@ const Login = () => {
   const { login, initError } = useAuth();
   const { trigger } = useHaptics();
   const navigate = useNavigate();
+  const location = useLocation();
   const showServerField = Capacitor.isNativePlatform();
   // Why this device was signed out (a reset sign-in, a refused key). It stays
   // until the next successful sign-in, so a reload does not lose it.
@@ -66,7 +68,10 @@ const Login = () => {
       }
       await login({ username, password });
       await storageSet('jarvis_last_username', username);
-      navigate('/');
+      // Back to the page that asked for a sign-in (a tapped notification, a
+      // bookmark), never a login loop.
+      const from = inAppPath((location.state as { from?: unknown } | null)?.from);
+      navigate(from && !from.startsWith('/login') ? from : '/', { replace: true });
     } catch (err: unknown) {
       if (err instanceof Error) {
         const axiosError = err as import('axios').AxiosError & { response?: { data?: { detail?: string } } };
