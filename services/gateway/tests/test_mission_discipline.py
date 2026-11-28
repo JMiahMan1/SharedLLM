@@ -116,8 +116,11 @@ def test_the_loop_checks_the_debrief_against_its_own_tracking_and_ends_on_it():
     src = inspect.getsource(agent_loop.AgentLoop)
     assert "_discipline.review_debrief(\n                        payload, pending_verification(_written_files, _verified_files)" in src
     assert "if _debrief_answer is not None:" in src and "ans = _debrief_answer" in src
-    # Words alone, or a quiet stall, do not end a mission whose objectives are open.
-    assert "if any(ind in _ans_l for ind in COMPLETION_INDICATORS) and _still_open:" in src
+    # Words alone, or a quiet stall, do not end a mission whose objectives are
+    # open -- and unverified writes also outrank the completion phrase.
+    assert "completion_hold_kind(ans, _still_open, _unverified_pending)" in src
+    assert 'if _hold == "objectives":' in src
+    assert 'elif _hold == "verification":' in src
     assert "if _gate_ok and _discipline.open_objectives():" in src
     # The objectives line reaches the model every turn and the state is checkpointed.
     assert "_objectives_line = _discipline.line()" in src

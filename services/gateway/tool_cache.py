@@ -28,6 +28,7 @@ question goes unanswered.
 """
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import hashlib
 import json
@@ -252,15 +253,17 @@ async def call(
     if is_write:
         result = await fetch()
         for tag in tags:
-            invalidate_tag(tag, reason=f"write via {tool}")
-        _stat(tool, writes=1)
+            # redis-py is synchronous; a slow or unreachable Redis must never
+            # stall the gateway's event loop while a household turn waits.
+            await asyncio.to_thread(invalidate_tag, tag, reason=f"write via {tool}")
+        await asyncio.to_thread(_stat, tool, writes=1)
         return result
     if not ENABLED or declared == tr.LIVE:
         # Never a Redis round trip on a live call: device commands and safety reads
         # go straight to their source, whatever state the cache is in.
         return await fetch()
 
-    cls = effective_class(tool, declared)
+    cls = await asyncio.to_thread(effective_class, tool, declared)
     if cls == tr.LIVE:
         return await fetch()
     conversation = conversation or CONVERSATION.get()
@@ -268,7 +271,7 @@ async def call(
     key = _entry_key(tool, args, user=user, conversation=conversation, public=public)
     now = _now()
     try:
-        raw = _redis().get(key)
+        raw = await asyncio.to_thread(lambda: _redis().get(key))
     except Exception as exc:
         _mark_down(exc)
         raw = None
@@ -276,8 +279,9 @@ async def call(
         try:
             entry = json.loads(raw)
             if now < entry["expires_at"]:
-                _stat(tool, hits=1, saved_ms=float(entry.get("source_ms", 0.0)) or 0)
-                _touch(key, entry, public=public, user=user)
+                await asyncio.to_thread(_stat, tool, hits=1,
+                                        saved_ms=float(entry.get("source_ms", 0.0)) or 0)
+                await asyncio.to_thread(_touch, key, entry, public=public, user=user)
                 return annotate(entry["result"], entry["fetched_at"], entry["cls"], now)
         except (ValueError, KeyError, TypeError):
             pass
@@ -285,11 +289,11 @@ async def call(
     started = time.perf_counter()
     result = await fetch()
     source_ms = round((time.perf_counter() - started) * 1000.0, 1)
-    _stat(tool, misses=1, source_ms=source_ms or 0, source_calls=1)
+    await asyncio.to_thread(_stat, tool, misses=1, source_ms=source_ms or 0, source_calls=1)
     if _looks_failed(result) or len(result) > MAX_VALUE_CHARS:
         return result
-    _remember(key, tool, args, payload, result, cls=cls, tags=tags, public=public, user=user,
-              source_ms=source_ms, now=now)
+    await asyncio.to_thread(_remember, key, tool, args, payload, result, cls=cls, tags=tags,
+                            public=public, user=user, source_ms=source_ms, now=now)
     return result
 
 

@@ -141,6 +141,58 @@ def _history_chars(history: list) -> int:
     return sum(len(str(m.get("content") or "")) for m in history if isinstance(m, dict))
 
 
+#: Conversation history is capped by characters, not message count: one pasted
+#: file or tool dump must not silently consume the whole context window.
+HISTORY_BUDGET_CHARS = 24_000
+#: Older assistant/tool messages longer than this become one-line observations.
+HISTORY_MASK_CHARS = 800
+#: The newest turns are replayed verbatim so a follow-up still has its referents.
+HISTORY_KEEP_RECENT = 6
+
+
+def _mask_history_message(message: dict) -> dict:
+    """A long old assistant/tool message as a compact one-line observation."""
+    content = str(message.get("content") or "")
+    first = re.sub(r"\s+", " ", content.strip())[:200]
+    return {
+        **message,
+        "content": f"[masked {message.get('role', 'message')} message: {len(content)} chars; began: {first}]",
+    }
+
+
+def _cap_tool_output(text: str, limit: int = 8_000) -> str:
+    """Cap one unbounded tool read (file, logs, config) with a head/tail notice.
+
+    A single huge read must not overflow the model's context and evict the
+    conversation; the model still sees both the beginning and the end.
+    """
+    if len(text) <= limit:
+        return text
+    head = (limit * 3) // 4
+    tail = limit - head
+    omitted = len(text) - limit
+    return f"{text[:head]}\n\n... [{omitted:,} characters truncated] ...\n\n{text[-tail:]}"
+
+
+def _fit_history(history: list, budget_chars: int = HISTORY_BUDGET_CHARS) -> list:
+    """Keep recent turns, observation-mask old bulky answers, drop only if needed.
+
+    The newest :data:`HISTORY_KEEP_RECENT` messages stay byte-for-byte. Older
+    assistant/tool messages over :data:`HISTORY_MASK_CHARS` become one-line
+    stubs. Oldest turns are dropped only when the masked history is still over
+    the real character budget.
+    """
+    fitted = [dict(m) if isinstance(m, dict) else {"role": "user", "content": str(m)} for m in history]
+    keep_from = max(0, len(fitted) - HISTORY_KEEP_RECENT)
+    for idx in range(keep_from):
+        message = fitted[idx]
+        if message.get("role") in ("assistant", "tool") and len(str(message.get("content") or "")) > HISTORY_MASK_CHARS:
+            fitted[idx] = _mask_history_message(message)
+    while len(fitted) > 1 and _history_chars(fitted) > budget_chars:
+        fitted.pop(0)
+    return fitted
+
+
 def _truncate_rag_context(rag_context: str) -> str:
     """Trim retrieved context to a size that fits the model window."""
     if len(rag_context) <= MAX_RAG_CONTEXT_CHARS:
@@ -482,58 +534,166 @@ def _get(settings: dict[str, str], key: str, default: str = "") -> str:
     return val
 
 
+_TOOL_CALL_KEYS = frozenset({"action", "tool", "payload", "@type", "tool_code", "arguments"})
+_TOOL_MESSAGE_KEYS = ("message", "response", "answer", "text", "content", "reply", "summary")
+
+
+def _toolish_json(obj: Any) -> bool:
+    """Whether a parsed JSON value looks like a tool call rather than prose."""
+    if isinstance(obj, dict):
+        return bool(_TOOL_CALL_KEYS.intersection(obj.keys()))
+    if isinstance(obj, list):
+        return bool(obj) and all(isinstance(item, dict) and _toolish_json(item) for item in obj)
+    return False
+
+
+def _json_message(obj: Any) -> str | None:
+    """The human-readable text inside a JSON object, if it has one."""
+    if isinstance(obj, dict):
+        for key in _TOOL_MESSAGE_KEYS:
+            value = obj.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+    return None
+
+
+def _strip_trailing_tool_json(text: str) -> str:
+    """Remove only a trailing tool-call JSON block, keeping the prose before it.
+
+    Deliberately narrow: a fenced code block in the middle of an answer (and any
+    braces or math inside it) is content, not an artifact. Only a fence/object at
+    the very end that parses as a tool call is removed.
+    """
+    fenced = re.search(r"```(?:json|tool_call|tool_code)?\s*(\{.*?\}|\[.*?\])\s*```\s*$", text, re.DOTALL)
+    if fenced:
+        try:
+            obj = json.loads(fenced.group(1))
+        except (json.JSONDecodeError, ValueError):
+            obj = None
+        if _toolish_json(obj):
+            return text[: fenced.start()].strip()
+
+    # A bare trailing object, walking back through nested braces until one
+    # parses. Only accept it when it really is a tool call.
+    end = len(text.rstrip())
+    idx = text.rfind("{", 0, end)
+    while idx != -1:
+        try:
+            obj = json.loads(text[idx:end])
+        except (json.JSONDecodeError, ValueError):
+            obj = None
+        if _toolish_json(obj):
+            return text[:idx].strip()
+        idx = text.rfind("{", 0, idx)
+    return text
+
+
+class _ProseStreamGate:
+    """Stream Turn 0 prose live, but never leak a JSON tool call.
+
+    The first ~24 non-whitespace characters decide: ordinary prose is flushed
+    and every later token streams immediately; a reply that opens with ``{``,
+    ``[`` or a fence is held until Turn 0 finishes. Without this, Turn 0 either
+    buffered the whole answer or leaked raw JSON into the chat bubble.
+    """
+
+    HOLD_CHARS = 24
+
+    def __init__(self, callback: Any) -> None:
+        self._callback = callback
+        self._buffer = ""
+        self._open = False
+        self._blocked = False
+        self.streamed = False
+
+    async def _emit(self, chunk: Any) -> None:
+        self.streamed = True
+        await self._callback(chunk)
+
+    async def feed(self, chunk: Any) -> None:
+        if isinstance(chunk, dict):
+            if chunk.get("type") == "thinking":
+                await self._callback(chunk)
+                return
+            text = chunk.get("text") or ""
+            payload = chunk
+        else:
+            text = str(chunk or "")
+            if text.startswith('{"type": "thinking"') or text.startswith('{"type":"thinking"'):
+                await self._callback(chunk)
+                return
+            payload = {"type": "content", "text": text}
+        if not text:
+            return
+        if self._blocked:
+            self._buffer += text
+            return
+        if self._open:
+            await self._emit(payload)
+            return
+        self._buffer += text
+        lead = self._buffer.lstrip()
+        if not lead:
+            return
+        if lead.startswith(("{", "[", "```", "<tool_code")):
+            self._blocked = True
+            return
+        if len(lead) >= self.HOLD_CHARS:
+            self._open = True
+            buffered, self._buffer = self._buffer, ""
+            self.streamed = True
+            await self._callback({"type": "content", "text": buffered})
+
+
 def strip_json_from_response(text: str) -> str:
     """
     Extract natural language from LLM output.
-    Handles: pure JSON, markdown-wrapped JSON, thinking tags, tool call artifacts.
-    Returns the most human-readable portion of the text.
+
+    Handles pure JSON, markdown-wrapped JSON, thinking tags, and a prose answer
+    followed by a trailing/fenced tool-call block. Normal prose, code blocks and
+    braces in code or math are left untouched.
     """
     if not text or not text.strip():
         return text
 
     # Strip thinking tags content
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    text = re.sub(r"Thinking.*?</think>", "", text, flags=re.DOTALL).strip()
+    if not text:
+        return text
 
-    # If text doesn't look like JSON at all, return as-is
-    if not text.strip().startswith(("{", "```")):
-        return text.strip()
+    stripped = text.strip()
 
-    # Try to extract natural language that appears BEFORE or AFTER JSON blocks
-    # Many models output: "Sure, I'll do that.\n```json{...}```"
-    # We want the "Sure, I'll do that." part
-    # Remove markdown JSON blocks
-    cleaned = re.sub(r"```json\s*\{.*?\}\s*```", "", text, flags=re.DOTALL).strip()
-    # Remove bare JSON objects
-    cleaned = re.sub(r"\{[^{}]*\}", "", cleaned, flags=re.DOTALL).strip()
-    # Remove remaining braces-wrapped content
-    cleaned = re.sub(r"\{.*?\}", "", cleaned, flags=re.DOTALL).strip()
-
-    if cleaned.strip():
-        return cleaned.strip()
-
-    # If all we have is JSON, try to extract a human-readable message field
-    try:
-        # Try parsing the whole text as JSON
-        parsed = json.loads(text)
-        for key in ["message", "response", "answer", "text", "content", "reply", "summary"]:
-            if key in parsed and isinstance(parsed[key], str):
-                return parsed[key]
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    # Try extracting from markdown-wrapped JSON
-    match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if match:
+    # Pure fenced JSON/tool block: return its message field (or nothing).
+    fenced_all = re.fullmatch(r"`{3}(?:json|tool_call|tool_code)?\s*(.*?)\s*`{3}", stripped, re.DOTALL)
+    if fenced_all:
         try:
-            parsed = json.loads(match.group(1))
-            for key in ["message", "response", "answer", "text", "content", "reply"]:
-                if key in parsed and isinstance(parsed[key], str):
-                    return parsed[key]
+            obj = json.loads(fenced_all.group(1))
         except (json.JSONDecodeError, ValueError):
-            pass
+            obj = None
+        if _toolish_json(obj) or isinstance(obj, (dict, list)):
+            return _json_message(obj) or ""
+        # A normal fenced code block (python, bash, text) is content.
+        return stripped
 
-    # Last resort: return text stripped
-    return text.strip()
+    # Pure bare JSON object/array: return its message field (or nothing).
+    if stripped.startswith(("{", "[")):
+        try:
+            obj = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            obj = None
+        if obj is not None:
+            if _toolish_json(obj):
+                return _json_message(obj) or ""
+            if isinstance(obj, dict) and _json_message(obj):
+                return _json_message(obj) or ""
+            return stripped
+
+    # Prose with a fenced/trailing tool-call block at the end.
+    cleaned = _strip_trailing_tool_json(stripped)
+    if cleaned != stripped:
+        return cleaned.strip()
+    return stripped
+
 
 # Tool routing comes from services.gateway.tool_registry, the table Raven and
 # the OpenAI tool surface also read. This path used to keep a hand-copied table
@@ -2272,7 +2432,7 @@ async def _run_single_tool(action: str, tool_data: dict, query: str, creds: Reso
                         return f"Created workspace environment '{ws_name}' (id: `{ws_id}`) successfully."
                     if action == "workspacefilereadrequest":
                         detail = result.get("detail") or {}
-                        content = detail.get("content", "")
+                        content = _cap_tool_output(str(detail.get("content", "")))
                         return f"File content of '{payload.get('path', '')}':\n\n{content}"
                     if action == "workspacesearchrequest" and result.get("status") != "FAILURE":
                         return _format_workspace_search(result)
@@ -2290,9 +2450,9 @@ async def _run_single_tool(action: str, tool_data: dict, query: str, creds: Reso
                         return f"Raven mission #{mid} ('{mtitle}') queued successfully."
                     if action == "executionlogrequest":
                         detail = result.get("detail") or {}
-                        logs = detail.get("logs", "")
+                        logs = str(detail.get("logs", ""))
                         if logs:
-                            return f"{result.get('message', '')}\n\n```\n{logs}\n```"
+                            return _cap_tool_output(f"{result.get('message', '')}\n\n```\n{logs}\n```")
                     if action == "contextsearchrequest":
                         return _format_context_search(result, payload)
                     if action == "entitysearchrequest":
@@ -2305,7 +2465,8 @@ async def _run_single_tool(action: str, tool_data: dict, query: str, creds: Reso
                     if action == "haconfigrequest":
                         detail = result.get("detail", {})
                         if detail:
-                            return f"{result.get('message', '')}\n\nDetail:\n{json.dumps(detail, indent=2)}"
+                            rendered = f"{result.get('message', '')}\n\nDetail:\n{json.dumps(detail, indent=2)}"
+                            return _cap_tool_output(rendered)
                         return result.get("message", "Action completed successfully.")
                     msg = result.get("message", "Action completed successfully.")
                     status = result.get("status", "SUCCESS")
@@ -2585,16 +2746,11 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     system = f"{system_prompt.strip()}\n\nSystem Capability Context:\n{single_turn_guide}"
     if kmap:
         system += f"\n\n{kmap}"
-    before_workspace = len(system)
-    if workspace_context.strip():
-        system += (
-            f"\n\nWorkspace:\n{workspace_context.strip()}\n"
-            "This turn allows only a few quick tool calls. A long job -- transcribing "
-            "audio or video, converting media, a multi-step build -- cannot finish "
-            "here: say so plainly, name the file it would use, and suggest sending "
-            "it to Raven as a mission."
-        )
-    ws_chars = len(system) - before_workspace
+    # The live file tree/sizes change whenever a file is edited or the workspace
+    # is switched. Keeping them out of `system` preserves the static KV prefix
+    # across every workspace turn; they ride with this request instead.
+    ws_text = workspace_context.strip()
+    ws_chars = len(ws_text)
     if persona:
         # Last on purpose: at the top of a ~20K-character system message the model
         # followed the tool guide and ignored the character ("I don't have a favorite
@@ -2624,10 +2780,19 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         )
     if book_chapter.strip():
         context_parts.append(book_chapter.strip())
+    if ws_text:
+        context_parts.append(
+            f"Workspace:\n{ws_text}\n"
+            "This turn allows only a few quick tool calls. A long job -- transcribing "
+            "audio or video, converting media, a multi-step build -- cannot finish "
+            "here: say so plainly, name the file it would use, and suggest sending "
+            "it to Raven as a mission."
+        )
     question = "[Context for this question]\n" + "\n\n".join(context_parts) + f"\n\n[Question]\n{query}"
     log.info(f"[_single_turn_inference] RAG context length: {len(rag_context)} chars")
     if rag_context:
         log.info(f"[_single_turn_inference] RAG context preview: {rag_context[:300]}")
+    history = _fit_history(history)
     messages = [{"role": "system", "content": system}, *history, {"role": "user", "content": question}]
 
     prefetch = dict(context_sections or {})
@@ -2637,12 +2802,13 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         budget_path,
         {
             # The four fixed parts add up to the system message exactly (separators in "system").
-            "system": len(system) - len(single_turn_guide) - len(kmap) - ws_chars,
+            "system": len(system) - len(single_turn_guide) - len(kmap),
             "tool_guide": len(single_turn_guide),
             "knowledge_map": len(kmap),
             "workspace": ws_chars,
             "history": _history_chars(history),
-            "question": len(question) - len(rag_context) - len(book_chapter.strip()),
+            "question": len(question) - len(rag_context) - len(book_chapter.strip()) - len(sim_block or "") - ws_chars,
+            "sim_block": len(sim_block or ""),
             **prefetch,
         },
         model=model,
@@ -2745,6 +2911,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         from services.gateway.speech_stream import SpeechGate
 
         gate = SpeechGate(chunk_callback, query)
+    prose_gate: _ProseStreamGate | None = None
 
     for turn in range(MAX_TURNS):
         log.info(f"[_single_turn_inference] Turn {turn + 1}/{MAX_TURNS}")
@@ -2754,9 +2921,23 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
         # In single-turn mode, do not stream intermediate tool emission (Turn 1) live
         # because the user/voice-assistant should never hear raw JSON tool calls.
-        # If show_thinking is True, thinking chunks are streamed to the UI.
+        # Turn 0 prose, however, streams live behind a small prefix gate: ordinary
+        # answers appear as they are written, while a reply that opens with JSON is
+        # held until the turn is parsed. SpeechGate still owns speech_stream.
         if turn == 0:
-            if show_thinking and chunk_callback:
+            if gate is None and chunk_callback:
+                prose_gate = _ProseStreamGate(chunk_callback)
+                if show_thinking:
+                    async def turn_callback(chunk, _pg=prose_gate):
+                        if (isinstance(chunk, dict) and chunk.get("type") == "thinking") or (
+                            isinstance(chunk, str) and chunk.startswith('{"type": "thinking"')
+                        ):
+                            await chunk_callback(chunk)
+                        else:
+                            await _pg.feed(chunk)
+                else:
+                    turn_callback = prose_gate.feed
+            elif show_thinking and chunk_callback:
                 async def turn_callback(chunk):
                     if (isinstance(chunk, dict) and chunk.get("type") == "thinking") or (isinstance(chunk, str) and chunk.startswith('{"type": "thinking"')):
                         await chunk_callback(chunk)
@@ -2851,7 +3032,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                     continue
 
             # No tool call; this is our final answer
-            if chunk_callback and turn == 0 and gate is None:
+            if chunk_callback and turn == 0 and gate is None and not (prose_gate and prose_gate.streamed):
                 clean_ans = strip_json_from_response(ans)
                 from services.gateway.llm_providers import strip_thinking_blocks
                 clean_ans = honest_reply(query, strip_thinking_blocks(clean_ans), device_runs)
@@ -2919,24 +3100,34 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 settings = await get_all_settings()
                 exec_svc = _get(settings, "execution_svc_url")
                 user_ctx = payload.get("user_context") or creds.model_dump()
-                lint_feedback = await run_post_write_lint(file_path, exec_svc, INTERNAL_SECRET, log, user_ctx)
+                lint_feedback = await run_post_write_lint(
+                    file_path, exec_svc, INTERNAL_SECRET, log, user_ctx, workspace_id=workspace_id
+                )
                 if lint_feedback:
                     tool_result = f"{tool_result}\n\n{lint_feedback}"
 
         # Direct physical/media control actions already yield an actionable, human-friendly message.
         # Returning it immediately saves 2 minutes of second-turn LLM inference and prevents voice assistant JSON reading.
-        action_norm = action.lower()
-        if action_norm in ("mediaplayrequest", "mediatransportrequest", "lightcontrolrequest", "climatecontrolrequest"):
+        # `_execute_single_tool` returns a plain string (not JSON), so parse only when the result
+        # really is a JSON object and fall back to the clean confirmation text otherwise.
+        action_norm = re.sub(r"[\s_]+", "", action.lower())
+        if action_norm in (
+            "mediaplayrequest", "mediatransportrequest", "lightcontrolrequest",
+            "climaterequest", "climatecontrolrequest",
+        ) and pending_tool_error is None:
+            message = ""
+            raw_result = str(tool_result or "").strip()
             try:
-                res_obj = json.loads(tool_result)
-                if isinstance(res_obj, dict) and res_obj.get("message"):
-                    await _record_sim_result(
-                        str(res_obj["message"]),
-                        success=pending_tool_error is None and not _reply_is_failure(str(res_obj["message"])),
-                    )
-                    return res_obj["message"]
-            except Exception:
-                pass
+                res_obj = json.loads(raw_result)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                res_obj = None
+            if isinstance(res_obj, dict):
+                message = str(res_obj.get("message") or "")
+            elif raw_result and not raw_result.startswith(("{", "[")) and len(raw_result) < 2_000:
+                message = raw_result
+            if message and not _reply_is_failure(message):
+                await _record_sim_result(message, success=True)
+                return message
 
         # Append tool result to conversation for next turn
         messages.append({"role": "user", "content": f"Tool result:\n{tool_result}"})

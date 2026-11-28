@@ -13,6 +13,7 @@ original file is restored, so a failed repair leaves the workspace as it was.
 from __future__ import annotations
 
 import ast
+import difflib
 import logging
 import re
 from dataclasses import asdict, dataclass, field
@@ -28,6 +29,10 @@ log = logging.getLogger("gateway.trainer.selffix")
 #: prompt asking for "the complete file" gets back a file missing its middle.
 MAX_FILE_BYTES = 12_000
 
+#: Files up to this size can still be repaired with search/replace patches:
+#: the model edits the parts named in the patch instead of rewriting the file.
+MAX_PATCH_FILE_BYTES = 64_000
+
 #: Enough of the test output for the model to see the failing assertion.
 MAX_TEST_OUTPUT = 3_000
 
@@ -35,11 +40,18 @@ MAX_TEST_OUTPUT = 3_000
 #: before the call and is never trimmed by :func:`llm.complete`.
 REPAIR_CONTEXT_CHARS = 24_000
 
+#: A patch repair must still show the file it is patching; this larger budget
+#: is what lets a 64 KB file be repaired without trimming it.
+REPAIR_PATCH_CONTEXT_CHARS = 96_000
+
 #: A repair is at most this many model attempts (the route and the cycle both
 #: enforce it; each attempt is a full-file generation).
 MAX_ATTEMPTS = 3
 
 _FENCE = re.compile(r"```[a-zA-Z0-9_+-]*\s*\n(.*?)```", re.DOTALL)
+_PATCH_BLOCK = re.compile(
+    r"<<<SEARCH[ \t]*\r?\n(.*?)\r?\n===[ \t]*\r?\n(.*?)\r?\n>>>REPLACE", re.DOTALL
+)
 
 
 class RepairError(RuntimeError):
@@ -62,6 +74,9 @@ class RepairResult:
     guards: list[str] = field(default_factory=list)
     committed: bool = False
     message: str = ""
+    changed_lines: int = 0
+    functions_touched: list[str] = field(default_factory=list)
+    change_summary: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -82,6 +97,63 @@ def extract_code(answer: str) -> str | None:
     if not body.strip():
         return None
     return body.rstrip() + "\n"
+
+
+def extract_patches(answer: str) -> list[tuple[str, str]]:
+    """Search/replace patches from an answer (``<<<SEARCH ... === ... >>>REPLACE``)."""
+    if not answer:
+        return []
+    return [(match.group(1), match.group(2)) for match in _PATCH_BLOCK.finditer(answer)]
+
+
+def apply_patches(source: str, patches: list[tuple[str, str]]) -> tuple[str | None, str]:
+    """Apply exact search/replace blocks, refusing ambiguous or missing matches."""
+    candidate = source
+    for search, replace in patches:
+        if not search.strip():
+            return None, "a SEARCH block is empty"
+        count = candidate.count(search)
+        if count == 0:
+            return None, "a SEARCH block did not match the current file"
+        if count > 1:
+            return None, "a SEARCH block matched more than once; it must name unique lines"
+        candidate = candidate.replace(search, replace, 1)
+    return candidate, ""
+
+
+def _definition_sources(source: str) -> dict[str, str]:
+    """Top-level function/class source, for naming what a repair touched."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return {}
+    out: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, _DEFINITION):
+            try:
+                out[node.name] = ast.unparse(node)
+            except Exception:
+                out[node.name] = ""
+    return out
+
+
+def _change_details(before: str, after: str) -> tuple[int, list[str], str]:
+    """Concrete repair summary: changed lines and the functions it touched."""
+    matcher = difflib.SequenceMatcher(None, before.splitlines(), after.splitlines())
+    changed = 0
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        changed += max(i2 - i1, j2 - j1)
+    old_defs, new_defs = _definition_sources(before), _definition_sources(after)
+    touched = sorted(
+        name for name in old_defs.keys() | new_defs.keys() if old_defs.get(name) != new_defs.get(name)
+    )
+    if touched:
+        summary = f"{changed} line(s) changed; functions touched: {', '.join(touched[:8])}"
+    else:
+        summary = f"{changed} line(s) changed; no function signature/body changed"
+    return changed, touched, summary
 
 
 def compiles(source: str) -> tuple[bool, str]:
@@ -200,13 +272,51 @@ def build_repair_prompt(path: str, source: str, error: str, test_output: str = "
     return "\n".join(parts)
 
 
+def build_patch_prompt(
+    path: str, source: str, error: str, test_output: str = "", sim_hints: str = ""
+) -> str:
+    """The repair instruction for a file too large to rewrite: patch blocks only."""
+    parts = [
+        f"Fix the bug in `{path}`. Reply with ONLY one or more search/replace blocks in exactly "
+        "this form -- no code fences, no explanation:",
+        "",
+        "<<<SEARCH",
+        "(exact lines copied from the current file)",
+        "===",
+        "(replacement lines)",
+        ">>>REPLACE",
+        "",
+        "Every SEARCH block must match exactly one place in the current file. Keep every function "
+        "and class, and change only what the error requires.",
+        "",
+        f"The error was:\n{error.strip() or '(no traceback given)'}",
+    ]
+    if sim_hints.strip():
+        parts += [
+            "",
+            "Lessons from earlier repairs (shared System and this user's own; apply only when relevant):",
+            sim_hints.strip(),
+        ]
+    if test_output.strip():
+        parts += ["", f"The test run said:\n{test_output.strip()[:MAX_TEST_OUTPUT]}"]
+    parts += ["", f"Current contents of `{path}`:", "```python", source, "```"]
+    return "\n".join(parts)
+
+
 def answer_tokens(source: str) -> int:
     """Enough tokens for the whole file back (about 3 characters a token), plus room."""
     return max(1600, len(source) // 3 + 512)
 
 
 async def _ask(
-    complete_fn: Any, prompt: str, result: RepairResult, llm_mod: Any, *, source: str
+    complete_fn: Any,
+    prompt: str,
+    result: RepairResult,
+    llm_mod: Any,
+    *,
+    source: str,
+    context_chars: int = REPAIR_CONTEXT_CHARS,
+    max_tokens: int | None = None,
 ) -> str:
     """One model call, recording which model answered."""
     if complete_fn is not None:
@@ -215,8 +325,8 @@ async def _ask(
     completion = await llm_mod.complete(
         prompt,
         model=result.model or None,
-        max_tokens=answer_tokens(source),
-        context_chars=REPAIR_CONTEXT_CHARS,
+        max_tokens=max_tokens or answer_tokens(source),
+        context_chars=context_chars,
         timeout=300.0,
     )
     result.model = completion.model
@@ -232,6 +342,7 @@ async def _record_repair_learning(
 
         observed = (
             f"pytest passed after {result.attempts} attempt(s) with {result.model or 'the local model'}"
+            + (f"; {result.change_summary}" if result.change_summary else "")
             if passed
             else (result.final_error or "the pytest gate still failed")[:300]
         )
@@ -253,7 +364,8 @@ async def _record_repair_learning(
                 rationale="The pytest gate rejected the original file; this repair passed it.",
                 rule=(
                     f"When repairing `{result.path}` after `{first_line[:120]}`, "
-                    "return the whole file and keep every existing definition; that is what the gate accepted."
+                    "keep every existing definition and change only what the error requires"
+                    + (f"; the accepted repair: {result.change_summary}." if result.change_summary else ".")
                 ),
                 observed_outcome=observed,
                 model=result.model,
@@ -303,9 +415,12 @@ async def repair_workspace(
     result = RepairResult(status="unrepaired", workspace_id=workspace_id, path=path)
     targets = list(test_targets or [])
     try:
-        # The whole file or nothing: the model is asked for the complete file, so
-        # it must be shown the complete file.
-        original = await ws.read_text_exact(workspace_id, path, user=user, max_bytes=MAX_FILE_BYTES)
+        # A small file is rewritten whole. A file over MAX_FILE_BYTES is still
+        # repaired, but with exact search/replace blocks, so the model never has
+        # to reproduce a large file (and can be shown all of it).
+        original = await ws.read_text_exact(
+            workspace_id, path, user=user, max_bytes=MAX_PATCH_FILE_BYTES
+        )
     except ws.WorkspaceError as exc:
         result.status, result.message = "skipped", str(exc)
         return result
@@ -357,39 +472,66 @@ async def repair_workspace(
     current = original
     context = result.initial_error
     test_output = _gate_output(gate)
+    # A large file is patched rather than rewritten. The larger prompt budget is
+    # the only difference; every verification gate below is unchanged.
+    patch_mode = len(original) > MAX_FILE_BYTES
+    budget = REPAIR_PATCH_CONTEXT_CHARS if patch_mode else REPAIR_CONTEXT_CHARS
+    build_prompt = build_patch_prompt if patch_mode else build_repair_prompt
+    attributed_items: list[dict[str, Any]] = []
 
     for attempt in range(1, int(attempts) + 1):
         result.attempts = attempt
         # The first attempt sees the file as it is on disk; a later attempt sees
         # the candidate that just failed the tests, so it can build on it.
-        prompt = build_repair_prompt(path, current, context, test_output, sim_hints=sim_block)
-        if len(prompt) > REPAIR_CONTEXT_CHARS and sim_block:
+        prompt = build_prompt(path, current, context, test_output, sim_hints=sim_block)
+        hints_shown = bool(sim_block.strip())
+        if len(prompt) > budget and sim_block:
             # SIM hints are an optimization, never a reason to refuse a repair
             # that fits without them: drop the hints and try the honest prompt.
-            prompt = build_repair_prompt(path, current, context, test_output, sim_hints="")
-        if len(prompt) > REPAIR_CONTEXT_CHARS:
+            prompt = build_prompt(path, current, context, test_output, sim_hints="")
+            hints_shown = False
+        if len(prompt) > budget:
             result.final_error = (
                 f"the repair prompt is {len(prompt):,} characters, over the "
-                f"{REPAIR_CONTEXT_CHARS:,} budget; refusing to trim the file"
+                f"{budget:,} budget; refusing to trim the file"
             )
             break
+        # Only rules the model actually saw may be credited or penalised.
+        attributed_items = sim_items if hints_shown else []
         try:
-            answer = await _ask(complete_fn, prompt, result, llm_mod, source=current)
+            answer = await _ask(
+                complete_fn,
+                prompt,
+                result,
+                llm_mod,
+                source=current,
+                context_chars=budget,
+                max_tokens=1600 if patch_mode else None,
+            )
         except llm_mod.LocalModelUnavailable as exc:
             result.final_error = str(exc)
             break
 
-        candidate = extract_code(answer)
-        reason = (
-            "the answer had no fenced code block"
-            if candidate is None
-            else reject_reason(candidate, original, path)
-        )
+        patches = extract_patches(answer)
+        if patches:
+            candidate, patch_reason = apply_patches(current, patches)
+            reason = patch_reason if candidate is None else reject_reason(candidate, original, path)
+        else:
+            candidate = extract_code(answer)
+            reason = (
+                "the answer had no fenced code block or search/replace patch"
+                if candidate is None
+                else reject_reason(candidate, original, path)
+            )
         if reason:
             result.guards.append(f"attempt {attempt}: {reason}")
             context = (
                 f"The previous answer was rejected: {reason}. "
-                "Return the whole file in one ```python block."
+                + (
+                    "Return one or more <<<SEARCH/===/>>>REPLACE blocks that match the current file."
+                    if patch_mode
+                    else "Return the whole file in one ```python block."
+                )
             )
             continue
         assert candidate is not None
@@ -416,7 +558,10 @@ async def repair_workspace(
             result.tests_passed = True
             result.status = "repaired"
             result.final_error = ""
-            await _record_repair_learning(result, sim_items, passed=True)
+            result.changed_lines, result.functions_touched, result.change_summary = _change_details(
+                original, candidate
+            )
+            await _record_repair_learning(result, attributed_items, passed=True)
             return result
         if gate["outcome"] == "error":
             result.final_error = (
@@ -442,5 +587,5 @@ async def repair_workspace(
 
     if not result.message:
         result.message = "no attempt produced a file the tests accept"
-    await _record_repair_learning(result, sim_items, passed=False)
+    await _record_repair_learning(result, attributed_items, passed=False)
     return result

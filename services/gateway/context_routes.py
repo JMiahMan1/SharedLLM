@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
@@ -83,7 +85,10 @@ async def invalidate_tool_cache(body: InvalidateRequest, request: Request):
 
     if bool(body.tag) == bool(body.user):
         raise HTTPException(status_code=422, detail="Name exactly one of tag or user.")
-    dropped = tool_cache.invalidate_tag(body.tag, reason="admin") if body.tag else tool_cache.invalidate_user(body.user or "")
+    if body.tag:
+        dropped = await asyncio.to_thread(tool_cache.invalidate_tag, body.tag, reason="admin")
+    else:
+        dropped = await asyncio.to_thread(tool_cache.invalidate_user, body.user or "")
     return {"status": "SUCCESS", "dropped": dropped}
 
 

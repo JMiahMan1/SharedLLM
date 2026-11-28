@@ -17,22 +17,48 @@ HISTORY_MESSAGES = 12
 HISTORY_CHARS = 12_000
 
 
+#: A tool part becomes one memory line of at most this many characters.
+TOOL_NOTE_CHARS = 200
+
+
+def _tool_note(part: dict[str, Any]) -> str:
+    """One compact line saying a tool ran and what it found.
+
+    Follow-up turns otherwise forget which files were read or edited and what
+    the tests said, because every tool part used to be stripped from history.
+    """
+    name = str(part.get("name") or part.get("tool") or "tool").strip()
+    raw = part.get("output")
+    if raw is None:
+        raw = part.get("input")
+    summary = " ".join(str(raw or "").split())
+    if not summary:
+        summary = str(part.get("status") or "done")
+    note = f"[used {name}: {summary}]"
+    return note if len(note) <= TOOL_NOTE_CHARS else note[: TOOL_NOTE_CHARS - 4] + "...]"
+
+
 def history_from(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
     """The chat so far as model messages: what was asked and what was answered.
 
-    Only the prose goes back -- thinking and tool output stay in the transcript
-    for the person, not in the next prompt -- newest kept when it must be cut.
+    Thinking stays in the transcript for the person. Tool output is replaced by
+    a one-line observation (``[used <tool>: <summary>]``) so follow-ups remember
+    the work without replaying a whole file read or test log. Newest kept when
+    the replay must be cut.
     """
     out: list[dict[str, str]] = []
     for message in messages[-HISTORY_MESSAGES:]:
         role = message.get("role")
         if role not in ("user", "assistant"):
             continue
-        text = "\n".join(
-            p.get("text", "") for p in message.get("parts", []) if isinstance(p, dict) and p.get("type") == "text"
-        ).strip()
-        if text:
-            out.append({"role": role, "content": text})
+        parts = [p for p in message.get("parts", []) if isinstance(p, dict)]
+        text = "\n".join(p.get("text", "") for p in parts if p.get("type") == "text").strip()
+        notes: list[str] = []
+        if role == "assistant":
+            notes = [_tool_note(p) for p in parts if p.get("type") == "tool"]
+        content = "\n".join(part for part in [text, *notes] if part)
+        if content:
+            out.append({"role": role, "content": content})
     while out and sum(len(m["content"]) for m in out) > HISTORY_CHARS:
         out.pop(0)
     return out

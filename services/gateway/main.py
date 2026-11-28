@@ -8,10 +8,8 @@ import ipaddress
 import json
 import logging
 import os
-import random
 import re
 import secrets
-import threading
 import time
 import traceback
 import uuid
@@ -26,32 +24,34 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect  # pyright: ignore[reportUnusedImport]
-from starlette.requests import ClientDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 from starlette.datastructures import UploadFile
+from starlette.requests import ClientDisconnect
 
 from services.common import active_minutes as _active_minutes
 from services.common import device_noun as _device_noun
-from services.common import ma_identity
 from services.common import guardian_recap as _recap
 from services.common import health_coach as _health_coach
+from services.common import ma_identity, spotify
 from services.common import notify as _notify
 from services.common import nutrition_label as _nutrition_label
 from services.common import recipe_ocr as _recipe_ocr
-from services.common import spotify
 from services.common.activity_recommendations import recommend_activity
+from services.common.backend_health import BackendUnavailable
 from services.common.book_recommendations import book_events, recommend_book
 from services.common.burden import is_burdened
 from services.common.circuit_breaker import breaker_snapshots
 from services.common.entity_ids import usable_entity_id
 from services.common.game_recommendations import recommend_game
 from services.common.guidance import guidance as _guidance
-from services.common.http import INTERNAL_KEEPALIVE_S
 from services.common.music_recommendations import recommend_music
 from services.common.podcast_recommendations import podcast_events, recommend_podcast
 from services.common.relay import until_either_ends
+from services.common.screen_time import (
+    REFRESH_KIND as SCREEN_TIME_REFRESH_KIND,
+)
 from services.common.screen_time import (
     carried_over as carried_over_screen_time,
 )
@@ -60,9 +60,6 @@ from services.common.screen_time import (
     chore_answer_words,
     lock_call_allow,
     parent_contacts,
-)
-from services.common.screen_time import (
-    REFRESH_KIND as SCREEN_TIME_REFRESH_KIND,
 )
 from services.common.screen_time import (
     evaluate as evaluate_screen_time,
@@ -88,7 +85,10 @@ from services.gateway import (
     calls,
     camera_live_routes,
     camera_routes,
+    client_origin,
+    cloud_fallback,
     collector_health_routes,
+    context_routes,
     cookbook,
     dashboard_routes,
     discovery_routes,
@@ -109,6 +109,7 @@ from services.gateway import (
     helper_routes,
     hub_registry_routes,
     light_group_routes,
+    local_ai,
     mdm,
     network_routes,
     notices,
@@ -133,12 +134,6 @@ from services.gateway import (
     weather_routes,
 )
 from services.gateway import beloved as beloved_routes
-from services.gateway import client_origin
-from services.gateway import cloud_fallback, local_ai
-from services.common.backend_health import BackendUnavailable
-from services.gateway.trainer import routes as trainer_routes
-from services.gateway import context_routes
-from services.gateway.studio import routes as studio_routes
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
 )
@@ -221,11 +216,13 @@ from services.gateway.prompts import (
 from services.gateway.redact import redact_url
 from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, StorageListRequest
 from services.gateway.skylight_scope import ChoreScopeError, resolve_chore_scope
+from services.gateway.studio import routes as studio_routes
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas, hub_tool_guide, tool_catalog
+from services.gateway.trainer import routes as trainer_routes
 from services.health import challenges as _challenges
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
-from services.shared.media_token import DEVICE_TOKEN_TTL_SECONDS, sign, verify
+from services.shared.media_token import DEVICE_TOKEN_TTL_SECONDS, sign
 from services.shared.media_token import why_invalid as media_token_why_invalid
 
 START_TIME = time.time()
@@ -831,14 +828,11 @@ HUMAN_READABLE_CAPABILITIES = {
 
 # --- Global Clients ---
 _original_async_client = aiohttp.ClientSession
-from services.gateway.http_client import (
-    get_http_client,
-    shared_http_client,
-    recreate_http_client,
-    retry_http_request,
+from services.gateway.http_client import (  # noqa: E402
     close_all_clients,
+    get_http_client,
+    retry_http_request,
 )
-
 
 _MEDIA_SESSIONS: dict[asyncio.AbstractEventLoop, aiohttp.ClientSession] = {}
 
@@ -4626,6 +4620,51 @@ async def chat_handler(request: Request, background_tasks=None):
     return voice_outcomes.finish_response(record, response)
 
 
+_CONTAINER_LOG_WORDS = (
+    "docker", "container", "compose", "podman", "kubectl", "kubernetes",
+    "service", "gateway", "microservice", "rag", "telemetry", "crash",
+    "server", "nginx", "systemd", "backend", "stdout", "stderr",
+)
+_LOG_INTENT_WORDS = ("log", "logs", "output", "traceback", "stderr", "stdout")
+
+
+def _wants_container_logs(query: str) -> bool:
+    """True only when the question is about container/service logs.
+
+    "How do I fix a Python KeyError" and "build a log cabin" contain ``error``
+    and ``log`` but ask for no logs; injecting the DockerLogsRequest override
+    on those turns made the model print a diagnostic no-one requested.
+    """
+    q = (query or "").lower()
+    if re.search(r"\b(?:docker|container|podman|kubectl|systemd)\s+logs?\b", q):
+        return True
+    if re.search(r"\b(?:server|gateway|service|rag|telemetry|nginx|backend)\b\s+(?:error\s+)?logs?\b", q):
+        return True
+    return any(w in q for w in _CONTAINER_LOG_WORDS) and any(w in q for w in _LOG_INTENT_WORDS)
+
+
+def _shadow_execution_wanted(is_autonomous: bool, query: str) -> bool:
+    """Whether this turn will actually USE a shadow context.
+
+    Only the autonomous Raven branch consumes ``shadow_context``; a normal chat
+    or voice turn must not pay for a full extra blocking LLM call (and the RAG
+    fetch that feeds it) and then discard both.
+    """
+    complex_signals = ("complex", "bug", "refactor", "design", "how to", "fix", "error", "traceback", "implement", "logic")
+    return bool(is_autonomous and any(k in (query or "").lower() for k in complex_signals))
+
+
+def _serves_speech_stream(
+    client: object, speech_stream: bool, should_stream: bool, is_standard_client: bool
+) -> bool:
+    """A voice satellite asking for spoken streaming must reach the speech generator.
+
+    Standard clients already stream; ``client="voice"`` used to fall through to a
+    202 QUEUED response, so the satellite waited for a job it could not stream.
+    """
+    return bool(should_stream and speech_stream and (client == "voice" or is_standard_client))
+
+
 async def _chat_handler_impl(request: Request, background_tasks=None):
     log.info("Chat handler entered")
     client = get_http_client()
@@ -5282,10 +5321,7 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
                         media_query = query[len("play the book "):].strip() if q_lower.startswith("play the book ") else media_query
 
                 area = (voice_context or {}).get("area") if isinstance(voice_context, dict) else None
-                if not named_device and area:
-                    device_name = area
-                else:
-                    device_name = named_device
+                device_name = area if not named_device and area else named_device
 
                 if book_ask is not None:
                     ask = book_ask[0]
@@ -5358,10 +5394,7 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
                 _, named_device = extract_media_request(query)
                 if volume_ask is not None:
                     named_device = fast_volume.place(query)
-                if not named_device and area:
-                    transport_device_name = area
-                else:
-                    transport_device_name = named_device
+                transport_device_name = area if not named_device and area else named_device
                 exec_payload = {
                     "user_context": creds.model_dump(),
                     "entity_id": resolved_entity,
@@ -5452,11 +5485,10 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
         return _rag_memo["ctx"]
 
     # 7. Slow Path Execution (LLM Pipeline)
+    # Shadow execution is a full extra blocking LLM call, and its output is only
+    # used by the autonomous Raven branch below. Chat/voice turns must not pay
+    # for it (or for the RAG fetch that fed it) and then throw it away.
     shadow_context = ""
-    complex_signals = ["complex", "bug", "refactor", "design", "how to", "fix", "error", "traceback", "implement", "logic"]
-    if not grounded and any(k in query.lower() for k in complex_signals):
-        shadow_context = await perform_shadow_execution(query, creds, short_term, await chat_rag_context())
-
     system_instruction = (body.get("system") or "") if grounded else select_system_instruction_for_query(query, selected_model)
 
     # Detection of autonomous agent engagement
@@ -5470,6 +5502,9 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
         log.info("[ShadowExecution] AUTONOMOUS MISSION DETECTED via Raven keyword + command")
         is_autonomous = True
         system_instruction = await load_prompt(get_http_client(), "raven_autonomous_protocol")
+
+    if _shadow_execution_wanted(is_autonomous, query):
+        shadow_context = await perform_shadow_execution(query, creds, short_term, await chat_rag_context())
 
     admin_tag = " (ADMIN)" if creds.is_admin else ""
     user_info = f"Current User: {user_id}{admin_tag}"
@@ -5493,7 +5528,7 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
             "or `StorageIndexRequest` to index them. Output the correct JSON block now.]"
         )
 
-    if not grounded and any(k in query.lower() for k in ["log", "logs", "docker", "output", "error"]):
+    if not grounded and _wants_container_logs(query):
         final_query += (
             "\n\n[SYSTEM OVERRIDE: You ARE authorized and REQUIRED to print diagnostic log snippets to the user. "
             "If you fetch logs via `DockerLogsRequest`, you MUST parse the output and display relevant snippets "
@@ -5695,11 +5730,16 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
     if "/api/chat" in str(request.url) and not body.get("async_job", False) and body.get("client") != "voice":
         is_standard_client = True
 
+    # A voice satellite that asks for spoken streaming must always reach the
+    # speech generator. It used to be handled only inside the standard-client
+    # branch, so client="voice" fell through to 202 QUEUED and the satellite
+    # waited for a job it could not stream.
+    if _serves_speech_stream(body.get("client"), speech_stream, should_stream, is_standard_client):
+        return StreamingResponse(_speech_stream_gen(job_id, selected_model, _REPLY_VOICE.get(),
+                                                    _SPOKEN_NAMES.get(), _voice_new_fields()),
+                                 media_type="application/x-ndjson")
+
     if is_standard_client:
-        if should_stream and speech_stream:
-            return StreamingResponse(_speech_stream_gen(job_id, selected_model, _REPLY_VOICE.get(),
-                                                        _SPOKEN_NAMES.get(), _voice_new_fields()),
-                                     media_type="application/x-ndjson")
         if should_stream:
             async def standard_stream_gen():
                 last_pos = -1
@@ -6673,10 +6713,7 @@ def _family_game_verdict(game: dict) -> dict:
     verdict on every card.
     """
     state = game.get("family_state") or "testing"
-    if state == "published":
-        reason = ""
-    else:
-        reason = "Unpublished" if state == "unpublished" else "In testing"
+    reason = "" if state == "published" else "Unpublished" if state == "unpublished" else "In testing"
     return {"on_shelf": state == "published", "shelf_reason": reason}
 
 
@@ -12685,19 +12722,33 @@ async def _run_workspace_turn(
     if event_callback:
         await event_callback({"type": "model", "model": model, "context_chars": len(context or "")})
 
-    answer = await _single_turn_inference(
-        query=query,
-        model=model,
-        system_prompt=system_override or select_system_instruction_for_query(query, model),
-        rag_context=context,
-        history=history or [],
-        creds=ResolvedCredentials(**creds),
-        grounded=bool(context.strip()),
-        workspace_id=workspace_id,
-        workspace_context=await _workspace_context(workspace_id, creds, mode),
-        event_callback=event_callback,
-        harness="workspace",
-    )
+    # ``context`` is never proof that the library answered: _fetch_rag_context
+    # also appends raven_memory.md and workspace_memory, so a non-empty string
+    # used to turn grounded=True on every workspace turn. That disabled the
+    # ContextSearchRequest/WebSearchRequest/CalibreRequest tools exactly when
+    # the workspace chat needed them. Only a genuine passage hit may ground a
+    # turn; the workspace path leaves grounded=False so its tools stay usable.
+    from services.gateway import tool_cache
+
+    conv_token = tool_cache.CONVERSATION.set(f"workspace:{workspace_id}")
+    try:
+        answer = await _single_turn_inference(
+            query=query,
+            model=model,
+            system_prompt=system_override or select_system_instruction_for_query(query, model),
+            rag_context=context,
+            history=history or [],
+            creds=ResolvedCredentials(**creds),
+            grounded=False,
+            workspace_id=workspace_id,
+            workspace_context=await _workspace_context(workspace_id, creds, mode),
+            event_callback=event_callback,
+            show_thinking=True,
+            budget_path="workspace",
+            harness="workspace",
+        )
+    finally:
+        tool_cache.CONVERSATION.reset(conv_token)
     return {
         "status": "SUCCESS",
         "requested_mode": requested_mode,

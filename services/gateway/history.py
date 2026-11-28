@@ -245,6 +245,7 @@ Return ONLY a bulleted list of facts, or 'NONE'.
         resp = await client.post(
             f"{ollama_url}/api/generate",
             json={"model": model, "prompt": prompt, "stream": False},
+            headers={"x-request-source": "background"},
             timeout=aiohttp.ClientTimeout(total=60.0),
         )
         if resp.status != 200:

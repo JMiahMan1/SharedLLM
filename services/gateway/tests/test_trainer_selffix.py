@@ -185,9 +185,36 @@ async def test_an_unreadable_file_is_skipped_not_guessed(workspace):
     assert "Could not read" in result.message
 
 
-async def test_a_file_too_big_to_show_whole_is_refused_not_trimmed(workspace):
-    """The model is asked for the complete file, so it must see the complete file."""
+async def test_a_file_too_big_to_rewrite_is_repaired_with_a_search_patch(workspace):
+    """Over MAX_FILE_BYTES the model gets SEARCH/REPLACE blocks, not a full rewrite."""
     workspace["content"] = BROKEN + "\n".join(f"VALUE_{i} = {i}" for i in range(3000)) + "\n"
+    asked: list[str] = []
+
+    async def fake_complete(prompt):
+        asked.append(prompt)
+        return (
+            "<<<SEARCH\n"
+            "def mean(values):\n"
+            "    return sum(values) / len(values) + 1\n"
+            "===\n"
+            "def mean(values):\n"
+            "    return sum(values) / len(values)\n"
+            ">>>REPLACE\n"
+        )
+
+    result = await selffix.repair_workspace(
+        "sermons", path="math_utils.py", error_text="1 failed", complete_fn=fake_complete
+    )
+
+    assert result.status == "repaired"
+    assert "SEARCH" in asked[0]
+    assert len(workspace["writes"]) == 1
+    assert "VALUE_2999" in workspace["writes"][0]["content"]
+    assert "sum(values) / len(values) + 1" not in workspace["writes"][0]["content"]
+
+
+async def test_a_file_too_big_for_patch_mode_is_refused_not_trimmed(workspace):
+    workspace["content"] = "x = 1\n" * (selffix.MAX_PATCH_FILE_BYTES // 6 + 10)
     asked: list[str] = []
 
     async def fake_complete(prompt):
@@ -368,3 +395,33 @@ async def test_sim_hints_are_dropped_before_a_repair_is_refused_for_the_budget(w
     assert prompts and "SIM-HINT-" not in prompts[0]
     assert prompts[0].startswith("Fix the bug in `math_utils.py`")
 
+
+
+@pytest.mark.asyncio
+async def test_sim_rules_dropped_from_the_prompt_are_not_credited(workspace, monkeypatch):
+    """A rule the model never saw must not be recorded as the reason a repair passed."""
+    from services.gateway.trainer import sim as sim_mod
+
+    attributed: list[list[dict]] = []
+
+    async def fake_context(**_kwargs):
+        return "H" * (selffix.REPAIR_CONTEXT_CHARS + 1000), [{"signature": "must-not-be-credited"}]
+
+    async def fake_record(_result, sim_items, *, passed):
+        attributed.append(list(sim_items))
+
+    async def fix(_prompt):
+        return _fenced(FIXED)
+
+    monkeypatch.setattr(sim_mod, "context_for_turn", fake_context)
+    monkeypatch.setattr(selffix, "_record_repair_learning", fake_record)
+    workspace["gates"] = [_gate(0)]
+
+    result = await selffix.repair_workspace(
+        "ws1", path="math_utils.py", error_text="TypeError: bad", attempts=1, complete_fn=fix
+    )
+
+    assert result.status == "repaired"
+    assert attributed == [[]], "unshown SIM rules were credited for the repair"
+    assert result.changed_lines >= 1
+    assert result.change_summary

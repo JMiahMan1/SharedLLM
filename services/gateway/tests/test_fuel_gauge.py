@@ -104,12 +104,14 @@ def test_compact_keeps_recent_turns_within_budget():
     # Result should have system + recent turns
     assert len(result) > 0
     assert result[0]["role"] == "system"
-    # Should contain the mission log note
-    system_content = result[0]["content"]
-    assert "MISSION LOG SO FAR" in system_content
+    # The static system prefix stays byte-for-byte; the rolling mission log
+    # lives in the pinned dynamic user context.
+    assert result[0]["content"] == "SYSTEM"
+    pinned_content = result[1]["content"]
+    assert "MISSION LOG SO FAR" in pinned_content
 
     # Recent turns should be preserved verbatim
-    recent_roles = [m["role"] for m in result[1:]]
+    recent_roles = [m["role"] for m in result[2:]]
     # Should have at least 2 turns kept
     assert len(recent_roles) >= 2
 
@@ -161,9 +163,10 @@ def test_compact_never_appends_to_system_repeatedly():
             conv.append({"role": "assistant", "content": "y" * 300})
         conv = _compact_conversation(conv, vram)
 
-    # Should only have ONE mission log note
-    system_content = conv[0]["content"]
-    count = system_content.count("MISSION LOG SO FAR")
+    # Should only have ONE mission log note, and it is in the pinned user
+    # message rather than the static system prefix.
+    assert conv[0]["content"] == "SYSTEM"
+    count = conv[1]["content"].count("MISSION LOG SO FAR")
     assert count == 1, f"Found {count} mission log notes (should be 1)"
 
 
@@ -396,11 +399,12 @@ def test_compact_replaces_previous_mission_log():
 
     result = _compact_conversation(conv, vram)
 
-    system_content = result[0]["content"]
-    # Should have exactly one mission log
-    assert system_content.count("MISSION LOG SO FAR") == 1
-    # Old log should be gone
-    assert "old log entry" not in system_content
+    assert result[0]["content"].startswith("SYSTEM")
+    pinned_content = result[1]["content"]
+    # Should have exactly one mission log, in the pinned dynamic message.
+    assert pinned_content.count("MISSION LOG SO FAR") == 1
+    # The previous mission log is replaced, not appended to, in the pinned note.
+    assert "old log entry" not in pinned_content
 
 
 def test_the_current_tool_result_is_never_stubbed():
@@ -423,13 +427,13 @@ def test_the_mission_log_keeps_the_newest_older_entries():
         conv.append({"role": "user", "content": f"step-{i:02d} " + "y" * 400})
         conv.append({"role": "assistant", "content": f"did-{i:02d}"})
     out = _compact_conversation(conv, {"num_ctx": 8192, "num_predict": 1024})
-    note = out[0]["content"]
+    note = out[1]["content"]
     assert "MISSION LOG SO FAR" in note
-    kept_recent = {m["content"][:7] for m in out[1:]}
+    kept_recent = {m["content"][:7] for m in out[2:]}
     # The newest step that did not stay verbatim is in the note; the very first one is not.
     older_steps = [f"step-{i:02d}" for i in range(60) if f"step-{i:02d}" not in kept_recent]
     assert older_steps[-1] in note
     assert "step-00" not in note
     # Compacting again does not stack a second note.
     again = _compact_conversation(out + conv[-20:], {"num_ctx": 8192, "num_predict": 1024})
-    assert again[0]["content"].count("MISSION LOG SO FAR") == 1
+    assert again[1]["content"].count("MISSION LOG SO FAR") == 1

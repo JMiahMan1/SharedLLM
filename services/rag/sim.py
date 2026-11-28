@@ -588,7 +588,7 @@ def query(
         # (or were written without an embedder). This is a one-time cost per
         # row, never a full-table re-embed on every query.
         missing = [item for item in items if "_embedding" not in item][:EMBEDDING_BACKFILL_PER_QUERY]
-        if missing:
+        if missing and embed_fn is not None:
             try:
                 backfill_vectors = embed_fn(
                     [f"{item.get('edit_or_rule', '')} {item.get('rationale', '')}" for item in missing]

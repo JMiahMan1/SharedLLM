@@ -150,14 +150,19 @@ async def test_every_tool_call_carries_the_workspace(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_workspace_files_reach_the_system_prompt(monkeypatch):
+async def test_the_workspace_files_reach_the_dynamic_context_not_the_system_prompt(monkeypatch):
     seen, _ = _scripted(monkeypatch, ["An answer."])
 
     await _run(workspace_id="sermon", workspace_context="- Journey of Grace Service.mkv (348.7 MB)")
 
     system = seen[0][0]["content"]
-    assert "Journey of Grace Service.mkv" in system
-    assert "suggest sending it to Raven" in system
+    dynamic = "\n".join(str(m.get("content") or "") for m in seen[0][1:])
+    # The live file tree must not sit in the static system prefix: doing so
+    # invalidated the prompt KV cache whenever a file changed or workspace
+    # switched. It belongs in the per-request dynamic context.
+    assert "Journey of Grace Service.mkv" not in system
+    assert "Journey of Grace Service.mkv" in dynamic
+    assert "suggest sending it to Raven" in dynamic
 
 
 @pytest.mark.asyncio
