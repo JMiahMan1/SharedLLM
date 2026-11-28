@@ -6,6 +6,7 @@ import logging
 import re
 import uuid
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Any, cast
 
@@ -744,6 +745,122 @@ _SLOW_TOOL_TIMEOUTS = {
     "webscraperrequest": 180.0,
     "browserautomationrequest": 180.0,
 }
+
+#: The harness a single-turn tool call belongs to. Set only around the tool
+#: dispatch (not the whole inference) so it is always reset, including when a
+#: tool raises. ``harness_bridge`` maps "satellite" to voice/chat from creds.
+CURRENT_HARNESS: ContextVar[str] = ContextVar("single_turn_harness", default="satellite")
+#: True for the Explorer subagent's isolated turn: tools that could mutate are
+#: refused centrally (``harness_bridge.is_read_only_action``), not per tool.
+READ_ONLY_TURN: ContextVar[bool] = ContextVar("single_turn_read_only", default=False)
+
+#: Inter-harness tools. They run in-process through harness_bridge, never over
+#: HTTP, and are deliberately absent from SINGLE_TURN_TOOL_ENDPOINTS.
+DELEGATION_ACTIONS: dict[str, str] = {
+    "delegateravenrequest": "delegate_to_raven",
+    "delegateworkspacerequest": "delegate_to_workspace",
+    "delegatelookuprequest": "delegate_lookup",
+    "delegatesubagentrequest": "delegate_explorer_subagent",
+    "delegatenotifyrequest": "delegate_notify",
+}
+
+
+def _delegation_payload(action: str, tool_data: dict, workspace_id: str | None = None) -> dict:
+    """The call's fields, whether the model used ``payload`` or flat arguments."""
+    body = tool_data.get("payload", tool_data)
+    payload = dict(body) if isinstance(body, dict) else {}
+    if not payload and isinstance(tool_data, dict):
+        payload = {k: v for k, v in tool_data.items() if k not in ("action", "tool")}
+    if workspace_id and not payload.get("workspace_id"):
+        payload["workspace_id"] = workspace_id
+    return payload
+
+
+async def _run_delegation_tool(
+    action: str,
+    tool_data: dict,
+    creds: ResolvedCredentials,
+    *,
+    query: str = "",
+    workspace_id: str | None = None,
+    harness: str | None = None,
+) -> str:
+    """Dispatch one of the five cross-harness tools through the guarded bridge."""
+    from services.gateway import harness_bridge
+
+    norm = re.sub(r"[\s_]+", "", str(action or "")).lower()
+    operation = DELEGATION_ACTIONS.get(norm)
+    if operation is None:
+        return f"I don't have a handler for the '{action}' action yet."
+    payload = _delegation_payload(norm, tool_data, workspace_id)
+    source = harness or CURRENT_HARNESS.get()
+    text = str(
+        payload.get("goal")
+        or payload.get("prompt")
+        or payload.get("query")
+        or payload.get("question")
+        or payload.get("task")
+        or query
+        or ""
+    ).strip()
+
+    def _truthy(value: Any, default: bool = False) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() not in ("", "0", "false", "no", "off")
+
+    if norm == "delegateravenrequest":
+        workspace = payload.get("workspace_id")
+        return await harness_bridge.delegate_to_raven(
+            text,
+            creds,
+            source_harness=source,
+            workspace_id=str(workspace) if workspace else None,
+            context_summary=str(payload.get("context_summary") or ""),
+            notify_on_complete=_truthy(payload.get("notify_on_complete"), True),
+            model=payload.get("model"),
+        )
+    if norm == "delegateworkspacerequest":
+        return await harness_bridge.delegate_to_workspace(
+            str(payload.get("workspace_id") or ""),
+            str(payload.get("prompt") or payload.get("query") or payload.get("task") or text),
+            creds,
+            source_harness=source,
+            mode=str(payload.get("mode") or "single_task"),
+            async_mode=_truthy(payload.get("async_mode"), False),
+        )
+    if norm == "delegatelookuprequest":
+        return await harness_bridge.delegate_lookup(
+            text, creds, source_harness=source, domain=str(payload.get("domain") or "")
+        )
+    if norm == "delegatesubagentrequest":
+        paths = payload.get("paths")
+        if isinstance(paths, str):
+            paths = [p.strip() for p in paths.split(",") if p.strip()]
+        try:
+            turns = int(payload.get("max_turns") or 6)
+        except (TypeError, ValueError):
+            turns = 6
+        return await harness_bridge.delegate_explorer_subagent(
+            text,
+            creds,
+            source_harness=source,
+            workspace_id=str(payload.get("workspace_id")) if payload.get("workspace_id") else None,
+            paths=paths if isinstance(paths, list) else None,
+            max_turns=max(1, min(turns, 6)),
+        )
+    return await harness_bridge.delegate_notify(
+        str(payload.get("message") or text),
+        creds,
+        source_harness=source,
+        title=str(payload.get("title") or "Jarvis"),
+        target_user=payload.get("target_user"),
+        link=payload.get("link"),
+        mission_id=payload.get("mission_id"),
+        workspace_id=str(payload.get("workspace_id")) if payload.get("workspace_id") else None,
+    )
 
 
 async def get_llm_settings() -> dict[str, str]:
@@ -2161,11 +2278,27 @@ async def _run_single_tool(action: str, tool_data: dict, query: str, creds: Reso
     ``workspace_id``, when the turn belongs to a workspace, overrides whatever
     workspace the model named or the query implied for workspace file tools.
     """
+    # Normalize action: strip underscores/spaces, lowercase → canonical form
+    action = re.sub(r'[\s_]+', '', action).lower()
+
+    # The Explorer subagent's firewall: a read-only turn may only observe. This
+    # is enforced here, at the one place every single-turn tool passes through,
+    # so a new tool cannot accidentally become available to it.
+    if READ_ONLY_TURN.get():
+        from services.gateway.harness_bridge import READ_ONLY_REFUSAL, is_read_only_action
+
+        candidate = tool_data.get("payload", tool_data)
+        if not is_read_only_action(action, candidate):
+            log.info("[_run_single_tool] read-only turn refused %s", action)
+            return READ_ONLY_REFUSAL
+
     settings = await get_all_settings()
     control_plane = _get(settings, "control_plane_url")
 
-    # Normalize action: strip underscores/spaces, lowercase → canonical form
-    action = re.sub(r'[\s_]+', '', action).lower()
+    if action in DELEGATION_ACTIONS:
+        return await _run_delegation_tool(
+            action, tool_data, creds, query=query, workspace_id=workspace_id
+        )
 
     if action == "controlplanerequest":
         payload = tool_data.get("payload", tool_data)
@@ -2649,7 +2782,7 @@ def _assistant_persona() -> str:
         return ""
 
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False, context_sections: dict[str, int] | None = None, budget_path: str = "chat", priority: int | None = None, persona: bool = False, book_chapter: str = "", harness: str = "satellite") -> str:
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False, context_sections: dict[str, int] | None = None, budget_path: str = "chat", priority: int | None = None, persona: bool = False, book_chapter: str = "", harness: str = "satellite", read_only: bool = False, max_turns: int | None = None) -> str:
     """Answer ``query`` in at most MAX_TURNS tool calls plus one closing turn.
 
     ``book_chapter`` is a chapter the gateway read for this question
@@ -2845,7 +2978,8 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         return forward
 
     MAX_INFERENCE_RETRIES = 3
-    MAX_TURNS = 3
+    # The Explorer subagent asks for at most six; everything else keeps three.
+    MAX_TURNS = max(1, min(int(max_turns or 3), 6))
 
     from services.gateway.agent_loop import extract_action_json
 
@@ -3072,7 +3206,17 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             )
             log.info("[_single_turn_inference] grounded turn refused a retrieval tool call")
         else:
-            tool_result = await _execute_single_tool(action, tool_data, query, creds, workspace_id=workspace_id)
+            # The bridge needs to know which harness is calling (voice vs chat
+            # when the internal name is "satellite") and whether this is the
+            # Explorer's read-only turn. Set only around the dispatch so both
+            # ContextVars are reset even when the tool raises.
+            _harness_token = CURRENT_HARNESS.set(harness)
+            _read_only_token = READ_ONLY_TURN.set(bool(read_only))
+            try:
+                tool_result = await _execute_single_tool(action, tool_data, query, creds, workspace_id=workspace_id)
+            finally:
+                READ_ONLY_TURN.reset(_read_only_token)
+                CURRENT_HARNESS.reset(_harness_token)
         log.info(f"[_single_turn_inference] Tool result: {tool_result[:300] if tool_result else 'empty'}")
         try:
             from services.gateway.trainer import sim as sim_mem
@@ -3128,6 +3272,30 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             if message and not _reply_is_failure(message):
                 await _record_sim_result(message, success=True)
                 return message
+
+        # A mission handoff or a notification is complete the moment the bridge
+        # returns: the person gets the spoken confirmation now, not after another
+        # temperature-0 round trip (voice dead air). The result event is emitted
+        # first so the UI's handoff card still receives its mission id/output.
+        if action_norm in ("delegateravenrequest", "delegatenotifyrequest") and pending_tool_error is None:
+            raw_result = str(tool_result or "").strip()
+            try:
+                res_obj = json.loads(raw_result)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                res_obj = None
+            if isinstance(res_obj, dict):
+                message = str(res_obj.get("summary") or res_obj.get("message") or "")
+                if message:
+                    if event_callback:
+                        await event_callback({
+                            "type": "tool_result",
+                            "id": f"step{turn + 1}",
+                            "output": raw_result[:4000],
+                        })
+                    await _record_sim_result(
+                        message, success=res_obj.get("status") not in ("ERROR", "REFUSED")
+                    )
+                    return message
 
         # Append tool result to conversation for next turn
         messages.append({"role": "user", "content": f"Tool result:\n{tool_result}"})
