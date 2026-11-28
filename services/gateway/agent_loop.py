@@ -1223,6 +1223,200 @@ def extract_action_batch(text: str) -> list[dict] | None:
     return None
 
 
+#: Actions with no side effects: safe to run together. A write, shell command,
+#: device command or anything not named here stays strictly sequential.
+READ_ONLY_ACTIONS = frozenset({
+    "workspacefilereadrequest",
+    "workspacelistrequest",
+    "workspacesearchrequest",
+    "workspacelintrequest",
+    "codesearchrequest",
+    "dockerlogsrequest",
+    "dockerpsrequest",
+    "websearchrequest",
+    "webreadrequest",
+    "webscraperrequest",
+    "contextsearchrequest",
+    "ragsearchrequest",
+    "executionlogrequest",
+    "haconfigrequest",
+    "entitysearchrequest",
+    "logbookrequest",
+    "mediastatusrequest",
+    "llminforequest",
+    "storagefilereadrequest",
+    "storagelistrequest",
+    "biblerequest",
+    "calibrerequest",
+    "identityrequest",
+    "weatherrequest",
+    "calendarrequest",
+    "listvoicesrequest",
+    "audiobookshelfrequest",
+    "volumeinventoryrequest",
+    "redisinspectrequest",
+})
+
+#: Read-only verbs inside GitOperationRequest. `push`, `commit`, `reset`, etc.
+#: are mutations and never enter the parallel path.
+_READ_ONLY_GIT_VERBS = frozenset({
+    "status", "diff", "log", "show", "branch", "remote", "rev-parse", "rev_parse",
+    "ls-files", "ls_files", "blame", "describe", "tag_list",
+})
+
+_READ_ONLY_ENDPOINTS: dict[str, str] = {
+    "workspacefilereadrequest": "/execute/workspace_file_read",
+    "workspacelistrequest": "/execute/workspace_list",
+    "workspacesearchrequest": "/execute/workspace_search",
+    "workspacelintrequest": "/execute/workspace_lint",
+    "codesearchrequest": "/execute/code_search",
+    "dockerlogsrequest": "/execute/docker_logs",
+    "dockerpsrequest": "/execute/docker_logs",
+    "websearchrequest": "/execute/web_search",
+    "webreadrequest": "/execute/web_read",
+    "webscraperrequest": "/execute/web_scraper",
+    "executionlogrequest": "/execute/logs",
+    "haconfigrequest": "/execute/ha_config",
+    "entitysearchrequest": "/execute/entity_search",
+    "logbookrequest": "/execute/ha_logbook",
+    "mediastatusrequest": "/execute/media/status",
+    "llminforequest": "/execute/llm/info",
+    "storagefilereadrequest": "/execute/storage_file_read",
+    "storagelistrequest": "/execute/storage_list",
+    "biblerequest": "/execute/bible",
+    "calibrerequest": "/execute/calibre",
+    "identityrequest": "/execute/identity",
+    "weatherrequest": "/execute/weather",
+    "calendarrequest": "/execute/calendar",
+    "listvoicesrequest": "/execute/list_voices",
+    "audiobookshelfrequest": "/execute/audiobookshelf",
+    "volumeinventoryrequest": "/execute/volumes",
+    "redisinspectrequest": "/execute/redis",
+}
+
+
+def _normalized_action(call: dict | None) -> str:
+    return str((call or {}).get("action") or (call or {}).get("@type") or "").strip().lower()
+
+
+def _is_read_only_call(call: dict | None) -> bool:
+    """Whether one tool call only reads: no writes, shells, or device commands."""
+    action = _normalized_action(call)
+    if action == "gitoperationrequest":
+        payload = (call or {}).get("payload")
+        verb = str((payload or {}).get("action") if isinstance(payload, dict) else "").lower()
+        return verb in _READ_ONLY_GIT_VERBS
+    return action in READ_ONLY_ACTIONS
+
+
+def _read_only_run(calls: list[dict]) -> int:
+    """Length of the leading contiguous run of read-only calls."""
+    count = 0
+    for call in calls:
+        if not _is_read_only_call(call):
+            break
+        count += 1
+    return count
+
+
+async def _execute_read_only_group(
+    calls: list[dict],
+    *,
+    user_context: dict | None,
+    workspace_id: str | None,
+) -> dict[str, Any]:
+    """Run a contiguous read-only batch concurrently and combine one observation.
+
+    Mutating tools never reach here. Each call still goes to its normal service
+    endpoint; the only difference is that independent reads overlap instead of
+    paying their latency one after another.
+    """
+
+    async def run_one(call: dict) -> dict[str, Any]:
+        action = _normalized_action(call)
+        payload = call.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+        payload = dict(payload)
+        if user_context:
+            payload.setdefault("user_context", user_context)
+        if workspace_id:
+            payload.setdefault("workspace_id", workspace_id)
+        if action == "workspacefilereadrequest":
+            payload.setdefault("line_numbers", True)
+            payload.setdefault("limit_lines", 300)
+        base = RAG_SVC if action in ("contextsearchrequest", "ragsearchrequest") else EXECUTION_SVC
+        endpoint = (
+            "/rag/search"
+            if action in ("contextsearchrequest", "ragsearchrequest")
+            else _READ_ONLY_ENDPOINTS[action]
+        )
+        try:
+            async with shared_http_client() as client:
+                resp = await client.post(
+                    f"{base}{endpoint}",
+                    json=payload,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=120.0),
+                )
+                try:
+                    body = await resp.json(content_type=None)
+                except Exception:
+                    body = {"message": (await resp.text())[:1000]}
+                if not isinstance(body, dict):
+                    body = {"message": str(body), "status": "SUCCESS" if resp.status < 400 else "ERROR"}
+                return {
+                    "action": action,
+                    "http_status": resp.status,
+                    "status": body.get("status") or ("SUCCESS" if resp.status < 400 else "ERROR"),
+                    "message": body.get("message", ""),
+                    "detail": body.get("detail"),
+                }
+        except Exception as exc:
+            return {
+                "action": action,
+                "http_status": 0,
+                "status": "ERROR",
+                "message": f"{action} failed: {exc}",
+            }
+
+    results = await asyncio.gather(*(run_one(call) for call in calls), return_exceptions=True)
+    clean: list[dict[str, Any]] = []
+    for call, result in zip(calls, results, strict=False):
+        if isinstance(result, BaseException):
+            clean.append({
+                "action": _normalized_action(call),
+                "status": "ERROR",
+                "message": f"read-only batch member failed: {result}",
+            })
+        else:
+            clean.append(result)
+    failed = [r for r in clean if str(r.get("status", "")).upper() not in ("SUCCESS", "OK")]
+    return {
+        "status": "SUCCESS" if not failed else "FAILURE",
+        "message": f"{len(clean)} read-only tool(s) ran in parallel"
+        + (f"; {len(failed)} failed" if failed else ""),
+        "detail": {"batch_results": clean},
+    }
+
+
+def _no_consecutive_user(messages: list[dict]) -> list[dict]:
+    """Merge back-to-back user messages so chat templates never receive two."""
+    out: list[dict] = []
+    for message in messages:
+        if (
+            out
+            and message.get("role") == "user"
+            and out[-1].get("role") == "user"
+        ):
+            merged = dict(out[-1])
+            merged["content"] = f"{merged.get('content', '')}\n\n{message.get('content', '')}"
+            out[-1] = merged
+        else:
+            out.append(message)
+    return out
+
+
 def _next_batch_step(pending_batch: list[dict]) -> tuple[bool, dict | None]:
     """Pop the next step of an in-flight batched command chain.
 
@@ -1914,6 +2108,23 @@ def is_verification_action(action_name: str, payload: dict | None) -> bool:
 def pending_verification(written: set[str], verified: set[str]) -> list[str]:
     """Files that were written but never linted/tested before finishing."""
     return sorted(set(written) - set(verified))
+
+
+def completion_hold_kind(
+    answer: str, open_objectives: list[str] | None, unverified: list[str] | None
+) -> str | None:
+    """Why a completion phrase must NOT end the mission yet (``None`` = it may).
+
+    The runtime decides completion, not the model's words: open objectives and
+    written-but-unverified files both outrank ``COMPLETION_INDICATORS``.
+    """
+    if not any(ind in str(answer or "").lower() for ind in COMPLETION_INDICATORS):
+        return None
+    if open_objectives:
+        return "objectives"
+    if unverified:
+        return "verification"
+    return None
 
 async def sd_proxy_base_url() -> str:
     """The desktop image (SD) proxy's base URL: the llm_local_url setting.
@@ -3018,6 +3229,64 @@ def _conversation_token_budget(conv: list[dict]) -> int:
     return sum(_estimate_tokens(m.get("content", "") or "") for m in conv)
 
 
+#: JetBrains NeurIPS observation-masking pattern: the newest turns stay whole,
+#: older bulky tool output becomes a one-line stub before heavier compaction runs.
+OBSERVATION_MASK_KEEP_RECENT = 4
+OBSERVATION_MASK_MIN_CHARS = 600
+
+
+def _observation_stub(content: str) -> str:
+    """One line naming what an old tool observation was and how big it was."""
+    action, status = "tool", "unknown"
+    body = content
+    if "LAST TOOL RESULT:" in content:
+        body = content.split("LAST TOOL RESULT:", 1)[1].strip()
+    try:
+        parsed = json.loads(body)
+        if isinstance(parsed, dict):
+            action = str(parsed.get("action") or parsed.get("tool") or action)
+            status = str(parsed.get("status") or status)
+    except Exception:
+        for line in body.splitlines():
+            if "->" in line:
+                action = line.strip()[:80]
+                break
+    return f"[masked observation: {action} -> {status}, {len(content)} chars]"
+
+
+def _is_tool_observation(message: dict) -> bool:
+    if message.get("role") != "user":
+        return False
+    content = str(message.get("content") or "")
+    if content.lstrip().startswith(("MISSION LOCK", "MISSION CONTEXT")):
+        return False
+    return (
+        "LAST TOOL RESULT:" in content
+        or content.lstrip().startswith(("{", "["))
+        or content.lstrip().startswith("TOOL RESULT")
+    )
+
+
+def _mask_observations(conv: list[dict], keep_recent: int = OBSERVATION_MASK_KEEP_RECENT) -> list[dict]:
+    """Mask old bulky tool observations, keeping the newest ``keep_recent`` turns."""
+    assistant_positions = [i for i, m in enumerate(conv) if m.get("role") == "assistant"]
+    if len(assistant_positions) <= keep_recent:
+        return conv
+    boundary = assistant_positions[-keep_recent]
+    out: list[dict] = []
+    for i, message in enumerate(conv):
+        content = str(message.get("content") or "")
+        if (
+            i < boundary
+            and len(content) > OBSERVATION_MASK_MIN_CHARS
+            and _is_tool_observation(message)
+        ):
+            out.append({"role": "user", "content": _observation_stub(content)})
+        else:
+            out.append(message)
+    return out
+
+
 def _stub_old_turns(conv: list[dict]) -> list[dict]:
     """Replace old assistant file writes and large tool results with stubs.
 
@@ -3086,6 +3355,9 @@ def _compact_conversation(conv: list[dict], mission_vram_params: dict | None = N
     if budget <= 0:
         budget = 8192  # safety floor
 
+    # JetBrains observation masking first: cheap, lossless for the last turns,
+    # and often removes enough bulk that heavier compaction is unnecessary.
+    conv = _mask_observations(conv)
     total_tokens = _conversation_token_budget(conv)
 
     # Check if compaction is needed (70% threshold)
@@ -3093,14 +3365,29 @@ def _compact_conversation(conv: list[dict], mission_vram_params: dict | None = N
         return conv
 
     system_msgs = [m for m in conv if m.get("role") == "system"]
+    system_msg = system_msgs[0] if system_msgs else None
+    # MISSION LOCK + plan (and the rolling mission log appended to it) is pinned:
+    # never dropped, and never folded into the static system prefix.
+    pinned = next(
+        (
+            m for m in conv
+            if m.get("role") == "user"
+            and str(m.get("content") or "").lstrip().startswith(("MISSION LOCK", "MISSION CONTEXT"))
+        ),
+        None,
+    )
     # Old file writes and big old tool results become short stubs before anything is dropped.
-    body = _stub_old_turns([m for m in conv if m.get("role") != "system"])
+    body = _stub_old_turns([
+        m for m in conv if m.get("role") != "system" and m is not pinned
+    ])
 
     if len(body) < 2:
         return conv
 
-    # Keep recent turns within ~35% of budget (at least last 2 turns)
-    keep_token_budget = int(budget * 0.35)
+    # Keep recent turns within ~35% of budget, after the pinned system/context.
+    system_tokens = _estimate_tokens(system_msg.get("content", "") or "") if system_msg else 0
+    pinned_tokens = _estimate_tokens(pinned.get("content", "") or "") if pinned else 0
+    keep_token_budget = max(500, int(budget * 0.35) - system_tokens - pinned_tokens)
 
     # Greedily keep recent turns until we hit the keep budget
     kept_tokens = 0
@@ -3142,17 +3429,83 @@ def _compact_conversation(conv: list[dict], mission_vram_params: dict | None = N
         + "\n".join(note_lines)
     )
 
-    # Replace system message with compacted version (never append repeatedly)
-    base_system = system_msgs[0]["content"] if system_msgs else ""
-    # Strip any previous compact note to avoid accumulation
-    base_system = re.sub(
+    # conversation[0] stays byte-for-byte static so llama-server keeps the system
+    # KV prefix warm. The growing mission log lives in the pinned dynamic message.
+    result: list[dict] = []
+    if system_msg is not None:
+        result.append(system_msg)
+    pinned_content = str(pinned.get("content") or "") if pinned else "MISSION CONTEXT:"
+    pinned_content = re.sub(
         r"\n\nMISSION LOG SO FAR.*",
         "",
-        base_system,
+        pinned_content,
         flags=re.DOTALL,
     )
-    new_system = {"role": "system", "content": base_system + "\n\n" + compact_note}
-    return [new_system, *recent]
+    result.append({"role": "user", "content": pinned_content + "\n\n" + compact_note})
+    result.extend(recent)
+
+    # Irreducible-context floor: if compaction freed under 10% and is still over
+    # threshold, further rewriting cannot help. Return the masked conversation
+    # unchanged and let the overflow path hard-compact once, instead of looping
+    # lossy rebuilds every iteration.
+    post_tokens = _conversation_token_budget(result)
+    if (
+        total_tokens > 0
+        and (total_tokens - post_tokens) / total_tokens < 0.10
+        and post_tokens >= int(budget * 0.70)
+    ):
+        log.warning(
+            "[AgentLoop] Compaction floor reached (%s -> %s tokens, under 10%% freed); "
+            "not re-compacting this conversation.",
+            total_tokens,
+            post_tokens,
+        )
+        return conv
+    return result
+
+
+def _hard_compact_conversation(
+    conversation: list[dict], query: str, fuel_budget: int
+) -> list[dict]:
+    """Emergency compaction after a real context-overflow error.
+
+    The static system message is preserved byte-for-byte, and ``MISSION LOCK``
+    plus the active plan is pinned so it can never be dropped on overflow.
+    """
+    system_msgs = [m for m in conversation if m.get("role") == "system"]
+    system_msg = system_msgs[0] if system_msgs else conversation[0]
+    body_msgs = [m for m in conversation if m.get("role") != "system"]
+    pinned = next(
+        (
+            m for m in body_msgs
+            if m.get("role") == "user"
+            and str(m.get("content") or "").lstrip().startswith(("MISSION LOCK", "MISSION CONTEXT"))
+        ),
+        {"role": "user", "content": f"MISSION LOCK: {query}"},
+    )
+    # Account for the static system prefix and the pinned mission lock before
+    # deciding how many recent turns fit.
+    system_tokens = _estimate_tokens(system_msg.get("content", "") or "")
+    pinned_tokens = _estimate_tokens(pinned.get("content", "") or "")
+    hard_keep_tokens = max(500, int(fuel_budget * 0.50) - system_tokens - pinned_tokens)
+    hard_kept = []
+    hard_tokens = 0
+    for m in reversed([m for m in body_msgs if m is not pinned]):
+        t = _estimate_tokens(m.get("content", "") or "")
+        if hard_tokens + t <= hard_keep_tokens:
+            hard_kept.append(m)
+            hard_tokens += t
+        if len(hard_kept) >= 4:  # cap at 4 most recent turns
+            break
+    hard_kept.reverse()
+    if not hard_kept and len(body_msgs) > 1:
+        # The newest turn alone is too big: keep its tail so the current
+        # tool result is never lost.
+        newest = dict(body_msgs[-1])
+        keep_chars = int(hard_keep_tokens * _FUEL_EST_CHARS_PER_TOKEN / _FUEL_TOKEN_MARGIN)
+        newest["content"] = "[truncated]\n" + (newest.get("content", "") or "")[-keep_chars:]
+        hard_kept = [newest]
+    return _no_consecutive_user([system_msg, pinned, *hard_kept])
 
 
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False, workspace_id: str | None = None, history_log: str | None = None) -> Any:
@@ -3162,10 +3515,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     _flush_reasoning = events.flush
 
     # Two-tier Self-Improvement Memory: shared System SIM (admin rules filtered
-    # by the caller's role) plus exactly this caller's User SIM. Raven appends
-    # the block to its system context; it is never written to the static
-    # single-turn prefix (this path has no prompt-cache contract).
+    # by the caller's role) plus exactly this caller's User SIM. It goes in the
+    # pinned dynamic message, never the static system prefix: the prefix must
+    # stay byte-for-byte identical across every mission iteration so the local
+    # llama-server can keep its KV cache warm.
     sim_items: list[dict] = []
+    sim_context = ""
     try:
         from services.gateway.trainer import sim as sim_mem
 
@@ -3178,8 +3533,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             k=8,
         )
         if sim_block:
-            full_system += (
-                "\n\n[Self-Improvement Memory]\n"
+            sim_context = (
+                "[Self-Improvement Memory]\n"
                 "Shared System lessons and this user's own lessons. Apply one only when its "
                 "situation matches this mission; a retired or regressed fix is never shown.\n"
                 f"{sim_block}"
@@ -3348,16 +3703,24 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # small, routed pre-fetch arrives as Retrieved Context. Fixed per configuration and role.
     from services.gateway.knowledge_map import knowledge_map_for
 
-    full_system = f"{full_system}\n\n{knowledge_map_for('raven', is_admin=bool(getattr(creds, 'is_admin', False)), guide=full_system)}"
-    enhanced_system = f"{full_system}\n\nCurrent Date/Time: {now}\n\nRetrieved Context:\n{rag_context}"
+    static_system = f"{full_system}\n\n{knowledge_map_for('raven', is_admin=bool(getattr(creds, 'is_admin', False)), guide=full_system)}"
+    # Everything that can change during (or between) missions lives here, in a
+    # pinned user message, not in conversation[0].
+    dynamic_parts = [f"Current Date/Time: {now}"]
+    if str(rag_context or "").strip():
+        dynamic_parts.append(f"Retrieved Context:\n{rag_context}")
+    if sim_context:
+        dynamic_parts.append(sim_context)
+    pinned_context = "MISSION CONTEXT (dynamic; keep for the whole mission):\n" + "\n\n".join(dynamic_parts)
 
     ollama_payload = {
         "model": selected_model,
-        "messages": [
-            {"role": "system", "content": enhanced_system},
+        "messages": _no_consecutive_user([
+            {"role": "system", "content": static_system},
+            {"role": "user", "content": pinned_context},
             *short_term,
             {"role": "user", "content": query},
-        ],
+        ]),
         "stream": False,
         "options": {
             "enable_thinking": is_thinking_capable and show_thinking,
@@ -3688,14 +4051,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # context (decisions, constraints, prior tool results) across a long mission
     # instead of only ever seeing the single most-recent tool result each turn.
     conversation: list[dict] = [
-        {"role": "system", "content": enhanced_system},
+        {"role": "system", "content": static_system},
         {"role": "user", "content": (
             f"MISSION LOCK: {query}"
             + (f"\n\nEXECUTION PLAN:\n{generated_plan}" if generated_plan else "")
+            + f"\n\n{pinned_context}"
         )},
     ]
     if prior_conversation_turns:
         conversation.extend(prior_conversation_turns)
+    conversation = _no_consecutive_user(conversation)
 
     for agent_iter in range(start_iteration, max_iterations):
         iter_num = agent_iter + 1
@@ -3840,9 +4205,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
             # Maintain a running, compacted conversation so the model retains learned
             # context across the mission instead of only seeing the last tool result.
-            conversation.append({"role": "user", "content": user_content})
+            # Chat templates reject two consecutive `user` messages. On a
+            # pending-batch continuation the previous turn can already be a
+            # user observation, so merge rather than append a second one.
+            if conversation and conversation[-1].get("role") == "user":
+                conversation[-1] = {
+                    **conversation[-1],
+                    "content": f"{conversation[-1].get('content', '')}\n\n{user_content}",
+                }
+            else:
+                conversation.append({"role": "user", "content": user_content})
             conversation = _compact_conversation(conversation, mission_vram_params)
-            ollama_payload["messages"] = conversation
+            ollama_payload["messages"] = _no_consecutive_user(conversation)
 
             # --- FUEL EVENT: record token budget per iteration ---
             fuel_tokens = _conversation_token_budget(conversation)
@@ -3915,28 +4289,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             f"[AgentLoop] Context overflow detected on attempt 1: {error_str[:200]}. "
                             "Hard-compacting conversation and retrying once."
                         )
-                        # Hard compact: keep only the last 2 turns within 50% of budget
-                        system_msgs = [m for m in conversation if m.get("role") == "system"]
-                        body_msgs = [m for m in conversation if m.get("role") != "system"]
-                        hard_keep_tokens = int(fuel_budget * 0.50)
-                        hard_kept = []
-                        hard_tokens = 0
-                        for m in reversed(body_msgs):
-                            t = _estimate_tokens(m.get("content", "") or "")
-                            if hard_tokens + t <= hard_keep_tokens:
-                                hard_kept.append(m)
-                                hard_tokens += t
-                            if len(hard_kept) >= 4:  # cap at 4 most recent turns
-                                break
-                        hard_kept.reverse()
-                        if not hard_kept and body_msgs:
-                            # The newest turn alone is too big: keep its tail so the current
-                            # tool result is never lost.
-                            newest = dict(body_msgs[-1])
-                            keep_chars = int(hard_keep_tokens * _FUEL_EST_CHARS_PER_TOKEN / _FUEL_TOKEN_MARGIN)
-                            newest["content"] = "[truncated]\n" + (newest.get("content", "") or "")[-keep_chars:]
-                            hard_kept = [newest]
-                        conversation = [system_msgs[0] if system_msgs else conversation[0], *hard_kept]
+                        # Hard compact: keep only the most recent turns within 50% of
+                        # budget. MISSION LOCK + the active plan is pinned and ALWAYS
+                        # survives; the static system message stays byte-identical.
+                        conversation = _hard_compact_conversation(conversation, query, fuel_budget)
                         ollama_payload["messages"] = conversation
                         # Record the hard-compact fuel event
                         fuel_tokens = _conversation_token_budget(conversation)
@@ -4021,6 +4377,54 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # burning a reasoning cycle per step.
             batch = extract_action_batch(ans)
             if batch:
+                # Parallel read-only batch: when the model asks for two or more
+                # consecutive read-only calls (reads/searches/git status/logs),
+                # run them concurrently and collapse them into ONE observation
+                # turn. Mutating calls stay strictly sequential.
+                _ro_group = []
+                for _call in batch:
+                    if _is_read_only_call(_call):
+                        _ro_group.append(_call)
+                    else:
+                        break
+                if len(_ro_group) >= 2:
+                    _ro_ctx = {
+                        "user": creds.user,
+                        "is_admin": creds.is_admin,
+                        "identified_by": getattr(creds, "identified_by", None),
+                        "via": "assistant",
+                        "voice_satellite": getattr(creds, "voice_satellite", None),
+                        "api_key": creds.api_key,
+                        "ha_url": creds.ha_url,
+                        "ha_token": creds.ha_token,
+                        "nextcloud_url": getattr(creds, "nextcloud_url", None),
+                        "nextcloud_user": getattr(creds, "nextcloud_user", None),
+                        "nextcloud_token": getattr(creds, "nextcloud_token", None),
+                        "github_token": getattr(creds, "github_token", None),
+                        "gitlab_token": getattr(creds, "gitlab_token", None),
+                        "git_token": getattr(creds, "git_token", None),
+                    }
+                    _ro_combined = await _execute_read_only_group(
+                        _ro_group, user_context=_ro_ctx, workspace_id=workspace_id
+                    )
+                    exec_data = _ro_combined
+                    successful_tool_calls += len(_ro_group)
+                    log.info(
+                        f"[AgentLoop] Parallel read-only batch: {len(_ro_group)} call(s) "
+                        f"executed concurrently."
+                    )
+                    action_log.append(
+                        f"ITERATION {iter_num}: Executed {len(_ro_group)} read-only tool calls "
+                        f"in parallel ({', '.join(str(c.get('action')) for c in _ro_group)}). "
+                        f"Results are in LAST TOOL RESULT."
+                    )
+                    _batch_rest = batch[len(_ro_group):]
+                    if _batch_rest:
+                        tool_data = _batch_rest.pop(0)
+                        pending_batch.extend(_batch_rest)
+                    else:
+                        tool_data = None
+                    continue
                 tool_data = batch.pop(0)
                 pending_batch.extend(batch)
                 log.info(f"[AgentLoop] Batching {len(batch) + 1} tool calls from one inference.")
@@ -4132,7 +4536,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             if successful_tool_calls > 0 and ans:
                 _ans_l = ans.lower()
                 _still_open = _discipline.open_objectives()
-                if any(ind in _ans_l for ind in COMPLETION_INDICATORS) and _still_open:
+                _unverified_pending = pending_verification(_written_files, _verified_files)
+                _hold = completion_hold_kind(ans, _still_open, _unverified_pending)
+                if _hold == "objectives":
                     # Objectives were set and are not all done: words alone do not end it.
                     log.info(f"[AgentLoop] Completion phrase with open objectives {_still_open}; asking for the debrief.")
                     action_log.append(
@@ -4140,7 +4546,21 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         f"done or dropped: {', '.join(_still_open)}. Finish them (or drop them with a note via "
                         f"MissionObjectivesRequest), then call MissionCompleteRequest."
                     )
-                elif any(ind in _ans_l for ind in COMPLETION_INDICATORS):
+                elif _hold == "verification":
+                    # Verification gate beats the completion phrase: files were
+                    # written but never linted/tested, so the mission is not done.
+                    _verification_nudge_sent = True
+                    log.warning(
+                        f"[AgentLoop] Completion phrase but unverified writes {_unverified_pending}; "
+                        f"nudging for lint/test before finish."
+                    )
+                    action_log.append(
+                        f"ITERATION {iter_num}: You said the mission is complete, but these files were "
+                        f"written and never verified: {', '.join(_unverified_pending)}. Run the standard "
+                        f"static check and the real test/selftest for the language you wrote, fix any "
+                        f"failure, then say Mission complete."
+                    )
+                elif _hold is None and any(ind in _ans_l for ind in COMPLETION_INDICATORS):
                     log.info(f"[AgentLoop] Completion signal detected in text reply after {successful_tool_calls} tool call(s). Terminating mission as complete.")
                     await _clear_checkpoint()
                     break
@@ -5635,7 +6055,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         if lookup_action in lintable_actions and isinstance(payload, dict):
                             file_path = payload.get("file_path") or payload.get("path", "")
                             if file_path:
-                                lint_feedback = await run_post_write_lint(file_path, EXECUTION_SVC, INTERNAL_SECRET, log, payload.get("user_context"))
+                                lint_feedback = await run_post_write_lint(
+                                    file_path,
+                                    EXECUTION_SVC,
+                                    INTERNAL_SECRET,
+                                    log,
+                                    payload.get("user_context"),
+                                    workspace_id=workspace_id,
+                                )
                                 if lint_feedback:
                                     await stream_event("result_error", lint_feedback)
                                     exec_data = {
@@ -5879,7 +6306,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     timeout=aiohttp.ClientTimeout(total=30.0),
                 )
                 if resp.status != 200:
-                    log.warning(f"[AgentLoop] Learning persistence failed: {resp.status} {resp.text}")
+                    _body = ""
+                    with contextlib.suppress(Exception):
+                        _body = (await resp.text())[:500]
+                    log.warning(f"[AgentLoop] Learning persistence failed: {resp.status} {_body}")
 
             # BRIDGE: keep the workspace's local raven_memory.md journal in sync
             # with the global system_learnings store. system_learnings is what
@@ -5913,7 +6343,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             timeout=aiohttp.ClientTimeout(total=30.0),
                         )
                         if _wr.status != 200:
-                            log.warning(f"[AgentLoop] raven_memory.md append failed: {_wr.status} {_wr.text}")
+                            _wr_body = ""
+                            with contextlib.suppress(Exception):
+                                _wr_body = (await _wr.text())[:500]
+                            log.warning(f"[AgentLoop] raven_memory.md append failed: {_wr.status} {_wr_body}")
                 except Exception as _me:
                     log.warning(f"[AgentLoop] raven_memory.md append skipped: {_me}")
         except Exception as e:
@@ -6111,9 +6544,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     return ans
 
 
-async def run_post_write_lint(file_path: str, execution_svc: str | None, internal_secret: str, logger, user_context: dict | None = None) -> str | None:
+async def run_post_write_lint(
+    file_path: str,
+    execution_svc: str | None,
+    internal_secret: str,
+    logger,
+    user_context: dict | None = None,
+    workspace_id: str | None = None,
+) -> str | None:
     """
     Shared post-write lint hook. Returns lint feedback string on failure, None on success.
+
+    A lint response only counts as success when it is explicitly SUCCESS/OK and
+    carries a positive ``passed``/``verified`` signal. Transport errors and
+    malformed responses are failures, never a silent clean pass.
     """
     if not execution_svc:
         return None
@@ -6133,6 +6577,8 @@ async def run_post_write_lint(file_path: str, execution_svc: str | None, interna
     logger.info(f"Post-write lint check for {file_path} (ext={ext})")
     try:
         lint_payload: dict[str, Any] = {"path": file_path}
+        if workspace_id:
+            lint_payload["workspace_id"] = workspace_id
         if user_context:
             lint_payload["user_context"] = user_context
         async with shared_http_client() as lint_client:
@@ -6142,42 +6588,75 @@ async def run_post_write_lint(file_path: str, execution_svc: str | None, interna
                 headers={"X-Internal-Secret": internal_secret},
                 timeout=aiohttp.ClientTimeout(total=15.0),
             )
-            if lint_resp.status == 200:
-                lint_data = await lint_resp.json()
-                detail = lint_data.get("detail", {}) or {}
-                lint_passed = detail.get("passed", True) if isinstance(detail, dict) else True
-                lint_verified = detail.get("verified", True) if isinstance(detail, dict) else True
-                results = detail.get("results", []) if isinstance(detail, dict) else []
+            if lint_resp.status != 200:
+                body = ""
+                with contextlib.suppress(Exception):
+                    body = (await lint_resp.text())[:500]
+                feedback = (
+                    f"LINT FAILED for {file_path}: lint service returned HTTP "
+                    f"{lint_resp.status}. {body}".strip()
+                )
+                logger.warning(feedback)
+                return feedback
+            lint_data = await lint_resp.json()
+            detail = lint_data.get("detail", {}) or {}
+            status = str(lint_data.get("status") or "").upper()
+            message = str(lint_data.get("message") or "")
+            if status not in ("SUCCESS", "OK"):
+                feedback = f"LINT FAILED for {file_path}: {message or status or 'no status'}"
+                logger.warning(feedback)
+                return feedback
+            if not isinstance(detail, dict) or "passed" not in detail or "verified" not in detail:
+                # Some execution-service errors come back as a SUCCESS-shaped
+                # envelope with only an error message. Treat that as a real
+                # failure so an unlinted file is never marked verified.
+                if message:
+                    feedback = f"LINT FAILED for {file_path}: {message}"
+                    logger.warning(feedback)
+                    return feedback
+                logger.warning(
+                    f"LINT UNVERIFIED for {file_path}: response carried no passed/verified signal."
+                )
+                return (
+                    f"LINT UNVERIFIED for {file_path}: the lint service returned no "
+                    f"passed/verified signal, so this code was NOT actually verified."
+                )
+            lint_passed = detail.get("passed", True)
+            lint_verified = detail.get("verified", True)
+            results = detail.get("results", []) if isinstance(detail, dict) else []
 
-                if lint_passed is False:
-                    lint_msg = lint_data.get("message", "")
-                    if results:
-                        issue_lines = []
-                        for r in results:
-                            output = r.get("output", "")
-                            if output:
-                                issue_lines.extend(output.split("\n")[:8])
-                        lint_feedback = f"LINT FAILED for {file_path}:\n" + "\n".join(issue_lines[:15])
-                    else:
-                        lint_feedback = f"LINT FAILED for {file_path}: {lint_msg}"
-                    logger.warning(f"{lint_feedback}")
-                    return lint_feedback
+            if lint_passed is False:
+                if results:
+                    issue_lines = []
+                    for r in results:
+                        output = r.get("output", "")
+                        if output:
+                            issue_lines.extend(output.split("\n")[:8])
+                    lint_feedback = f"LINT FAILED for {file_path}:\n" + "\n".join(issue_lines[:15])
+                else:
+                    lint_feedback = f"LINT FAILED for {file_path}: {message}"
+                logger.warning(f"{lint_feedback}")
+                return lint_feedback
 
-                # UNVERIFIED: the handler ran but NO checker was installed, so we
-                # have no real signal. Surface this so the model cannot trust a
-                # phantom "clean" and so a missing toolchain gets flagged in CI.
-                if not lint_verified:
-                    skipped = [r.get("tool") for r in results if r.get("skipped")]
-                    warn = (
-                        f"LINT UNVERIFIED for {file_path}: no code checker ("
-                        + ", ".join(skipped or ["?"])
-                        + ") is installed in the sandbox. This code was NOT actually "
-                        + "verified; install the language toolchain or rely on CI to catch errors."
-                    )
-                    logger.warning(warn)
-                    return warn
+            # UNVERIFIED: the handler ran but NO checker was installed, so we
+            # have no real signal. Surface this so the model cannot trust a
+            # phantom "clean" and so a missing toolchain gets flagged in CI.
+            if not lint_verified:
+                skipped = [r.get("tool") for r in results if r.get("skipped")]
+                warn = (
+                    f"LINT UNVERIFIED for {file_path}: no code checker ("
+                    + ", ".join(skipped or ["?"])
+                    + ") is installed in the sandbox. This code was NOT actually "
+                    + "verified; install the language toolchain or rely on CI to catch errors."
+                )
+                logger.warning(warn)
+                return warn
 
-                logger.info(f"Post-write lint clean for {file_path}")
+            logger.info(f"Post-write lint clean for {file_path}")
     except Exception as lint_e:
         logger.warning(f"Post-write lint check failed: {lint_e}")
+        return (
+            f"LINT FAILED for {file_path}: post-write lint could not run "
+            f"({type(lint_e).__name__}: {lint_e}). The file is NOT verified."
+        )
     return None

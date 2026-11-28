@@ -147,12 +147,15 @@ async def test_the_orchestrator_streams_safe_sentences_and_returns_the_whole_ans
     assert answer == "It will be sunny tomorrow with a light breeze. Highs near seventy."
     # The last sentence is said once the model call ends, not held for the whole job.
     assert sink.said() == ["It will be sunny tomorrow with a light breeze.", "Highs near seventy."]
-    # Without speech_stream the old behaviour stands: the whole answer as one content chunk at the end.
+    # Without speech_stream, Turn 0 prose streams live behind the small prefix
+    # gate: the UI sees the answer as it is written, exactly once.
     plain = Sink()
     await orchestrator._single_turn_inference(
         query="what's the weather tomorrow", model="m", system_prompt="S", rag_context="", history=[],
         creds=orchestrator.ResolvedCredentials(user="u"), chunk_callback=plain)
-    assert plain.chunks == [{"type": "content", "text": answer}]
+    assert len(plain.chunks) > 1
+    assert "".join(c["text"] for c in plain.chunks) == answer
+    assert all(c.get("type") == "content" for c in plain.chunks)
 
 
 async def test_device_claims_still_correct_a_streamed_voice_answer(monkeypatch):
