@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 import traceback
@@ -339,6 +340,44 @@ def require_internal(x_internal_secret: str = Header(...)):
 
 # Core storage helpers
 
+#: nomic-embed-text is trained with task prefixes; without them a query and a
+#: document are embedded as if they were the same kind of text.
+_TASK_PREFIX = {"query": "search_query: ", "document": "search_document: "}
+
+
+def _uses_nomic_prefixes() -> bool:
+    return "nomic" in str(EMBEDDING_MODEL or "").lower()
+
+
+def _with_task_prefix(text: str, kind: str) -> str:
+    """Prefix ``text`` for the active model exactly once.
+
+    The ingest paths and the query path must use the matching prefix or the
+    vectors live in different subspaces. A caller that already prefixed its
+    text is left alone so a retry cannot become ``search_query: search_query:``.
+    """
+    if not _uses_nomic_prefixes():
+        return text
+    prefix = _TASK_PREFIX.get(kind, "")
+    if not prefix:
+        return text
+    if str(text).lstrip().startswith(prefix):
+        return text
+    return prefix + text
+
+
+def _embed_document(text: str) -> list[float]:
+    return embed([_with_task_prefix(text, "document")])[0]
+
+
+def _embed_query_vector(text: str) -> list[float]:
+    return embed([_with_task_prefix(text, "query")])[0]
+
+
+def _embed_documents(texts: list[str]) -> list[list[float]]:
+    return embed([_with_task_prefix(text, "document") for text in texts])
+
+
 def _add_item(
     collection: str,
     doc_id: str,
@@ -405,7 +444,7 @@ def _add_item(
         ],
     )
     if vector is None:
-        vector = embed([content])[0]
+        vector = _embed_document(content)
     _adapter().add(doc_id, vector, collection, user_id)
 
     # BM25 keyword index (best effort).
@@ -669,7 +708,7 @@ def reindex_all(batch_size: int = 256) -> int:
         return 0
     for start in range(0, len(rows), max(1, batch_size)):
         chunk = rows[start : start + batch_size]
-        vectors = embed([r["content"] or "" for r in chunk])
+        vectors = _embed_documents([r["content"] or "" for r in chunk])
         for r, vec in zip(chunk, vectors, strict=False):
             _adapter().add(r["id"], vec, r["collection_name"], r["user_id"])
     _conn().commit()
@@ -693,10 +732,50 @@ def _delete_items(ids: list[str]):
     _conn().commit()
 
 
+#: An alphanumeric token of at least two characters. Splitting on everything
+#: else (quotes, hyphens, colons, punctuation) is deliberate: those are FTS5
+#: syntax, not search text, and were what made a natural-language query match
+#: zero rows or raise OperationalError.
+_FTS_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
+
+
+def _fts_tokens(query: str) -> list[str]:
+    tokens = [token.lower() for token in _FTS_TOKEN_RE.findall(str(query or ""))]
+    return [token for token in tokens if len(token) >= 2]
+
+
+def _bm25_query(query: str) -> str:
+    """Build a safe FTS5 MATCH expression from natural language.
+
+    Every token is double-quoted, so FTS5 reserved words (AND, OR, NOT, NEAR)
+    and punctuation can never be parsed as syntax. Tokens are OR-ed so a
+    natural-language question matches any of its meaningful words instead of
+    requiring one contiguous phrase. For short queries the contiguous phrase is
+    added as an extra alternative; BM25's rank then rewards the phrase match.
+    """
+    tokens = list(dict.fromkeys(_fts_tokens(query)))
+    if not tokens:
+        return ""
+    quoted = [f'"{token}"' for token in tokens]
+    if len(tokens) <= 5:
+        phrase = '"' + " ".join(tokens) + '"'
+        return f'({" OR ".join(quoted)}) OR {phrase}'
+    return " OR ".join(quoted)
+
+
+def _bm25_phrase_query(query: str) -> str:
+    tokens = _fts_tokens(query)
+    if not tokens or len(tokens) > 5:
+        return ""
+    return '"' + " ".join(tokens) + '"'
+
+
 def _bm25_search(collection: str, user_id: str, query: str, k: int) -> list[tuple[str, float]]:
     """Return ``(doc_id, rank)`` ordered best-first, or [] if FTS5 unavailable."""
+    safe = _bm25_query(query)
+    if not safe:
+        return []
     try:
-        safe = '"' + query.replace('"', " ").strip() + '"'
         rows = _conn().execute(
             "SELECT id, bm25(rag_fts) AS rank FROM rag_fts "
             "WHERE rag_fts MATCH ? AND collection_name = ? "
@@ -708,6 +787,29 @@ def _bm25_search(collection: str, user_id: str, query: str, k: int) -> list[tupl
     except Exception as e:  # pragma: no cover - FTS5 may be disabled
         log.debug(f"BM25 search unavailable: {e}")
         return []
+
+
+def _bm25_phrase_hits(collection: str, user_id: str, query: str, k: int) -> set[str]:
+    """Docs the query matches as one contiguous phrase.
+
+    Tokenized OR matches are ranked evidence, not proof the query is about the
+    document; only a phrase hit is strong enough to survive ``min_similarity``.
+    """
+    safe = _bm25_phrase_query(query)
+    if not safe:
+        return set()
+    try:
+        rows = _conn().execute(
+            "SELECT id FROM rag_fts "
+            "WHERE rag_fts MATCH ? AND collection_name = ? "
+            "AND (user_id = ? OR user_id = 'default') "
+            "ORDER BY bm25(rag_fts) LIMIT ?",
+            [safe, collection, user_id, k],
+        ).fetchall()
+        return {r["id"] for r in rows}
+    except Exception as e:  # pragma: no cover - FTS5 may be disabled
+        log.debug(f"BM25 phrase search unavailable: {e}")
+        return set()
 
 
 def _hybrid_search(
@@ -756,8 +858,9 @@ def _hybrid_search(
             fused[doc_id] = vec_scores.get(doc_id, 0.0) + bm25_scores.get(doc_id, 0.0)
 
     ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)
-    # A keyword hit matched the whole query as a phrase, which is evidence enough.
-    phrase_hits = {doc_id for doc_id, _ in bm25_res}
+    # Only a contiguous phrase match is evidence enough to bypass the floor;
+    # a single shared OR-token is not.
+    phrase_hits = _bm25_phrase_hits(collection, user_id, query, pool)
     if min_similarity is not None:
         ranked = [
             (doc_id, score) for doc_id, score in ranked
@@ -847,18 +950,18 @@ def _bump_columns(doc_ids: list[str], set_clause: str) -> None:
 
 
 def _search_all_collections(
-    user_id: str, query: str, k: int, alpha: float, use_rrf: bool, tags: list[str] | None = None,
-    min_similarity: float | None = None,
+    user_id: str, query: str, query_vector: list[float], k: int, alpha: float, use_rrf: bool,
+    tags: list[str] | None = None, min_similarity: float | None = None,
 ) -> list[SearchResultItem]:
     """Search every collection the user (or the shared ``default`` user) owns.
 
-    The embedding is computed once and reused across collections. Per-collection
-    hybrid results are merged, de-duplicated by content, and re-ranked globally
-    by fused score so a global "search everything" query returns the best hits
-    regardless of which collection they live in.
+    The caller computes the query embedding once (off the event loop) and it is
+    reused across collections. Per-collection hybrid results are merged,
+    de-duplicated by content, and re-ranked globally by fused score so a global
+    "search everything" query returns the best hits regardless of which
+    collection they live in.
     """
     user_id = user_id.lower()
-    query_vector = embed([query])[0]
 
     rows = _conn().execute(
         "SELECT DISTINCT collection_name FROM rag_items "
@@ -887,22 +990,68 @@ def _search_all_collections(
 
 # Search / Ingest endpoints (legacy contract preserved)
 
+def _cross_encoder_scores(query: str, texts: list[str]) -> list[float]:
+    """Score ``texts`` against ``query`` with the loaded cross-encoder."""
+    model = _get_reranker()
+    return [float(score) for score in model.rerank(query, texts, batch_size=16)]
+
+
+def _blend_rerank_scores(
+    results: list[SearchResultItem], scores: list[float]
+) -> list[SearchResultItem]:
+    """Order by cross-encoder score, keeping the fused score as a tie-breaker.
+
+    The raw cross-encoder logits have no fixed scale, so they are min-max
+    normalized before blending. The small fused-weight term only separates
+    near-ties; the cross-encoder remains the deciding signal.
+    """
+    if len(scores) != len(results):
+        return results
+    high, low = max(scores), min(scores)
+    span = high - low or 1.0
+    base_high = max((item.score or 0.0) for item in results) or 1.0
+    blended = [
+        (0.75 * ((score - low) / span)) + (0.25 * ((item.score or 0.0) / base_high))
+        for item, score in zip(results, scores, strict=False)
+    ]
+    order = sorted(range(len(results)), key=lambda index: blended[index], reverse=True)
+    return [results[index] for index in order]
+
+
 @app.post("/rag/search", response_model=SearchResponse, dependencies=[Depends(require_internal)])
 async def search(req: SearchRequest):
     # `collection_name` of "all"/""/None searches across every collection the
     # user (or shared `default`) owns, instead of a single hardcoded one.
     log.info(f"[RAG] search query_len={len(req.query)} coll={req.collection_name} k={req.k}")
+    wants_rerank = bool(req.rerank and reranker is not None)
+    # Cross-encoder scores are only comparable within the candidate set, so an
+    # over-fetch is required: the best final hit may not be in the dense/BM25
+    # top-k. The floor keeps a tiny k from starving the reranker.
+    fetch_k = max(req.k * 2, 10) if wants_rerank else req.k
     try:
+        query_vector = await asyncio.to_thread(_embed_query_vector, req.query)
+        # Only ONNX inference moves off the loop; the SQLite connection is
+        # thread-affine (check_same_thread=True) and stays on the request thread.
         if req.collection_name in (None, "", "all", "__all__"):
             results = _search_all_collections(
-                req.user_id, req.query, req.k, req.alpha, req.use_rrf, req.tags, req.min_similarity
+                req.user_id, req.query, query_vector, fetch_k, req.alpha, req.use_rrf,
+                req.tags, req.min_similarity,
             )
         else:
             results = _hybrid_search(
-                req.collection_name, req.user_id, req.query,
-                embed([req.query])[0], req.k, req.alpha, req.use_rrf, req.tags, req.min_similarity
+                req.collection_name, req.user_id, req.query, query_vector,
+                fetch_k, req.alpha, req.use_rrf, req.tags, req.min_similarity,
             )
-        return SearchResponse(results=results)
+        if wants_rerank and len(results) > 1:
+            texts = [(item.content or "")[:RERANK_MAX_CHARS] for item in results]
+            try:
+                scores = await asyncio.to_thread(_cross_encoder_scores, req.query, texts)
+                results = _blend_rerank_scores(results, scores)
+            except Exception as exc:
+                # A reranker failure must never fail the search: the hybrid
+                # ranking is already valid, just less precise.
+                log.warning(f"[RAG] rerank skipped: {type(exc).__name__}: {exc}")
+        return SearchResponse(results=results[: req.k])
     except Exception as e:
         # A failed search is not "nothing matched": answering [] here let every caller
         # tell the person their files hold nothing on the subject while the index was down.
@@ -914,11 +1063,6 @@ async def search(req: SearchRequest):
 #: request cannot occupy the embedder for minutes.
 EMBED_ENDPOINT_MAX_TEXTS = 128
 EMBED_ENDPOINT_MAX_CHARS = 2_000
-#: nomic-embed-text is trained with task prefixes; without them a query and a
-#: document are embedded as if they were the same kind of text.
-_TASK_PREFIX = {"query": "search_query: ", "document": "search_document: "}
-
-
 class EmbedRequest(BaseModel):
     texts: list[str]
     kind: Literal["query", "document"] = "document"
@@ -944,10 +1088,9 @@ async def embed_texts(req: EmbedRequest):
         )
     if embedder is None:
         raise HTTPException(status_code=503, detail="The embedding model is still loading")
-    prefix = _TASK_PREFIX[req.kind] if "nomic" in EMBEDDING_MODEL.lower() else ""
     # embed_batched, never embed(): its cost bound is what keeps a large
     # request from pushing the service out of memory (see embed_batched).
-    vectors = await asyncio.to_thread(embed_batched, [prefix + t for t in req.texts])
+    vectors = await asyncio.to_thread(embed_batched, [_with_task_prefix(text, req.kind) for text in req.texts])
     return {"model": EMBEDDING_MODEL, "dim": len(vectors[0]) if vectors else EMBEDDING_DIM, "vectors": vectors}
 
 
@@ -1417,7 +1560,7 @@ async def dream_learnings(
         # so the event loop stays responsive during the compaction pass.
         if pending_reembed:
             try:
-                vectors = await asyncio.to_thread(embed_batched, [p[1] for p in pending_reembed])
+                vectors = await asyncio.to_thread(embed_batched, [_with_task_prefix(p[1], "document") for p in pending_reembed])
             except Exception as ex:
                 log.warning(f"Dream re-embed failed for {len(pending_reembed)} doc(s): {ex}")
             else:
@@ -1494,14 +1637,13 @@ async def dream_learnings(
                 log.warning(f"[Dream] lesson {d['id']} degraded, missing: {missing}")
             else:
                 _pri = _lesson_priority_score(d)
-                if (d.get("applied_count") or 0) > 0 and (d.get("usage_count") or 0) == 0:
-                    validation_checklist.append({
-                        "id": d["id"],
-                        "rule": parsed.get("rule", ""),
-                        "applied_count": d.get("applied_count", 0),
-                        "priority": round(_pri, 2),
-                    })
-                else:
+                meta = d.get("metadata") if isinstance(d.get("metadata"), dict) else {}
+                validations = meta.get("validations") or []
+                last_passed = validations[0].get("passed") if validations else None
+                # Only lessons that were actually applied and have not yet
+                # passed validation belong on the RSI checklist; every other
+                # surviving lesson is still eligible for priority injection.
+                if (d.get("applied_count") or 0) > 0 and last_passed is not True:
                     validation_checklist.append({
                         "id": d["id"],
                         "rule": parsed.get("rule", ""),
@@ -1591,7 +1733,7 @@ async def validate_lessons(
             "evidence": evidence,
             "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         })
-        validations[:5] = validations[:5]
+        meta["validations"] = validations = validations[:5]
         if passed:
             meta.setdefault("validation_success_count", 0)
             meta["validation_success_count"] = meta["validation_success_count"] + 1
@@ -1629,7 +1771,7 @@ async def pending_validations(user_id: str = "default"):
             meta = json.loads(r["metadata"]) if r["metadata"] else {}
             validations = meta.get("validations", [])
             last_passed = validations[0].get("passed") if validations else None
-            if (r["applied_count"] or 0) > 0 and last_passed is not False:
+            if (r["applied_count"] or 0) > 0 and last_passed is not True:
                 parsed: dict[str, Any] = {}
                 if r["content"].strip().startswith("{"):
                     with suppress(Exception):
@@ -2148,7 +2290,7 @@ async def sync_files(payload: dict):
     # Embedding is CPU-bound ONNX inference; run it in a worker thread so the
     # event loop stays responsive while file chunks are being indexed.
     try:
-        vectors = await asyncio.to_thread(embed_batched, [p[1] for p in pending])
+        vectors = await asyncio.to_thread(embed_batched, [_with_task_prefix(p[1], "document") for p in pending])
     except Exception as ex:
         log.error(f"File chunk embedding failed for {len(pending)} chunks: {ex}")
         return JSONResponse(
@@ -2923,7 +3065,7 @@ async def sync_devices(payload: dict, user_id: str | None = None):
             f"in batches of {EMBED_BATCH_SIZE} (rss={_self_rss_mib()}MiB)"
         )
         embed_started = time.monotonic()
-        vectors = await asyncio.to_thread(embed_batched, [p[1] for p in pending])
+        vectors = await asyncio.to_thread(embed_batched, [_with_task_prefix(p[1], "document") for p in pending])
         log.info(
             f"[device_sync] embedded {len(pending)} texts in "
             f"{time.monotonic() - embed_started:.1f}s (rss={_self_rss_mib()}MiB)"
@@ -3033,7 +3175,7 @@ async def sync_capabilities(payload: dict):
     # Embedding is CPU-bound ONNX inference; run it in a worker thread so the
     # event loop stays responsive while capabilities are being indexed.
     try:
-        vectors = await asyncio.to_thread(embed_batched, [p[1] for p in pending])
+        vectors = await asyncio.to_thread(embed_batched, [_with_task_prefix(p[1], "document") for p in pending])
     except Exception as ex:
         log.error(f"Capability embedding failed for {len(pending)} entries: {ex}")
         return JSONResponse(
@@ -3465,7 +3607,11 @@ class SimOutcomeRequest(BaseModel):
 @app.post("/rag/sim/record", dependencies=[Depends(require_internal)])
 async def sim_record(req: SimRecordRequest):
     try:
-        problem = sim_store.record(_conn(), **req.model_dump())
+        problem = sim_store.record(
+            _conn(),
+            **req.model_dump(),
+            embed_fn=_embed_documents if embedder is not None else None,
+        )
         return {"status": "SUCCESS", "problem": problem}
     except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -3474,6 +3620,11 @@ async def sim_record(req: SimRecordRequest):
 @app.post("/rag/sim/query", dependencies=[Depends(require_internal)])
 async def sim_query(req: SimQueryRequest):
     try:
+        query_embedding = None
+        if embedder is not None and req.query.strip():
+            # ONNX inference is CPU-bound; the ledger query itself is SQLite
+            # and stays on the request thread (the connection is thread-affine).
+            query_embedding = await asyncio.to_thread(_embed_query_vector, req.query)
         results = sim_store.query(
             _conn(),
             user_id=req.user_id,
@@ -3483,7 +3634,8 @@ async def sim_query(req: SimQueryRequest):
             model_family=req.model_family,
             is_admin=req.is_admin,
             k=req.k,
-            embed_fn=embed if embedder is not None else None,
+            embed_fn=_embed_documents if embedder is not None else None,
+            query_embedding=query_embedding,
         )
         return {"status": "SUCCESS", "count": len(results), "results": results}
     except ValueError as exc:

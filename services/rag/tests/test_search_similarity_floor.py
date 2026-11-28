@@ -47,7 +47,9 @@ def test_every_hit_reports_its_cosine_similarity(tmp_path, adapter_cls):
     assert "porch" in top.content
     assert top.similarity is not None and 0.5 < top.similarity <= 1.0
     assert all(h.similarity is not None for h in hits)
-    assert [h.similarity for h in hits] == sorted((h.similarity for h in hits), reverse=True)
+    # The best semantic hit is first. Remaining order is hybrid (a keyword OR
+    # match may legitimately outrank a slightly closer vector neighbour).
+    assert hits[0].similarity == max(h.similarity for h in hits)
 
 
 @pytest.mark.parametrize("adapter_cls", [NumpyVecAdapter, SqliteVecAdapter])

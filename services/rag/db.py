@@ -91,6 +91,24 @@ def detect_dimension(embed_fn, fallback: int = 768) -> int:
     return fallback
 
 
+def _migrate_sim_problems_columns(cur: sqlite3.Connection | sqlite3.Cursor) -> None:
+    """Add the SIM columns introduced after the first ledger ship.
+
+    ``ALTER TABLE ... ADD COLUMN`` is the only safe in-place migration SQLite
+    offers, so each addition is guarded by ``PRAGMA table_info``. Existing rows
+    keep their data; ``family_stats`` defaults to an empty object and
+    ``embedding`` stays ``NULL`` until the row is next recorded or queried.
+    """
+    columns = {str(row[1]) for row in cur.execute("PRAGMA table_info(sim_problems)").fetchall()}
+    additions = (
+        ("embedding", "TEXT"),
+        ("family_stats", "TEXT NOT NULL DEFAULT '{}'"),
+    )
+    for name, ddl in additions:
+        if name not in columns:
+            cur.execute(f"ALTER TABLE sim_problems ADD COLUMN {name} {ddl}")
+
+
 def create_sim_tables(cur: sqlite3.Connection | sqlite3.Cursor) -> None:
     """Create the Self-Improvement Memory ledger (idempotent).
 
@@ -150,6 +168,7 @@ def create_sim_tables(cur: sqlite3.Connection | sqlite3.Cursor) -> None:
         )
         """
     )
+    _migrate_sim_problems_columns(cur)
     for index, table, columns in (
         ("idx_sim_problems_scope_user", "sim_problems", "scope, user_id"),
         ("idx_sim_problems_harness", "sim_problems", "harness"),

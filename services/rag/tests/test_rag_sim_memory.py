@@ -210,7 +210,7 @@ async def test_rag_sim_endpoints_record_query_and_list(tmp_path):
     assert consolidated["status"] == "SUCCESS"
 
 
-def test_matching_verified_user_rule_beats_an_unrelated_portable_rule(tmp_path):
+def test_matching_verified_user_rule_beats_and_excludes_an_unrelated_portable_rule(tmp_path):
     conn = _conn(tmp_path)
     verified = _record(
         conn,
@@ -246,10 +246,10 @@ def test_matching_verified_user_rule_beats_an_unrelated_portable_rule(tmp_path):
     )
     ids = [item["problem_id"] for item in results]
 
-    # Relevance gates portability: the exact match is first even though the
-    # unrelated rule is portable.
+    # Relevance gates portability in every harness: the exact match is first,
+    # and a portable rule with zero overlap is not injected at all.
     assert ids[0] == verified["problem_id"]
-    assert portable["problem_id"] in ids
+    assert portable["problem_id"] not in ids
 
 
 def test_satellite_query_drops_unrelated_rules_even_when_portable(tmp_path):

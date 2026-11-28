@@ -40,7 +40,12 @@ from services.gateway.device_claims import (
     honest_reply,
     retry_note,
 )
-from services.gateway.history import get_history
+from services.gateway.history import (
+    MAX_LONG_TERM_MEMORY_CHARS,
+    get_history,
+    get_long_term_memory,
+    is_personal_user,
+)
 from services.gateway.intent_engine import is_raven_intent
 from services.gateway.knowledge_map import knowledge_map_for
 from services.gateway.llm_providers import get_provider
@@ -1061,38 +1066,45 @@ async def _fetch_rag_context(
         # timeout. Three consecutive failures open the breaker and the rest of
         # the collections are skipped until the reset window passes.
         breaker = get_breaker("rag", fail_max=3, reset_timeout=30.0)
+
+        async def _search_one(coll: str) -> Any:
+            search_body: dict[str, Any] = {
+                "collection_name": coll,
+                "query": query,
+                "user_id": user_id,
+                "k": MAX_HITS_PER_COLL,
+            }
+            if min_similarity is not None:
+                search_body["min_similarity"] = min_similarity
+            return await breaker.call(
+                lambda: client.post(
+                    f"{rag_svc}/rag/search",
+                    json=search_body,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                ),
+                is_failure=lambda response: response.status >= 500,
+            )
+
         async with shared_http_client() as client:
-            for coll in collections:
+            # Fetch every collection concurrently, then consume the responses in
+            # the original collection order. Parallel I/O, deterministic prompt.
+            raw_results = await asyncio.gather(
+                *(_search_one(coll) for coll in collections), return_exceptions=True
+            )
+            for coll, outcome in zip(collections, raw_results, strict=False):
                 if total_hits >= MAX_TOTAL_HITS or total_chars >= TOTAL_CHARS_LIMIT:
                     break
-                coll_start = len(rag_context)
-                search_body: dict[str, Any] = {
-                    "collection_name": coll,
-                    "query": query,
-                    "user_id": user_id,
-                    "k": MAX_HITS_PER_COLL,
-                }
-                if min_similarity is not None:
-                    search_body["min_similarity"] = min_similarity
-
-                try:
-                    resp = await breaker.call(
-                        lambda coll=coll, search_body=search_body: client.post(
-                            f"{rag_svc}/rag/search",
-                            json=search_body,
-                            headers={"X-Internal-Secret": INTERNAL_SECRET},
-                            timeout=aiohttp.ClientTimeout(total=10.0),
-                        ),
-                        is_failure=lambda response: response.status >= 500,
-                    )
-                except CircuitOpenError:
+                if isinstance(outcome, CircuitOpenError):
                     log.warning(
                         "RAG circuit is open; continuing without retrieved context"
                     )
                     break
-                except Exception as exc:  # RAG is optional context
-                    log.warning("RAG search failed; continuing without context: %s", exc)
-                    break
+                if isinstance(outcome, Exception):  # RAG is optional context
+                    log.warning("RAG search failed; continuing without context: %s", outcome)
+                    continue
+                coll_start = len(rag_context)
+                resp = outcome
                 if resp.status == 200:
                     hits = _above_floor((await resp.json()).get("results", []), min_similarity, coll)
                     if coll == "calibre_files" and (named := library_names.named_works(query)):
@@ -1196,16 +1208,38 @@ async def _fetch_rag_context(
     before_curriculum = len(rag_context)
     if not skip_curriculum:
         try:
+            from services import config as _config
             from services.gateway.main import shared_http_client
+
             async with shared_http_client() as client:
-                try:
-                    # Every seeded lesson, by id: a newest-first page of
-                    # `tag=protocol` dropped the oldest, most basic ones.
-                    _pr = await client.get(
-                        f"{rag_svc}/rag/learning/protocol",
-                        headers={"X-Internal-Secret": INTERNAL_SECRET},
-                        timeout=aiohttp.ClientTimeout(total=5.0),
-                    )
+                async def _get_block(path: str, params: dict | None = None) -> Any:
+                    try:
+                        return await client.get(
+                            f"{rag_svc}{path}",
+                            params=params,
+                            headers={"X-Internal-Secret": INTERNAL_SECRET},
+                            timeout=aiohttp.ClientTimeout(total=5.0),
+                        )
+                    except Exception as e:
+                        log.warning(f"[Orchestrator] {path} fetch skipped: {e}")
+                        return None
+
+                async def _none() -> None:
+                    return None
+
+                # Four independent awareness fetches: run them together, then
+                # render in this fixed order so the prompt stays byte-stable.
+                _pr, _tr, _nr, _hr = await asyncio.gather(
+                    _get_block("/rag/learning/protocol"),
+                    _get_block("/rag/toolchain"),
+                    _get_block("/rag/resources/nextcloud", {"limit": 10}),
+                    _get_block("/rag/resources/ha", {"limit": 10})
+                    if _config.any_home_hub() else _none(),
+                )
+
+                # Every seeded lesson, by id: a newest-first page of
+                # `tag=protocol` dropped the oldest, most basic ones.
+                if _pr is not None:
                     if _pr.status != 200:
                         log.error(
                             f"[Orchestrator] protocol curriculum unavailable: HTTP {_pr.status} "
@@ -1230,70 +1264,39 @@ async def _fetch_rag_context(
                                 _ps = f" [{_pout}]" if _pout else ""
                                 _cs = f" (conf {_pconf})" if _pconf != "" else ""
                                 rag_context += f"- [{_pid}]{_ps}{_cs} {_prule}\n"
-                except Exception as e:
-                    log.warning(f"[Orchestrator] protocol curriculum fetch skipped: {e}")
 
-                try:
-                    _tr = await client.get(
-                        f"{rag_svc}/rag/toolchain",
-                        headers={"X-Internal-Secret": INTERNAL_SECRET},
-                        timeout=aiohttp.ClientTimeout(total=5.0),
-                    )
-                    if _tr.status == 200:
-                        _tools = (await _tr.json()).get("tools") or []
-                        if _tools:
-                            rag_context += (
-                                "\n[WORKSPACE TOOLCHAIN: CLI tools available in the workspace "
-                                "shell; use them instead of assuming tools exist]\n"
-                            )
-                            for _t in _tools:
-                                _tv = f" {_t.get('version')}" if _t.get("version") else ""
-                                rag_context += f"- {_t.get('name')}{_tv}: {_t.get('description', '')}\n"
-                except Exception as e:
-                    log.warning(f"[Orchestrator] toolchain fetch skipped: {e}")
+                if _tr is not None and _tr.status == 200:
+                    _tools = (await _tr.json()).get("tools") or []
+                    if _tools:
+                        rag_context += (
+                            "\n[WORKSPACE TOOLCHAIN: CLI tools available in the workspace "
+                            "shell; use them instead of assuming tools exist]\n"
+                        )
+                        for _t in _tools:
+                            _tv = f" {_t.get('version')}" if _t.get("version") else ""
+                            rag_context += f"- {_t.get('name')}{_tv}: {_t.get('description', '')}\n"
 
-                try:
-                    _nr = await client.get(
-                        f"{rag_svc}/rag/resources/nextcloud",
-                        params={"limit": 10},
-                        headers={"X-Internal-Secret": INTERNAL_SECRET},
-                        timeout=aiohttp.ClientTimeout(total=5.0),
-                    )
-                    if _nr.status == 200:
-                        _files = (await _nr.json()).get("files") or []
-                        if _files:
-                            rag_context += (
-                                "\n[NEXTCLOUD RESOURCES: files you can pull into the workspace "
-                                "via StorageFileReadRequest then WorkspaceFileWriteRequest]\n"
-                            )
-                            for _f in _files:
-                                rag_context += f"- {_f.get('path') or _f.get('name')}\n"
-                except Exception as e:
-                    log.warning(f"[Orchestrator] nextcloud resources fetch skipped: {e}")
-
-                from services import config as _config
+                if _nr is not None and _nr.status == 200:
+                    _files = (await _nr.json()).get("files") or []
+                    if _files:
+                        rag_context += (
+                            "\n[NEXTCLOUD RESOURCES: files you can pull into the workspace "
+                            "via StorageFileReadRequest then WorkspaceFileWriteRequest]\n"
+                        )
+                        for _f in _files:
+                            rag_context += f"- {_f.get('path') or _f.get('name')}\n"
 
                 # No home hub set up: no device snapshot, just as no hub tools are offered.
-                if _config.any_home_hub():
-                    try:
-                        _hr = await client.get(
-                            f"{rag_svc}/rag/resources/ha",
-                            params={"limit": 10},
-                            headers={"X-Internal-Secret": INTERNAL_SECRET},
-                            timeout=aiohttp.ClientTimeout(total=5.0),
+                if _hr is not None and _hr.status == 200:
+                    _ents = (await _hr.json()).get("entities") or []
+                    if _ents:
+                        rag_context += (
+                            "\n[HOME ASSISTANT SNAPSHOT: entities you can read state from "
+                            "or control]\n"
                         )
-                        if _hr.status == 200:
-                            _ents = (await _hr.json()).get("entities") or []
-                            if _ents:
-                                rag_context += (
-                                    "\n[HOME ASSISTANT SNAPSHOT: entities you can read state from "
-                                    "or control]\n"
-                                )
-                                for _e in _ents:
-                                    _en = _e.get("friendly_name") or _e.get("entity_id") or ""
-                                    rag_context += f"- {_e.get('entity_id')}: {_e.get('state')} ({_en})\n"
-                    except Exception as e:
-                        log.warning(f"[Orchestrator] HA resources fetch skipped: {e}")
+                        for _e in _ents:
+                            _en = _e.get("friendly_name") or _e.get("entity_id") or ""
+                            rag_context += f"- {_e.get('entity_id')}: {_e.get('state')} ({_en})\n"
         except Exception as e:
             log.warning(f"[Orchestrator] awareness blocks skipped: {e}")
     if len(rag_context) > before_curriculum:
@@ -2536,6 +2539,31 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         )
     except Exception as exc:  # SIM can never fail a turn
         log.debug("[_single_turn_inference] SIM query skipped: %s", exc)
+    caller = str(getattr(creds, "user", "") or "")
+    long_term_memory = ""
+    if harness == "satellite":
+        # Chat/Voice: an explicit "no, I meant ..." is this person's own lesson,
+        # so it is written to User SIM only (record_user_correction rejects
+        # anonymous/household callers).
+        try:
+            from services.gateway.trainer import sim as sim_mem
+
+            await sim_mem.record_user_correction(
+                user_id=caller,
+                harness=harness,
+                query=query,
+                history=history,
+                model=model,
+            )
+        except Exception as exc:
+            log.debug("[_single_turn_inference] User correction skipped: %s", exc)
+        # Recalled facts are per-request context, never part of the cached
+        # system prefix. Anonymous/household callers have no personal memory.
+        if is_personal_user(caller):
+            try:
+                long_term_memory = await get_long_term_memory(caller, query)
+            except Exception as exc:
+                log.debug("[_single_turn_inference] Long-term memory skipped: %s", exc)
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
     single_turn_guide = hub_tool_guide(load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE))
     if grounded:
@@ -2588,6 +2616,11 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         context_parts.append(
             "Self-Improvement Memory (shared System + your own User lessons; use only "
             f"when relevant to this question):\n{sim_block}"
+        )
+    if long_term_memory:
+        context_parts.append(
+            "Long-term memory about this user (use only when relevant):\n"
+            f"{long_term_memory[:MAX_LONG_TERM_MEMORY_CHARS]}"
         )
     if book_chapter.strip():
         context_parts.append(book_chapter.strip())
@@ -2656,8 +2689,22 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     tools_called = 0
     nudged = False
     #: A tool error that has not yet been followed by a successful retry; when a
-    #: later call succeeds, the correction is the reusable part.
-    pending_tool_error: tuple[str, str] | None = None
+    #: later call succeeds, the correction is the reusable part. The third item
+    #: is the rejected call's payload so the lesson can name the argument diff.
+    pending_tool_error: tuple[str, str, Any] | None = None
+
+    def _reply_is_failure(result_text: str) -> bool:
+        """A real failure signal, not the word "error" inside prose.
+
+        "Fixed the failing test" is a success; an unrecovered tool error, an
+        empty reply, or a reply that opens with an error is not.
+        """
+        try:
+            from services.gateway.trainer import sim as sim_mem
+
+            return not str(result_text or "").strip() or sim_mem.looks_like_tool_error(result_text)
+        except Exception:
+            return not str(result_text or "").strip()
 
     async def _record_sim_result(result_text: str, *, success: bool) -> None:
         if not sim_items:
@@ -2675,7 +2722,9 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         except Exception as exc:
             log.debug("[_single_turn_inference] SIM outcome skipped: %s", exc)
 
-    async def _record_tool_recovery(action_name: str, error_text: str) -> None:
+    async def _record_tool_recovery(
+        action_name: str, error_text: str, failed_args: Any = None, working_args: Any = None
+    ) -> None:
         try:
             from services.gateway.trainer import sim as sim_mem
 
@@ -2686,6 +2735,8 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 error=error_text,
                 model=model,
                 query=query,
+                failed_args=failed_args,
+                working_args=working_args,
             )
         except Exception as exc:
             log.debug("[_single_turn_inference] SIM tool recovery skipped: %s", exc)
@@ -2846,9 +2897,12 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             from services.gateway.trainer import sim as sim_mem
 
             if sim_mem.looks_like_tool_error(tool_result):
-                pending_tool_error = (action, str(tool_result or ""))
+                failed_args = tool_data.get("payload", tool_data)
+                pending_tool_error = (action, str(tool_result or ""), failed_args)
             elif pending_tool_error is not None:
-                await _record_tool_recovery(*pending_tool_error)
+                await _record_tool_recovery(
+                    *pending_tool_error, working_args=tool_data.get("payload", tool_data)
+                )
                 pending_tool_error = None
         except Exception as exc:
             log.debug("[_single_turn_inference] SIM error classification skipped: %s", exc)
@@ -2876,7 +2930,10 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             try:
                 res_obj = json.loads(tool_result)
                 if isinstance(res_obj, dict) and res_obj.get("message"):
-                    await _record_sim_result(str(res_obj["message"]), success=pending_tool_error is None)
+                    await _record_sim_result(
+                        str(res_obj["message"]),
+                        success=pending_tool_error is None and not _reply_is_failure(str(res_obj["message"])),
+                    )
                     return res_obj["message"]
             except Exception:
                 pass
@@ -2902,7 +2959,10 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             if gate is not None:
                 await gate.end_call()
             final_answer = honest_reply(query, closing, device_runs)
-            await _record_sim_result(final_answer, success=pending_tool_error is None)
+            await _record_sim_result(
+                final_answer,
+                success=pending_tool_error is None and not _reply_is_failure(final_answer),
+            )
             return final_answer
 
     # Final answer processing: strip JSON/thinking artifacts for clean natural language
@@ -2914,13 +2974,19 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         try:
             res_obj = json.loads(tool_result)
             if isinstance(res_obj, dict) and res_obj.get("message"):
-                await _record_sim_result(str(res_obj["message"]), success=pending_tool_error is None)
+                await _record_sim_result(
+                    str(res_obj["message"]),
+                    success=pending_tool_error is None and not _reply_is_failure(str(res_obj["message"])),
+                )
                 return res_obj["message"]
         except Exception:
-            await _record_sim_result(tool_result, success=pending_tool_error is None)
+            await _record_sim_result(
+                tool_result,
+                success=pending_tool_error is None and not _reply_is_failure(tool_result),
+            )
             return tool_result
     await _record_sim_result(
         cleaned,
-        success=pending_tool_error is None and not re.search(r"\b(failed|error|cannot|unable)\b", cleaned.lower()),
+        success=pending_tool_error is None and not _reply_is_failure(cleaned),
     )
     return cleaned
