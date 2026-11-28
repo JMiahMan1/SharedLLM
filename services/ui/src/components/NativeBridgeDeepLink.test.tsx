@@ -45,7 +45,9 @@ import NativeBridge from './NativeBridge';
 
 function Where() {
   const location = useLocation();
-  return <p data-testid="where">{`${location.pathname}${location.search}`}</p>;
+  return (
+    <p data-testid="where" data-key={location.key}>{`${location.pathname}${location.search}`}</p>
+  );
 }
 
 function mount(initial = '/') {
@@ -118,6 +120,22 @@ describe('a notification tap found before the page was ready', () => {
     mount();
     await act(async () => undefined);
     expect(screen.getByTestId('where').textContent).toBe('/');
+  });
+
+  it('a cold start hands the same tap over twice and it opens once', async () => {
+    // The plugin keeps the tap for takePendingOpen() and also re-sends it as a
+    // retained 'open' event, both within a few milliseconds. Two navigations
+    // would run the destination's own arrival twice.
+    m.takePendingOpen.mockResolvedValue({ path: '/family?chat=abc&beloved=notes' });
+    mount();
+    await waitFor(() => expect(m.listeners.open).toBeTypeOf('function'));
+    await act(async () => m.listeners.open({ path: '/family?chat=abc&beloved=notes' }));
+    expect(screen.getByTestId('where').textContent).toBe('/family?chat=abc&beloved=notes');
+    // A navigation gives the address a new key, so an unchanged key is proof the
+    // second delivery of the same tap did not navigate again.
+    const key = screen.getByTestId('where').getAttribute('data-key');
+    await act(async () => m.listeners.open({ path: '/family?chat=abc&beloved=notes' }));
+    expect(screen.getByTestId('where').getAttribute('data-key')).toBe(key);
   });
 
   it('an address that is already showing is still a real navigation', async () => {

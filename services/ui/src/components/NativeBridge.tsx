@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { App } from '@capacitor/app';
 import { useNavigate } from 'react-router-dom';
@@ -88,6 +88,9 @@ async function warnIfNotificationsOff(): Promise<void> {
   );
 }
 
+/** Two deliveries of one tap land this close together; two taps do not. */
+const OPEN_DEDUPE_MS = 500;
+
 export default function NativeBridge() {
   const navigate = useNavigate();
   const { token, isLoading } = useAuth();
@@ -96,11 +99,22 @@ export default function NativeBridge() {
   // reload) waits here instead of being dropped.
   const [wanted, setWanted] = useState<string | null>(null);
 
+  // A cold start hands the same tap over twice: the plugin keeps it for
+  // takePendingOpen() and also re-sends it as a retained 'open' event once this
+  // bundle attaches its listener. Both arrive within a few milliseconds, and
+  // navigating twice would run the page's own arrival twice (a second tab
+  // switch, a second seal fetched). A deliberate second tap on the same
+  // notification is seconds later, not milliseconds.
+  const lastGo = useRef<{ path: string; at: number }>({ path: '', at: 0 });
+
   /** Open what a tap asked for. The full address is navigated, query and hash too. */
   const go = useCallback(
     (raw: unknown) => {
       const path = inAppPath(raw);
       if (!path) return;
+      const now = Date.now();
+      if (path === lastGo.current.path && now - lastGo.current.at < OPEN_DEDUPE_MS) return;
+      lastGo.current = { path, at: now };
       // A hardware trigger (tile, widget, voice button, Digital Assistant) asks for
       // the assistant, not for a page: open it over the dashboard. Navigating to
       // '/?voice=1' used to land on '/' and do nothing, which is why the tile looked

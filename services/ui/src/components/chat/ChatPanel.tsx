@@ -478,19 +478,27 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   // drop the parameter so going back to the list is not undone.
   const [searchParams, setSearchParams] = useSearchParams();
   const linkedToken = searchParams.get('chat');
+  // A tap on the chat's own icon: the same address as last time when this chat
+  // is already selected, so the thread is told by a number instead. Older
+  // shortcuts (made before they said `&private=1`) count too.
+  const [chatFocus, setChatFocus] = useState(0);
   // The conversation a link asked for, until a list fetched after it says whether it still exists.
   const [linked, setLinked] = useState<{ token: string; at: number } | null>(null);
   useEffect(() => {
     if (!linkedToken) return;
+    // Read before the parameter is dropped: a link that also names a Beloved
+    // section is a notice for that page, not a request for the chat itself.
+    const asksBeloved = Boolean(searchParams.get('beloved'));
     // eslint-disable-next-line react-hooks/set-state-in-effect -- following the link
     setSelectedToken(linkedToken);
+    if (!asksBeloved) setChatFocus((n) => n + 1);
     setLinked({ token: linkedToken, at: Date.now() });
     setMobileView('thread');
     setSearchParams((params) => {
       params.delete('chat');
       return params;
     }, { replace: true });
-  }, [linkedToken, setSearchParams]);
+  }, [linkedToken, searchParams, setSearchParams]);
 
   // A link (a home-screen shortcut, an old notification) to a conversation that is
   // gone, or that this account cannot see any more: back to the list with a word,
@@ -990,6 +998,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
               onKeyAdopted={forgetCreatedKey}
               onUnlockedChange={setPrivateUnlocked}
               onChanged={() => refreshThread(activeToken)}
+              focusSeq={chatFocus}
               onAddBelovedToHome={
                 shortcutTarget && shortcutTarget.token === activeToken
                   ? () => addToHome.mutate({ target: shortcutTarget, beloved: true })

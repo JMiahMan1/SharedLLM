@@ -50,6 +50,7 @@ export default function BelovedPage({
   onClose,
   onAddToHome,
   initialTab,
+  initialTabSeq,
 }: {
   token: string;
   vault: PrivateVault;
@@ -58,6 +59,13 @@ export default function BelovedPage({
   onAddToHome?: () => void;
   /** The section a notice or an address asked for (a love note opens Notes). */
   initialTab?: Tab | null;
+  /**
+   * Increases with every ask. Two notes notifications name the same section,
+   * so the section alone cannot tell the second one apart from the first: a
+   * person who read the notes, went back to Us, and got another note must be
+   * walked to Notes again, and only this tells us it is a new ask.
+   */
+  initialTabSeq?: number;
 }) {
   const data = useBeloved(token, vault);
   const [tab, setTab] = useState<Tab>(initialTab ?? 'home');
@@ -69,7 +77,7 @@ export default function BelovedPage({
     // The section came from the address, which is outside React's state.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setTab(initialTab);
-  }, [initialTab]);
+  }, [initialTab, initialTabSeq]);
   const [editing, setEditing] = useState(false);
   const [reminders, setReminders] = useState<ReminderState | null>(null);
   const [nudge, setNudge] = useState(nudgeAfter);

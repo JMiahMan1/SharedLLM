@@ -123,6 +123,10 @@ export default function PrivateCamera({
   const retake = () => {
     wipe();
     setCaptured(false);
+    // A retake is a new picture: the last one's "Save to gallery" tick was
+    // about that picture, and keeping it would quietly file the next shot.
+    // PrivateVideoRecorder and PrivateAudioRecorder reset theirs the same way.
+    setToGallery(false);
   };
 
   const still = async (): Promise<Blob> => {

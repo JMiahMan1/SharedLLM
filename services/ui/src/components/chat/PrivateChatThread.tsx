@@ -91,6 +91,13 @@ interface PrivateChatThreadProps {
   onUnlockedChange: (token: string, unlocked: boolean) => void;
   /** Refetch the thread after a send or a delete. */
   onChanged: () => void;
+  /**
+   * A number that goes up each time a link asks for this chat itself, so a tap
+   * on an old `/family?chat=<token>` shortcut still clears whatever is on top
+   * (Beloved, the gallery, the camera) even when this chat is already the one
+   * selected and nothing about the address changes.
+   */
+  focusSeq?: number;
 }
 
 type Opened = PrivatePayload | 'unreadable';
@@ -113,6 +120,7 @@ export default function PrivateChatThread({
   onUnlockedChange,
   onChanged,
   onAddBelovedToHome,
+  focusSeq,
 }: PrivateChatThreadProps) {
   // One vault per chat in this app's memory: it outlives this screen by this
   // device's lock setting (privateChatSession), never the app.
@@ -215,6 +223,7 @@ export default function PrivateChatThread({
       storage={info?.storage}
       onChanged={onChanged}
       onAddBelovedToHome={onAddBelovedToHome}
+      focusSeq={focusSeq}
     />
   );
 }
@@ -395,6 +404,8 @@ interface UnlockedChatProps {
   storage?: 'talk' | 'store';
   onChanged: () => void;
   onAddBelovedToHome?: () => void;
+  /** See {@link PrivateChatThreadProps.focusSeq}. */
+  focusSeq?: number;
 }
 
 /** How long a picture is held to start picking pictures for the gallery. */
@@ -413,7 +424,7 @@ function tooLarge(error: unknown): boolean {
   return (error as { response?: { status?: number } } | null)?.response?.status === 413;
 }
 
-function UnlockedChat({ partnerName, partner, token, conversation, messages, opened, myActorIds, vault, secure, belovedAllowed, storage, onChanged, onAddBelovedToHome }: UnlockedChatProps) {
+function UnlockedChat({ partnerName, partner, token, conversation, messages, opened, myActorIds, vault, secure, belovedAllowed, storage, onChanged, onAddBelovedToHome, focusSeq }: UnlockedChatProps) {
   const queryClient = useQueryClient();
   const [securityOpen, setSecurityOpen] = useState(false);
   // The in-app camera: a photo, or a video clip (the two share one button and switch modes).
@@ -440,8 +451,17 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
     const params = new URLSearchParams(search);
     return { tab: belovedTab(params.get('beloved')), private: params.get('private') === '1' };
   }, [search]);
-  const [beloved, setBeloved] = useState(() => belovedAsk.tab !== null);
-  const [belovedTabWanted, setBelovedTabWanted] = useState<BelovedTab | null>(belovedAsk.tab);
+  // `?private=1` wins over `?beloved=...`: a shortcut that asks for the chat
+  // itself must not be handed a page on top of it, even if the address still
+  // carries the section the old one named.
+  const [beloved, setBeloved] = useState(() => !belovedAsk.private && belovedAsk.tab !== null);
+  const [belovedTabWanted, setBelovedTabWanted] = useState<BelovedTab | null>(
+    belovedAsk.private ? null : belovedAsk.tab,
+  );
+  // A count, not just the section: two notes notifications name the same
+  // section, and the second has to move a page the person already tabbed away
+  // from. BelovedPage watches this alongside the section itself.
+  const [belovedTabSeq, setBelovedTabSeq] = useState(0);
   // The heart on the bar: hearts and love notes from your spouse you have not seen in Beloved yet.
   const love = useLoveIndicator(token, belovedAllowed);
   const { markSeen } = love;
@@ -458,13 +478,31 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
     setAudioOpen(false);
     setViewing(null);
   }, [belovedAsk.private, addressKey]);
-  // A notice names a section: open Beloved there, or move an open one to it.
+  // An old shortcut (`/family?chat=<token>`, made before shortcuts said
+  // `&private=1`) asks for the chat itself too. Nothing about the address
+  // changes when the chat is already selected, so the panel counts these taps
+  // and hands the count down; a new number clears whatever is on top.
+  const focusSeen = useRef(focusSeq ?? 0);
   useEffect(() => {
-    if (!belovedAsk.tab || !belovedAllowed) return;
+    const seq = focusSeq ?? 0;
+    if (seq === focusSeen.current) return;
+    focusSeen.current = seq;
+    setBeloved(false);
+    setGallery(null);
+    setCamera(null);
+    setAudioOpen(false);
+    setViewing(null);
+  }, [focusSeq]);
+  // A notice names a section: open Beloved there, or move an open one to it.
+  // A shortcut that asks for the chat itself (`?private=1`) is not a request
+  // for Beloved, so it wins even when it also carries a section.
+  useEffect(() => {
+    if (belovedAsk.private || !belovedAsk.tab || !belovedAllowed) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setBelovedTabWanted(belovedAsk.tab);
+    setBelovedTabSeq((n) => n + 1);
     setBeloved(true);
-  }, [belovedAsk.tab, belovedAllowed, addressKey]);
+  }, [belovedAsk.tab, belovedAsk.private, belovedAllowed, addressKey]);
   useEffect(() => {
     // Whatever arrives while Beloved is open is seen there.
     if (beloved && belovedAllowed) markSeen();
@@ -1586,6 +1624,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
           token={token}
           vault={vault}
           initialTab={belovedTabWanted}
+          initialTabSeq={belovedTabSeq}
           onClose={() => { setBeloved(false); setBelovedTabWanted(null); }}
           onAddToHome={onAddBelovedToHome}
         />

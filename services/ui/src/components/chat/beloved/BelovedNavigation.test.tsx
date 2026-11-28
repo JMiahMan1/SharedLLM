@@ -116,6 +116,27 @@ describe('finding your way around Beloved', () => {
     expect(screen.getByTestId('beloved-tab-dates').getAttribute('aria-current')).toBe('page');
   });
 
+  it('walks back to Notes for a second note even after the person tabbed away', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <BelovedPage token="abc" vault={vault} initialTab="notes" initialTabSeq={1} onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByTestId('beloved-tab-notes').getAttribute('aria-current')).toBe('page');
+    // The person reads the notes, then goes back to Us of their own accord.
+    fireEvent.click(screen.getByTestId('beloved-tab-home'));
+    expect(screen.getByTestId('beloved-home')).toBeTruthy();
+    // A second note arrives: same section name, so only the count says it is new.
+    rerender(
+      <QueryClientProvider client={client}>
+        <BelovedPage token="abc" vault={vault} initialTab="notes" initialTabSeq={2} onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByTestId('beloved-home')).toBeNull();
+    expect(screen.getByTestId('beloved-tab-notes').getAttribute('aria-current')).toBe('page');
+  });
+
   it('has a way back to the chat that says what it does', () => {
     const { onClose } = open();
     const back = screen.getByTestId('beloved-back');
