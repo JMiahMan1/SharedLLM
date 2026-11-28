@@ -155,13 +155,24 @@ final class AudioMessageScan {
                 byte[] audio = readUpTo(app, Uri.parse("content://mms/part/" + partId), MAX_AUDIO_BYTES);
                 if (audio == null || audio.length == 0) continue;
                 String safeName = fileName(name == null || name.isEmpty() ? "mms-audio-" + partId : name, type);
-                int status = send(app, safeName, type, audio, withKey(meta, key));
-                if (settled(status)) {
+                JSONObject carried = withKey(meta, key);
+                int status = send(app, safeName, type, audio, carried);
+                boolean done = settled(status);
+                if (!done) {
+                    // Offline, or the transcriber is busy. CommsCollector has
+                    // already moved its cursor past this message, so "the next
+                    // pass finds it again" is not true: keep the clip.
+                    done = MediaScanOutbox.add(outboxDir(app), type == null ? "" : type, safeName,
+                            Base64.encodeToString(audio, Base64.NO_WRAP),
+                            carried == null ? null : carried.toString());
+                }
+                if (!done) {
+                    Log.w(TAG, "mms audio kept nowhere: the outbox is full");
+                }
+                if (done) {
                     remember(app, KEY_MMS_AUDIO_SEEN, key);
                     sent++;
                 }
-                // Not settled (offline, or the transcriber is busy): the MMS part
-                // does not expire, so the next pass finds it again.
             }
         } catch (Exception e) {
             Log.w(TAG, "mms audio unreadable: " + e.getMessage());

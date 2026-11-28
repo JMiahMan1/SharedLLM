@@ -237,8 +237,20 @@ final class PhotoScan {
                     }
                     int status = GuardApi.uploadMediaScan(app, mediaType,
                             name == null || name.isEmpty() ? "mms-" + partId : name, b64, meta);
-                    if ((status >= 200 && status < 300) || (status >= 400 && status < 500 && status != 429)) {
+                    boolean settled = (status >= 200 && status < 300)
+                            || (status >= 400 && status < 500 && status != 429);
+                    if (!settled) {
+                        // Offline, or the photo check is paused. The message
+                        // cursor has already moved past this one, so an unqueued
+                        // picture is a picture never checked: keep it instead.
+                        settled = MediaScanOutbox.add(outboxDir(app), mediaType,
+                                name == null || name.isEmpty() ? "mms-" + partId : name, b64,
+                                meta == null ? null : meta.toString());
+                    }
+                    if (settled) {
                         remember(prefs, KEY_MMS_SEEN, seen, key);
+                    } else {
+                        Log.w(TAG, "mms picture kept nowhere: the outbox is full");
                     }
                 }
             }

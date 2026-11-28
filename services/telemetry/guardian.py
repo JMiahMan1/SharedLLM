@@ -671,12 +671,17 @@ async def on_activity(rc, session, event: dict[str, Any], deliver: Deliver) -> l
         found = concern_monitor.scan_event(event)
         if not found:
             return []
+        # Who said it goes on before the second pass reads it: that pass is shown
+        # the concern and its words, and "a voice note" with no sender and no
+        # accompanying text is far less to judge than the whole exchange.
+        if event.get("message_context"):
+            for concern in found:
+                if not concern.get("message_context"):
+                    concern["message_context"] = event["message_context"]
         found = await second_pass(session, event, found)
         for concern in found:
             concern.setdefault("id", store.new_id())
             concern["at"] = _iso_at(concern.get("at"))
-            # A voice note's concerns keep who said it, so a parent's notice
-            # names the person instead of only quoting the words.
             if event.get("message_context") and not concern.get("message_context"):
                 concern["message_context"] = event["message_context"]
         await store.add_concerns(rc, child["username"], found)
