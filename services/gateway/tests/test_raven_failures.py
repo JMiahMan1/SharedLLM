@@ -116,11 +116,24 @@ def data_dir(tmp_path, monkeypatch):
     return tmp_path
 
 
+class _Written(list):
+    """System-learnings writes; SIM ledger writes are kept on ``.sim``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sim: list[dict] = []
+
+
 @pytest.fixture
 def rag(monkeypatch):
-    written: list[dict] = []
+    written = _Written()
 
     async def fake_request(method, path, **kwargs):
+        if path == "/rag/sim/history":
+            return {"problems": [], "count": 0}
+        if path == "/rag/sim/record":
+            written.sim.append(kwargs["body"])
+            return {}
         written.append(kwargs["body"])
         return {}
 
@@ -220,7 +233,11 @@ def test_a_pass_learns_from_mistakes_and_never_from_infrastructure(data_dir, rag
     kinds = [json.loads(body["content"])["topic"] for body in rag]
     assert "raven failure: infrastructure" not in kinds
     assert all(body["metadata"]["type"] == "avoid" for body in rag)
-    assert NAME not in json.dumps(rag) and NAME not in json.dumps(raven_failures.read_state()), "names are scrubbed"
+    assert len(rag.sim) == len(rag) == 3, "every avoid-lesson is also recorded in the SIM ledger"
+    assert all(body["harness"] == "raven" for body in rag.sim)
+    assert all(body["outcome_status"] == "regressed" for body in rag.sim)
+    assert NAME not in json.dumps(rag) and NAME not in json.dumps(rag.sim), "names are scrubbed"
+    assert NAME not in json.dumps(raven_failures.read_state()), "names are scrubbed"
 
     again = asyncio.run(raven_failures.run_pass(fetch=_fetch(MISSIONS)))
     assert again["examined"] == 0, "a mission is read once"

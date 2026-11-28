@@ -460,7 +460,7 @@ async def run_pass(*, fetch: Fetch = _identity_get, user_id: str = "default", wr
         done["sim_retired"] = [
             p.get("problem_id") for p in sim_history.get("problems") or [] if p.get("status") == "retired"
         ]
-    except dream_mod.RagError as exc:
+    except Exception as exc:  # SIM is optional context: a ledger failure never stops the pass
         done.setdefault("errors", []).append(f"sim history: {exc}")
     listing = await fetch(f"/api/raven/missions?limit={MAX_MISSIONS_PER_PASS}")
     new = [m for m in listing if is_failed(m) and str(m.get("id")) not in state["seen"]]
@@ -531,7 +531,7 @@ async def run_pass(*, fetch: Fetch = _identity_get, user_id: str = "default", wr
                     model=str(mission.get("model") or ""),
                     domain=goal[:200],
                 )
-            except dream_mod.RagError as exc:
+            except Exception as exc:  # SIM is optional: a ledger failure never stops the pass
                 done.setdefault("errors", []).append(f"sim: {exc}")
             written += 1
             done["lessons"].append(key)
